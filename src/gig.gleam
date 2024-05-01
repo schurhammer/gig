@@ -1,10 +1,32 @@
 import glance as g
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 
-type Context =
-  List(#(String, g.Type))
+type Context {
+  Context(env: List(#(String, g.Type)), uid: Int)
+}
+
+fn new_context() -> Context {
+  Context([], 1)
+}
+
+fn next_type_var(con: Context) -> #(Context, g.Type) {
+  #(
+    Context(..con, uid: con.uid + 1),
+    g.VariableType("T" <> int.to_string(con.uid)),
+  )
+}
+
+fn bind_env(con: Context, name: String, bind_type: g.Type) -> Context {
+  let env = [#(name, bind_type), ..con.env]
+
+  env
+  |> io.debug
+
+  Context(..con, env: env)
+}
 
 fn check_module(con: Context, mod: g.Module) -> Context {
   mod.functions
@@ -12,27 +34,49 @@ fn check_module(con: Context, mod: g.Module) -> Context {
 }
 
 fn check_function(con: Context, fun: g.Function) -> #(Context, g.Type) {
-  let #(_, typ) =
-    fun.body
-    |> list.fold(#(con, g.HoleType("*")), fn(con, d) {
-      check_statement(con.0, d)
+  let outer_env = con.env
+  let con =
+    fun.parameters
+    |> list.fold(con, fn(con, param) {
+      case param.name {
+        g.Named(name) ->
+          case param.type_ {
+            Some(ann_type) -> bind_env(con, name, ann_type)
+            None -> {
+              let #(con, var_type) = next_type_var(con)
+              bind_env(con, name, var_type)
+            }
+          }
+        g.Discarded(_) -> con
+      }
     })
+
+  let #(con, ret_type_ann) = case fun.return {
+    Some(ret_type) -> #(con, ret_type)
+    None -> next_type_var(con)
+  }
+
+  let #(_, ret_type) =
+    fun.body
+    |> list.fold(#(con, ret_type_ann), fn(con, d) { check_statement(con.0, d) })
+
+  let ret_type = unify(ret_type_ann, ret_type)
 
   // add the function to the context
   // TODO it should be a function type not just the return type
-  #([#(fun.name, typ), ..con], typ)
+  #(bind_env(Context(..con, env: outer_env), fun.name, ret_type), ret_type)
 }
 
 fn check_statement(con: Context, sta: g.Statement) -> #(Context, g.Type) {
   case sta {
     g.Assignment(_kind, pat, ann, exp) -> {
       // find the type of the expression
-      let typ = check_expression(con, exp)
+      let expr_type = check_expression(con, exp)
 
       // make sure the expression matches the type annotation
       case ann {
         Some(ann) -> {
-          let assert True = typ == ann
+          let assert True = expr_type == ann
           Nil
         }
         None -> Nil
@@ -40,7 +84,7 @@ fn check_statement(con: Context, sta: g.Statement) -> #(Context, g.Type) {
 
       // add variables to context based on the pattern
       case pat {
-        g.PatternVariable(name) -> #([#(name, typ), ..con], typ)
+        g.PatternVariable(name) -> #(bind_env(con, name, expr_type), expr_type)
 
         _ -> todo
       }
@@ -53,7 +97,7 @@ fn check_statement(con: Context, sta: g.Statement) -> #(Context, g.Type) {
 }
 
 fn find_in_context(con: Context, name: String) -> Result(g.Type, Nil) {
-  con
+  con.env
   |> list.find_map(fn(x) {
     case x {
       #(n, t) if n == name -> Ok(t)
@@ -62,14 +106,27 @@ fn find_in_context(con: Context, name: String) -> Result(g.Type, Nil) {
   })
 }
 
+// TODO unify needs to alter the env too
+fn unify(a: g.Type, b: g.Type) -> g.Type {
+  case a, b {
+    a, b if a == b -> a
+    g.VariableType(_), b -> b
+    a, g.VariableType(_) -> a
+    _, _ -> {
+      io.debug(#("failed to unify", a, b))
+      panic
+    }
+  }
+}
+
 fn check_expression(con: Context, exp: g.Expression) -> g.Type {
   case exp {
     g.Int(_) -> g.NamedType("Int", None, [])
     g.Float(_) -> g.NamedType("Float", None, [])
     g.String(_) -> g.NamedType("String", None, [])
     g.Variable(name) -> {
-      let assert Ok(typ) = find_in_context(con, name)
-      typ
+      let assert Ok(var_type) = find_in_context(con, name)
+      var_type
     }
     // g.NegateInt(Expression)
     // g.g.NegateBool(Expression)
@@ -103,12 +160,20 @@ fn check_expression(con: Context, exp: g.Expression) -> g.Type {
     // )
     // g.Case(subjects: List(Expression), clauses: List(Clause))
     g.BinaryOperator(name, left, right) -> {
-      let left_typ = check_expression(con, left)
-      let right_typ = check_expression(con, right)
+      let left_type = check_expression(con, left)
+      let right_type = check_expression(con, right)
+      let #(con, ret_typee) = next_type_var(con)
+      let inferred_type = g.FunctionType([left_type, right_type], ret_typee)
       case name {
         g.AddInt -> {
-          let assert g.NamedType("Int", None, []) = left_typ
-          let assert g.NamedType("Int", None, []) = right_typ
+          let expected_type =
+            g.FunctionType(
+              [g.NamedType("Int", None, []), g.NamedType("Int", None, [])],
+              g.NamedType("Int", None, []),
+            )
+          // TODO instead of the below, unify the function types (inferred vs expected) and apply the subs to env
+          unify(g.NamedType("Int", None, []), left_type)
+          unify(g.NamedType("Int", None, []), right_type)
           g.NamedType("Int", None, [])
         }
         _ -> todo
@@ -129,14 +194,12 @@ pub fn main() {
   let assert Ok(module) =
     g.module(
       "
-  pub fn main() {
-    let a: Int = 1
-    let b = 2
-    a + b
-  }
+      fn f(x, y) {
+        x + 6
+      }
   ",
     )
-
-  io.debug(module)
-  check_module([], module)
+  check_module(new_context(), module)
+  |> io.debug
+  Nil
 }
