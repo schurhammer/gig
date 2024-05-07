@@ -1,27 +1,56 @@
 import gleam/list
 
+type Var =
+  Int
+
 pub type Type {
-  TypeVar(id: Int)
+  TypeVar(id: Var)
   TypeFun(name: String, args: List(Type))
 }
 
-pub type PolyType {
+pub type Poly {
   Type(typ: Type)
-  PolyType(var: Int, typ: PolyType)
+  Poly(var: Var, typ: Poly)
 }
 
 pub type Env =
-  List(#(String, PolyType))
+  List(#(String, Poly))
 
-// TODO Type or PolyType?
+// TODO Type or Poly?
 pub type Sub =
-  List(#(Int, Type))
+  List(#(Var, Type))
 
 pub type Context {
-  Context(env: Env, uid: Int)
+  Context(env: Env, uid: Var)
 }
 
-fn replace_type(in: Type, replace: Int, with: Type) -> Type {
+fn free_var_type(typ: Type) -> List(Var) {
+  case typ {
+    TypeVar(a) -> [a]
+    TypeFun(_, args) -> list.flat_map(args, free_var_type)
+  }
+}
+
+fn free_var_poly(typ: Poly) -> List(Var) {
+  case typ {
+    Type(a) -> free_var_type(a)
+    Poly(var, typ) ->
+      free_var_poly(typ)
+      |> list.filter(fn(x) { x != var })
+  }
+}
+
+fn free_var_env(env: Env) -> List(Var) {
+  list.flat_map(env, fn(entry) { free_var_poly(entry.1) })
+}
+
+fn free_var_typing(env: Env, typ: Poly) -> List(Var) {
+  let env_vars = free_var_env(env)
+  free_var_poly(typ)
+  |> list.filter(fn(x) { !list.contains(env_vars, x) })
+}
+
+fn replace_type(in: Type, replace: Var, with: Type) -> Type {
   case in {
     TypeVar(v) if v == replace -> with
     TypeFun(name, args) ->
