@@ -1,4 +1,5 @@
 import gleam/list
+import unique_integer
 
 type Var =
   Int
@@ -24,43 +25,79 @@ pub type Context {
   Context(env: Env, uid: Var)
 }
 
-fn free_var_type(typ: Type) -> List(Var) {
+fn new_var() {
+  TypeVar(unique_integer.mono_positive())
+}
+
+fn ftv_type(typ: Type) -> List(Var) {
   case typ {
     TypeVar(a) -> [a]
-    TypeFun(_, args) -> list.flat_map(args, free_var_type)
+    TypeFun(_, args) -> list.flat_map(args, ftv_type)
   }
 }
 
-fn free_var_poly(typ: Poly) -> List(Var) {
+fn ftv_poly(typ: Poly) -> List(Var) {
   case typ {
-    Type(a) -> free_var_type(a)
+    Type(a) -> ftv_type(a)
     Poly(var, typ) ->
-      free_var_poly(typ)
+      ftv_poly(typ)
       |> list.filter(fn(x) { x != var })
   }
 }
 
-fn free_var_env(env: Env) -> List(Var) {
-  list.flat_map(env, fn(entry) { free_var_poly(entry.1) })
+fn ftv_env(env: Env) -> List(Var) {
+  list.flat_map(env, fn(entry) { ftv_poly(entry.1) })
 }
 
-fn free_var_typing(env: Env, typ: Poly) -> List(Var) {
-  let env_vars = free_var_env(env)
-  free_var_poly(typ)
+fn ftv_typing(env: Env, typ: Poly) -> List(Var) {
+  let env_vars = ftv_env(env)
+  ftv_poly(typ)
   |> list.filter(fn(x) { !list.contains(env_vars, x) })
 }
 
-fn replace_type(in: Type, replace: Var, with: Type) -> Type {
+fn replace_tv(in: Type, replace: Var, with: Type) -> Type {
   case in {
     TypeVar(v) if v == replace -> with
     TypeFun(name, args) ->
-      TypeFun(name, list.map(args, replace_type(_, replace, with)))
+      TypeFun(name, list.map(args, replace_tv(_, replace, with)))
     _ -> in
   }
 }
 
+fn mgu(a: Type, b: Type) -> Sub {
+  case a, b {
+    TypeFun(a, _), TypeFun(b, _) if a != b -> panic as "failed unify - name"
+    TypeFun(_, a), TypeFun(_, b) ->
+      case list.strict_zip(a, b) {
+        Ok(z) ->
+          list.fold(z, [], fn(s, i) {
+            let #(a, b) = i
+            let s1 = mgu(apply_sub(s, a), apply_sub(s, b))
+            compose_sub(s, s1)
+          })
+        Error(Nil) -> panic as "failed to unify - args"
+      }
+    TypeVar(a), TypeVar(b) if a == b -> []
+    TypeVar(v), _ -> {
+      let t = ftv_type(b)
+      case list.contains(t, v) {
+        True -> panic as "failed to unify - infinite type"
+        False -> [#(v, b)]
+      }
+    }
+    _, TypeVar(_) -> mgu(b, a)
+  }
+}
+
+fn inst(typ: Poly) -> Type {
+  case typ {
+    Type(a) -> a
+    Poly(a, typ) -> replace_tv(inst(typ), a, new_var())
+  }
+}
+
 fn apply_sub(sub: Sub, in: Type) -> Type {
-  list.fold(sub, in, fn(in, s) { replace_type(in, s.0, s.1) })
+  list.fold(sub, in, fn(in, s) { replace_tv(in, s.0, s.1) })
 }
 
 fn compose_sub(s1: Sub, s2: Sub) -> Sub {
