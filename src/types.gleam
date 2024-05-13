@@ -25,6 +25,14 @@ pub type Context {
   Context(env: Env, uid: Var)
 }
 
+pub type Expression {
+  Int(typ: Type, Int)
+  String(typ: Type, String)
+  Variable(typ: Type, String)
+  Let(typ: Type, variable: String, value: Expression)
+  Call(typ: Type, function: Expression, arguments: List(Expression))
+}
+
 fn new_var() {
   TypeVar(unique_integer.mono_positive())
 }
@@ -64,7 +72,7 @@ fn replace_tv(in: Type, replace: Var, with: Type) -> Type {
   }
 }
 
-fn mgu(a: Type, b: Type) -> Sub {
+pub fn mgu(a: Type, b: Type) -> Sub {
   case a, b {
     TypeFun(a, _), TypeFun(b, _) if a != b -> panic as "failed unify - name"
     TypeFun(_, a), TypeFun(_, b) ->
@@ -75,7 +83,7 @@ fn mgu(a: Type, b: Type) -> Sub {
             let s1 = mgu(apply_sub(s, a), apply_sub(s, b))
             compose_sub(s, s1)
           })
-        Error(Nil) -> panic as "failed to unify - args"
+        Error(Nil) -> panic as "failed to unify - arity"
       }
     TypeVar(a), TypeVar(b) if a == b -> []
     TypeVar(v), _ -> {
@@ -89,18 +97,18 @@ fn mgu(a: Type, b: Type) -> Sub {
   }
 }
 
-fn inst(typ: Poly) -> Type {
+pub fn inst(typ: Poly) -> Type {
   case typ {
     Type(a) -> a
     Poly(a, typ) -> replace_tv(inst(typ), a, new_var())
   }
 }
 
-fn apply_sub(sub: Sub, in: Type) -> Type {
+pub fn apply_sub(sub: Sub, in: Type) -> Type {
   list.fold(sub, in, fn(in, s) { replace_tv(in, s.0, s.1) })
 }
 
-fn compose_sub(s1: Sub, s2: Sub) -> Sub {
+pub fn compose_sub(s1: Sub, s2: Sub) -> Sub {
   // for each item in s1, apply s2 first
   let s1 = list.map(s1, fn(s) { #(s.0, apply_sub(s2, s.1)) })
   // find items that are in s2 but not s1, these remain unchanged

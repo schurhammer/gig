@@ -3,23 +3,21 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
+import types as t
 
 type Context {
-  Context(env: List(#(String, g.Type)), uid: Int)
+  Context(env: t.Env, uid: Int)
 }
 
 fn new_context() -> Context {
   Context([], 1)
 }
 
-fn next_type_var(con: Context) -> #(Context, g.Type) {
-  #(
-    Context(..con, uid: con.uid + 1),
-    g.VariableType("T" <> int.to_string(con.uid)),
-  )
+fn next_type_var(con: Context) -> #(Context, t.Type) {
+  #(Context(..con, uid: con.uid + 1), t.TypeVar(con.uid))
 }
 
-fn bind_env(con: Context, name: String, bind_type: g.Type) -> Context {
+fn bind_env(con: Context, name: String, bind_type: t.Poly) -> Context {
   let env = [#(name, bind_type), ..con.env]
 
   env
@@ -33,7 +31,7 @@ fn check_module(con: Context, mod: g.Module) -> Context {
   |> list.fold(con, fn(con, d) { check_function(con, d.definition).0 })
 }
 
-fn check_function(con: Context, fun: g.Function) -> #(Context, g.Type) {
+fn check_function(con: Context, fun: g.Function) -> #(Context, t.Expression) {
   let outer_env = con.env
   let con =
     fun.parameters
@@ -67,7 +65,7 @@ fn check_function(con: Context, fun: g.Function) -> #(Context, g.Type) {
   #(bind_env(Context(..con, env: outer_env), fun.name, ret_type), ret_type)
 }
 
-fn check_statement(con: Context, sta: g.Statement) -> #(Context, g.Type) {
+fn check_statement(con: Context, sta: g.Statement) -> #(Context, t.Expression) {
   case sta {
     g.Assignment(_kind, pat, ann, exp) -> {
       // find the type of the expression
@@ -96,7 +94,7 @@ fn check_statement(con: Context, sta: g.Statement) -> #(Context, g.Type) {
   }
 }
 
-fn find_in_context(con: Context, name: String) -> Result(g.Type, Nil) {
+fn find_in_context(con: Context, name: String) -> Result(t.Poly, Nil) {
   con.env
   |> list.find_map(fn(x) {
     case x {
@@ -119,65 +117,48 @@ fn unify(a: g.Type, b: g.Type) -> g.Type {
   }
 }
 
-fn check_expression(con: Context, exp: g.Expression) -> g.Type {
+fn check_expression(con: Context, exp: g.Expression) -> t.Expression {
   case exp {
-    g.Int(_) -> g.NamedType("Int", None, [])
-    g.Float(_) -> g.NamedType("Float", None, [])
-    g.String(_) -> g.NamedType("String", None, [])
-    g.Variable(name) -> {
-      let assert Ok(var_type) = find_in_context(con, name)
-      var_type
+    g.Int(x) -> {
+      let assert Ok(x) = int.parse(x)
+      t.Int(t.TypeFun("Int", []), x)
     }
-    // g.NegateInt(Expression)
-    // g.g.NegateBool(Expression)
-    // g.Block(List(Statement))
-    // g.Panic(Option(Expression))
-    // g.Todo(Option(Expression))
-    // g.Tuple(List(Expression))
-    // g.List(elements: List(Expression), rest: Option(Expression))
-    // g.Fn(
-    //   arguments: List(FnParameter),
-    //   return_annotation: Option(Type),
-    //   body: List(Statement),
-    // )
-    // g.RecordUpdate(
-    //   module: Option(String),
-    //   constructor: String,
-    //   record: Expression,
-    //   fields: List(#(String, Expression)),
-    // )
-    // g.FieldAccess(container: Expression, label: String)
-    // g.Call(function: Expression, arguments: List(Field(Expression)))
-    // g.TupleIndex(tuple: Expression, index: Int)
-    // g.FnCapture(
-    //   label: Option(String),
-    //   function: Expression,
-    //   arguments_before: List(Field(Expression)),
-    //   arguments_after: List(Field(Expression)),
-    // )
-    // g.BitString(
-    //   segments: List(#(Expression, List(BitStringSegmentOption(Expression)))),
-    // )
-    // g.Case(subjects: List(Expression), clauses: List(Clause))
-    g.BinaryOperator(name, left, right) -> {
-      let left_type = check_expression(con, left)
-      let right_type = check_expression(con, right)
-      let #(con, ret_typee) = next_type_var(con)
-      let inferred_type = g.FunctionType([left_type, right_type], ret_typee)
-      case name {
-        g.AddInt -> {
-          let expected_type =
-            g.FunctionType(
-              [g.NamedType("Int", None, []), g.NamedType("Int", None, [])],
-              g.NamedType("Int", None, []),
-            )
-          // TODO instead of the below, unify the function types (inferred vs expected) and apply the subs to env
-          unify(g.NamedType("Int", None, []), left_type)
-          unify(g.NamedType("Int", None, []), right_type)
-          g.NamedType("Int", None, [])
+    g.String(x) -> t.String(t.TypeFun("String", []), x)
+    g.Variable(name) -> {
+      let assert Ok(typ) = find_in_context(con, name)
+      t.Variable(t.inst(typ), name)
+    }
+    g.Call(fun, args) -> {
+      let fun = check_expression(con, fun)
+      let args = list.map(args, fn(arg) { check_expression(con, arg.item) })
+
+      let subs = case fun.typ {
+        t.TypeFun(name, params) -> {
+          let assert Ok(zip) = list.strict_zip(params, args)
+          let sub =
+            list.fold(zip, [], fn(acc, pair) {
+              let #(param_type, arg_type) = pair
+              t.compose_sub(acc, t.mgu(param_type, arg_type.typ))
+            })
+          // t.Call(
+          //   t.Function(apply_sub(sub, return_type), apply_sub(sub, param_types)),
+          //   arg_types,
+          // )
         }
-        _ -> todo
+        _ -> {
+          io.debug(#("Expected a function type, but got", fun))
+          panic
+        }
       }
+    }
+    g.BinaryOperator(op, left, right) -> {
+      check_expression(
+        con,
+        g.Call(g.Variable(bin_op_name(op)), [
+          g.Field(option.None, left),
+          g.Field(option.None, right),
+        ]),
+      )
     }
     _ -> {
       io.println_error("\n\ncontext\n---")
@@ -187,6 +168,13 @@ fn check_expression(con: Context, exp: g.Expression) -> g.Type {
       io.println_error("\n")
       todo
     }
+  }
+}
+
+fn bin_op_name(op: g.BinaryOperator) -> String {
+  case op {
+    g.AddInt -> "add_int"
+    _ -> todo
   }
 }
 
