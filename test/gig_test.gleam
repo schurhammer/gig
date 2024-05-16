@@ -1,15 +1,15 @@
-import gleeunit
-import gleeunit/should
-
+import gleam/bool
 import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/string
+import gleeunit
+import gleeunit/should
 
 import lc.{
-  type Poly, type Type, type TypeVar, ExpAbs, ExpApp, ExpLet, ExpVar, Mono, Poly,
-  TypeApp, TypeVar, apply_sub, compose_sub, ftv, ftv_env, ftv_poly, ftv_typing,
-  generalize, infer, instantiate, occurs_check, substitute, unify, unify_many,
+  type Poly, type Type, type TypeVar, ExpAbs, ExpApp, ExpInt, ExpLet, ExpVar,
+  Mono, Poly, TypeApp, TypeVar, apply_sub, compose_sub, ftv, ftv_env, ftv_poly,
+  ftv_typing, generalize, infer, instantiate, occurs_check, unify, unify_many,
 }
 
 pub fn main() {
@@ -66,13 +66,6 @@ pub fn apply_sub_test() {
   let subs = dict.from_list([#(1, TypeApp("List", [TypeVar(2)]))])
   let typ = TypeVar(1)
   let result = apply_sub(subs, typ)
-  result
-  |> should.equal(TypeApp("List", [TypeVar(2)]))
-}
-
-pub fn substitute_test() {
-  let typ = TypeApp("List", [TypeVar(1)])
-  let result = substitute(1, TypeVar(2), typ)
   result
   |> should.equal(TypeApp("List", [TypeVar(2)]))
 }
@@ -178,10 +171,84 @@ pub fn infer_function_composition_test() {
   |> should.equal(Error("Unbound variable"))
 }
 
+pub fn infer_poly_test() {
+  let env = dict.new()
+  // let id = \x.x in id id 1
+
+  let id = ExpAbs("x", ExpVar("x"))
+  let assert Ok(id_type) =
+    infer(
+      env,
+      ExpLet(
+        "id",
+        id,
+        ExpApp(
+          ExpApp(ExpVar("id"), ExpVar("id")),
+          ExpApp(ExpVar("id"), ExpInt(1)),
+        ),
+      ),
+    )
+
+  let assert Ok(#(texp, subs)) =
+    lc.w2(
+      env,
+      ExpLet(
+        "id",
+        id,
+        ExpApp(
+          ExpApp(ExpVar("id"), ExpVar("id")),
+          ExpApp(ExpVar("id"), ExpInt(1)),
+        ),
+      ),
+    )
+  io.debug("--")
+  io.debug(subs)
+  io.debug(pretty_print_texp(texp))
+  id_type
+  |> normalize_type_vars()
+  |> pretty_print_type()
+  |> should.equal(
+    TypeApp("Int", [])
+    |> pretty_print_type(),
+  )
+}
+
+pub fn infer_poly_fail_test() {
+  let env = dict.new()
+  // \id. id id 1 (\x.x)
+
+  let id = ExpAbs("x", ExpVar("x"))
+  let res =
+    infer(
+      env,
+      ExpApp(
+        ExpAbs(
+          "id",
+          ExpApp(
+            ExpApp(ExpVar("id"), ExpVar("id")),
+            ExpApp(ExpVar("id"), ExpInt(1)),
+          ),
+        ),
+        id,
+      ),
+    )
+
+  res
+  |> should.equal(Error("Occurs check failed"))
+}
+
+import gleam/io
+
 pub fn infer_higher_order_function_test() {
   let env = dict.new()
   let exp = ExpAbs("f", ExpAbs("x", ExpApp(ExpVar("f"), ExpVar("x"))))
   let assert Ok(result) = infer(env, exp)
+
+  let assert Ok(#(texp, subs)) = lc.w2(env, exp)
+  io.debug("--")
+  io.debug(subs)
+  io.debug(pretty_print_texp(texp))
+
   result
   |> normalize_type_vars()
   |> pretty_print_type
@@ -351,5 +418,57 @@ fn apply_mapping(typ: Type, mapping: dict.Dict(TypeVar, TypeVar)) -> Type {
       let new_args = list.map(args, fn(arg) { apply_mapping(arg, mapping) })
       TypeApp(name, new_args)
     }
+  }
+}
+
+fn print_arg(f: Type) -> String {
+  case f {
+    TypeApp("->", [a, _]) -> pretty_print_type(a)
+    _ -> "<invalid>"
+  }
+}
+
+fn print_ret(f: Type) -> String {
+  case f {
+    TypeApp("->", [_, r]) -> pretty_print_type(r)
+    _ -> "<invalid>"
+  }
+}
+
+pub fn pretty_print_texp(texp: lc.TExp) -> String {
+  case texp {
+    lc.TExpBool(typ, val) -> bool.to_string(val)
+
+    lc.TExpInt(typ, val) -> int.to_string(val)
+
+    lc.TExpVar(typ, var) -> "[" <> var <> " | " <> pretty_print_type(typ) <> "]"
+
+    lc.TExpApp(typ, fun, arg) ->
+      "{"
+      <> pretty_print_texp(fun)
+      <> " "
+      <> pretty_print_texp(arg)
+      <> " | "
+      <> pretty_print_type(typ)
+      <> "}"
+
+    lc.TExpAbs(typ, var, exp) ->
+      "(λ"
+      <> var
+      <> " -> "
+      <> pretty_print_texp(exp)
+      <> " | "
+      <> pretty_print_type(typ)
+      <> ")"
+
+    lc.TExpLet(typ, var, val, exp) ->
+      "let "
+      <> var
+      <> ": "
+      <> pretty_print_type(typ)
+      <> " = "
+      <> pretty_print_texp(val)
+      <> " in "
+      <> pretty_print_texp(exp)
   }
 }

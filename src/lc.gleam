@@ -7,10 +7,21 @@ pub type ExpVar =
   String
 
 pub type Exp {
+  ExpBool(val: Bool)
+  ExpInt(val: Int)
   ExpVar(var: ExpVar)
   ExpApp(fun: Exp, arg: Exp)
   ExpAbs(var: ExpVar, exp: Exp)
   ExpLet(var: ExpVar, val: Exp, exp: Exp)
+}
+
+pub type TExp {
+  TExpBool(typ: Type, val: Bool)
+  TExpInt(typ: Type, val: Int)
+  TExpVar(typ: Type, var: ExpVar)
+  TExpApp(typ: Type, fun: TExp, arg: TExp)
+  TExpAbs(typ: Type, var: ExpVar, exp: TExp)
+  TExpLet(typ: Type, var: ExpVar, val: TExp, exp: TExp)
 }
 
 pub type TypeVar =
@@ -89,9 +100,14 @@ pub fn occurs_check(var: TypeVar, typ: Type) -> Bool {
 }
 
 pub fn apply_sub(sub: Sub, typ: Type) -> Type {
-  dict.fold(sub, typ, fn(acc, var, replacement) {
-    substitute(var, replacement, acc)
-  })
+  case typ {
+    TypeVar(v) ->
+      case dict.get(sub, v) {
+        Ok(r) -> r
+        _ -> typ
+      }
+    TypeApp(name, args) -> TypeApp(name, list.map(args, apply_sub(sub, _)))
+  }
 }
 
 fn apply_sub_poly(sub: Sub, typ: Poly) -> Poly {
@@ -101,20 +117,31 @@ fn apply_sub_poly(sub: Sub, typ: Poly) -> Poly {
   }
 }
 
-fn apply_sub_env(sub: Sub, env: Env) -> Env {
-  dict.map_values(env, fn(_, v) { apply_sub_poly(sub, v) })
+fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
+  case texp {
+    TExpBool(_, _) -> texp
+    TExpInt(_, _) -> texp
+    TExpVar(typ, var) -> TExpVar(apply_sub(sub, typ), var)
+    TExpApp(typ, fun, arg) ->
+      TExpApp(
+        apply_sub(sub, typ),
+        apply_sub_texpr(sub, fun),
+        apply_sub_texpr(sub, arg),
+      )
+    TExpAbs(typ, var, exp) ->
+      TExpAbs(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
+    TExpLet(typ, var, val, exp) ->
+      TExpLet(
+        apply_sub(sub, typ),
+        var,
+        apply_sub_texpr(sub, val),
+        apply_sub_texpr(sub, exp),
+      )
+  }
 }
 
-pub fn substitute(var: TypeVar, replacement: Type, typ: Type) -> Type {
-  case typ {
-    TypeVar(v) if v == var -> replacement
-    TypeApp(name, args) ->
-      TypeApp(
-        name,
-        list.map(args, fn(arg) { substitute(var, replacement, arg) }),
-      )
-    _ -> typ
-  }
+fn apply_sub_env(sub: Sub, env: Env) -> Env {
+  dict.map_values(env, fn(_, v) { apply_sub_poly(sub, v) })
 }
 
 pub fn unify_many(types1: List(Type), types2: List(Type)) -> Result(Sub, String) {
@@ -155,6 +182,8 @@ pub fn instantiate(sub: Sub, poly: Poly) -> Type {
 
 pub fn w(env: Env, exp: Exp) -> Result(#(Type, Sub), String) {
   case exp {
+    ExpBool(_val) -> Ok(#(TypeApp("Bool", []), dict.new()))
+    ExpInt(_val) -> Ok(#(TypeApp("Int", []), dict.new()))
     ExpVar(var) ->
       case dict.get(env, var) {
         Ok(poly) -> {
@@ -187,9 +216,63 @@ pub fn w(env: Env, exp: Exp) -> Result(#(Type, Sub), String) {
       use #(type1, sub1) <- result.try(w(env, val))
       let type1_gen = generalize(apply_sub_env(sub1, env), type1)
       let env1 = dict.insert(env, var, type1_gen)
-      let env1 = apply_sub_env(sub1, env1)
+      // TODO this line seems to break let polymorphism
+      // let env1 = apply_sub_env(sub1, env1)
       use #(type2, sub2) <- result.try(w(env1, body))
       Ok(#(type2, compose_sub(sub1, sub2)))
+    }
+  }
+}
+
+pub fn w2(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
+  case exp {
+    ExpBool(val) -> Ok(#(TExpBool(TypeApp("Bool", []), val), dict.new()))
+    ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
+    ExpVar(var) ->
+      case dict.get(env, var) {
+        Ok(poly) -> {
+          let typ = instantiate(dict.new(), poly)
+          Ok(#(TExpVar(typ, var), dict.new()))
+        }
+        Error(_) -> Error("Unbound variable")
+      }
+    ExpApp(fun, arg) -> {
+      let ret_type = TypeVar(new_type_var())
+      use #(texp1, sub1) <- result.try(w2(env, fun))
+      let env1 = apply_sub_env(sub1, env)
+      use #(texp2, sub2) <- result.try(w2(env1, arg))
+      let type1_sub = apply_sub(sub2, texp1.typ)
+      let type3 = TypeApp("->", [texp2.typ, ret_type])
+      use sub3 <- result.try(unify(type1_sub, type3))
+      let sub = compose_sub(sub3, compose_sub(sub2, sub1))
+      let ret_type = apply_sub(sub, ret_type)
+      // Ok(#(TExpApp(ret_type, texp1, texp2), sub))
+      Ok(#(
+        TExpApp(
+          ret_type,
+          apply_sub_texpr(compose_sub(sub3, sub2), texp1),
+          apply_sub_texpr(sub3, texp2),
+        ),
+        sub,
+      ))
+    }
+    ExpAbs(var, body) -> {
+      let var_type = TypeVar(new_type_var())
+      let new_env = dict.insert(env, var, Mono(var_type))
+      use #(body_texp, sub) <- result.try(w2(new_env, body))
+      let var_type = apply_sub(sub, var_type)
+      let abs_type = TypeApp("->", [var_type, body_texp.typ])
+      // TODO probs need to apply some subs here
+      Ok(#(TExpAbs(abs_type, var, body_texp), sub))
+    }
+    ExpLet(var, val, body) -> {
+      use #(texp1, sub1) <- result.try(w2(env, val))
+      let type1_gen = generalize(apply_sub_env(sub1, env), texp1.typ)
+      let env1 = dict.insert(env, var, type1_gen)
+      // TODO this line seems to break let polymorphism
+      // let env1 = apply_sub_env(sub1, env1)
+      use #(texp2, sub2) <- result.try(w2(env1, body))
+      Ok(#(TExpLet(texp1.typ, var, texp1, texp2), compose_sub(sub1, sub2)))
     }
   }
 }
