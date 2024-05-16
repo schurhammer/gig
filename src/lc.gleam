@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/list
 import gleam/result
+import unique_integer
 
 pub type ExpVar =
   String
@@ -25,10 +26,10 @@ pub type Poly {
   Poly(var: TypeVar, typ: Poly)
 }
 
-pub type Context =
+pub type Env =
   dict.Dict(ExpVar, Poly)
 
-pub type Subs =
+pub type Sub =
   dict.Dict(TypeVar, Type)
 
 pub fn ftv(typ: Type) -> List(TypeVar) {
@@ -47,20 +48,21 @@ pub fn ftv_poly(typ: Poly) -> List(TypeVar) {
   }
 }
 
-pub fn ftv_context(context: Context) -> List(TypeVar) {
-  dict.fold(context, [], fn(acc, _, val) { list.append(acc, ftv_poly(val)) })
+pub fn ftv_env(env: Env) -> List(TypeVar) {
+  dict.fold(env, [], fn(acc, _, val) { list.append(acc, ftv_poly(val)) })
 }
 
-pub fn ftv_typing(context: Context, typ: Poly) -> List(TypeVar) {
-  let context_vars = ftv_context(context)
+pub fn ftv_typing(env: Env, typ: Poly) -> List(TypeVar) {
+  let env_vars = ftv_env(env)
   ftv_poly(typ)
-  |> list.filter(fn(x) { !list.contains(context_vars, x) })
+  |> list.filter(fn(x) { !list.contains(env_vars, x) })
 }
 
-@external(erlang, "erlang", "unique_integer")
-pub fn new_type_var() -> TypeVar
+pub fn new_type_var() -> TypeVar {
+  unique_integer.mono_positive()
+}
 
-pub fn unify(t1: Type, t2: Type) -> Result(Subs, String) {
+pub fn unify(t1: Type, t2: Type) -> Result(Sub, String) {
   case t1, t2 {
     TypeVar(var1), TypeVar(var2) if var1 == var2 -> Ok(dict.new())
     TypeVar(var), typ -> unify_var(var, typ)
@@ -71,7 +73,7 @@ pub fn unify(t1: Type, t2: Type) -> Result(Subs, String) {
   }
 }
 
-fn unify_var(var: TypeVar, typ: Type) -> Result(Subs, String) {
+fn unify_var(var: TypeVar, typ: Type) -> Result(Sub, String) {
   case typ {
     TypeVar(var2) if var == var2 -> Ok(dict.new())
     _ ->
@@ -86,10 +88,21 @@ pub fn occurs_check(var: TypeVar, typ: Type) -> Bool {
   list.contains(ftv(typ), var)
 }
 
-pub fn apply_subs(subs: Subs, typ: Type) -> Type {
-  dict.fold(subs, typ, fn(acc, var, replacement) {
+pub fn apply_sub(sub: Sub, typ: Type) -> Type {
+  dict.fold(sub, typ, fn(acc, var, replacement) {
     substitute(var, replacement, acc)
   })
+}
+
+fn apply_sub_poly(sub: Sub, typ: Poly) -> Poly {
+  case typ {
+    Mono(t) -> Mono(apply_sub(sub, t))
+    Poly(a, t) -> apply_sub_poly(dict.delete(sub, a), t)
+  }
+}
+
+fn apply_sub_env(sub: Sub, env: Env) -> Env {
+  dict.map_values(env, fn(_, v) { apply_sub_poly(sub, v) })
 }
 
 pub fn substitute(var: TypeVar, replacement: Type, typ: Type) -> Type {
@@ -104,17 +117,14 @@ pub fn substitute(var: TypeVar, replacement: Type, typ: Type) -> Type {
   }
 }
 
-pub fn unify_many(
-  types1: List(Type),
-  types2: List(Type),
-) -> Result(Subs, String) {
+pub fn unify_many(types1: List(Type), types2: List(Type)) -> Result(Sub, String) {
   case types1, types2 {
     [head1, ..tail1], [head2, ..tail2] ->
-      result.try(unify(head1, head2), fn(subs1) {
-        let tail1 = list.map(tail1, fn(t) { apply_subs(subs1, t) })
-        let tail2 = list.map(tail2, fn(t) { apply_subs(subs1, t) })
-        result.try(unify_many(tail1, tail2), fn(subs2) {
-          Ok(compose_subs(subs1, subs2))
+      result.try(unify(head1, head2), fn(sub1) {
+        let tail1 = list.map(tail1, fn(t) { apply_sub(sub1, t) })
+        let tail2 = list.map(tail2, fn(t) { apply_sub(sub1, t) })
+        result.try(unify_many(tail1, tail2), fn(sub2) {
+          Ok(compose_sub(sub1, sub2))
         })
       })
     [], [] -> Ok(dict.new())
@@ -122,93 +132,72 @@ pub fn unify_many(
   }
 }
 
-pub fn compose_subs(subs1: Subs, subs2: Subs) -> Subs {
-  let subs2_applied =
-    dict.map_values(subs2, fn(_, typ) { apply_subs(subs1, typ) })
-  dict.fold(subs1, subs2_applied, fn(acc, var, typ) {
-    dict.insert(acc, var, typ)
-  })
+pub fn compose_sub(sub1: Sub, sub2: Sub) -> Sub {
+  let sub2_applied = dict.map_values(sub2, fn(_, typ) { apply_sub(sub1, typ) })
+  dict.fold(sub1, sub2_applied, fn(acc, var, typ) { dict.insert(acc, var, typ) })
 }
 
-pub fn generalize(context: Context, typ: Type) -> Poly {
-  let vars = ftv_typing(context, Mono(typ))
+pub fn generalize(env: Env, typ: Type) -> Poly {
+  let vars = ftv_typing(env, Mono(typ))
   list.fold(vars, Mono(typ), fn(acc, var) { Poly(var, acc) })
 }
 
-pub fn instantiate(subs: Subs, poly: Poly) -> Type {
+pub fn instantiate(sub: Sub, poly: Poly) -> Type {
   case poly {
-    Mono(typ) -> apply_subs(subs, typ)
+    Mono(typ) -> apply_sub(sub, typ)
     Poly(var, poly) -> {
       let new_var = new_type_var()
-      let subs = dict.insert(subs, var, TypeVar(new_var))
-      instantiate(subs, poly)
+      let sub = dict.insert(sub, var, TypeVar(new_var))
+      instantiate(sub, poly)
     }
   }
 }
 
-pub fn infer(context: Context, exp: Exp) -> Result(Type, String) {
+pub fn w(env: Env, exp: Exp, sub: Sub) -> Result(#(Type, Sub), String) {
+  let sub = dict.new()
   case exp {
     ExpVar(var) ->
-      case dict.get(context, var) {
-        Ok(poly) -> Ok(instantiate(dict.new(), poly))
+      case dict.get(env, var) {
+        Ok(poly) -> {
+          let typ = instantiate(sub, poly)
+          Ok(#(typ, sub))
+        }
         Error(_) -> Error("Unbound variable")
       }
-    ExpApp(fun, arg) ->
-      result.try(infer(context, fun), fn(fun_type) {
-        result.try(infer(context, arg), fn(arg_type) {
-          let var = TypeVar(new_type_var())
-          let fun_type2 = TypeApp("->", [arg_type, var])
-          result.try(unify(fun_type, fun_type2), fn(subs) {
-            Ok(apply_subs(subs, var))
-          })
-        })
-      })
+    ExpApp(fun, arg) -> {
+      let ret_type = TypeVar(new_type_var())
+      use #(type1, sub1) <- result.try(w(env, fun, sub))
+      let env1 = apply_sub_env(sub1, env)
+      use #(type2, sub2) <- result.try(w(env1, arg, sub))
+      let type1_sub = apply_sub(sub2, type1)
+      let type3 = TypeApp("->", [type2, ret_type])
+      use sub3 <- result.try(unify(type1_sub, type3))
+      let sub = compose_sub(sub3, compose_sub(sub2, sub1))
+      let ret_type = apply_sub(sub, ret_type)
+      Ok(#(ret_type, sub))
+    }
     ExpAbs(var, body) -> {
       let var_type = TypeVar(new_type_var())
-      let new_context = dict.insert(context, var, Mono(var_type))
-      result.try(infer(new_context, body), fn(body_type) {
-        Ok(TypeApp("->", [var_type, body_type]))
-      })
+      let new_env = dict.insert(env, var, Mono(var_type))
+      use #(body_type, sub) <- result.try(w(new_env, body, sub))
+      let var_type = apply_sub(sub, var_type)
+      let abs_type = TypeApp("->", [var_type, body_type])
+      Ok(#(abs_type, sub))
     }
-    ExpLet(var, val, body) ->
-      result.try(infer(context, val), fn(val_type) {
-        let new_context =
-          dict.insert(context, var, generalize(context, val_type))
-        infer(new_context, body)
-      })
+    ExpLet(var, val, body) -> {
+      use #(type1, sub1) <- result.try(w(env, val, sub))
+      let type1_gen = generalize(apply_sub_env(sub1, env), type1)
+      let env1 = dict.insert(env, var, type1_gen)
+      let env1 = apply_sub_env(sub1, env1)
+      use #(type2, sub2) <- result.try(w(env1, body, sub))
+      Ok(#(type2, compose_sub(sub1, sub2)))
+    }
   }
 }
 
-pub fn normalize_type_vars(typ: Type) -> Type {
-  let type_vars = list.unique(collect_type_vars(typ))
-  let mapping = create_mapping(type_vars)
-  apply_mapping(typ, mapping)
-}
-
-fn collect_type_vars(typ: Type) -> List(TypeVar) {
-  case typ {
-    TypeVar(var) -> [var]
-    TypeApp(_, args) -> list.flat_map(args, collect_type_vars)
-  }
-}
-
-fn create_mapping(type_vars: List(TypeVar)) -> dict.Dict(TypeVar, TypeVar) {
-  list.index_fold(type_vars, dict.new(), fn(acc, var, index) {
-    dict.insert(acc, var, index + 1)
+pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
+  result.try(w(env, exp, dict.new()), fn(res) {
+    let #(typ, _sub) = res
+    Ok(typ)
   })
-}
-
-fn apply_mapping(typ: Type, mapping: dict.Dict(TypeVar, TypeVar)) -> Type {
-  case typ {
-    TypeVar(var) ->
-      case dict.get(mapping, var) {
-        Ok(new_var) -> TypeVar(new_var)
-        Error(_) -> typ
-        // This shouldn't happen as all vars should be in the mapping
-      }
-    TypeApp(name, args) -> {
-      let new_args = list.map(args, fn(arg) { apply_mapping(arg, mapping) })
-      TypeApp(name, new_args)
-    }
-  }
 }
