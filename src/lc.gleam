@@ -153,22 +153,21 @@ pub fn instantiate(sub: Sub, poly: Poly) -> Type {
   }
 }
 
-pub fn w(env: Env, exp: Exp, sub: Sub) -> Result(#(Type, Sub), String) {
-  let sub = dict.new()
+pub fn w(env: Env, exp: Exp) -> Result(#(Type, Sub), String) {
   case exp {
     ExpVar(var) ->
       case dict.get(env, var) {
         Ok(poly) -> {
-          let typ = instantiate(sub, poly)
-          Ok(#(typ, sub))
+          let typ = instantiate(dict.new(), poly)
+          Ok(#(typ, dict.new()))
         }
         Error(_) -> Error("Unbound variable")
       }
     ExpApp(fun, arg) -> {
       let ret_type = TypeVar(new_type_var())
-      use #(type1, sub1) <- result.try(w(env, fun, sub))
+      use #(type1, sub1) <- result.try(w(env, fun))
       let env1 = apply_sub_env(sub1, env)
-      use #(type2, sub2) <- result.try(w(env1, arg, sub))
+      use #(type2, sub2) <- result.try(w(env1, arg))
       let type1_sub = apply_sub(sub2, type1)
       let type3 = TypeApp("->", [type2, ret_type])
       use sub3 <- result.try(unify(type1_sub, type3))
@@ -179,24 +178,24 @@ pub fn w(env: Env, exp: Exp, sub: Sub) -> Result(#(Type, Sub), String) {
     ExpAbs(var, body) -> {
       let var_type = TypeVar(new_type_var())
       let new_env = dict.insert(env, var, Mono(var_type))
-      use #(body_type, sub) <- result.try(w(new_env, body, sub))
+      use #(body_type, sub) <- result.try(w(new_env, body))
       let var_type = apply_sub(sub, var_type)
       let abs_type = TypeApp("->", [var_type, body_type])
       Ok(#(abs_type, sub))
     }
     ExpLet(var, val, body) -> {
-      use #(type1, sub1) <- result.try(w(env, val, sub))
+      use #(type1, sub1) <- result.try(w(env, val))
       let type1_gen = generalize(apply_sub_env(sub1, env), type1)
       let env1 = dict.insert(env, var, type1_gen)
       let env1 = apply_sub_env(sub1, env1)
-      use #(type2, sub2) <- result.try(w(env1, body, sub))
+      use #(type2, sub2) <- result.try(w(env1, body))
       Ok(#(type2, compose_sub(sub1, sub2)))
     }
   }
 }
 
 pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
-  result.try(w(env, exp, dict.new()), fn(res) {
+  result.try(w(env, exp), fn(res) {
     let #(typ, _sub) = res
     Ok(typ)
   })
