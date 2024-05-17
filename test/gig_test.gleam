@@ -140,8 +140,8 @@ pub fn infer_higher_order_function_test() {
   |> pretty_print_type
   |> should.equal(
     TypeApp("->", [
-      TypeApp("->", [TypeVar(1), TypeVar(2)]),
-      TypeApp("->", [TypeVar(1), TypeVar(2)]),
+      TypeApp("->", [TypeVar(2), TypeVar(1)]),
+      TypeApp("->", [TypeVar(2), TypeVar(1)]),
     ])
     |> pretty_print_type,
   )
@@ -197,12 +197,11 @@ pub fn infer_compose_test() {
   |> should.equal(
     TypeApp("->", [
       TypeApp("->", [
-        TypeApp("->", [TypeVar(3), TypeVar(1)]),
-        TypeApp("->", [TypeVar(2), TypeVar(1)]),
+        TypeApp("->", [TypeVar(2), TypeVar(3)]),
+        TypeApp("->", [TypeVar(1), TypeVar(3)]),
       ]),
-      TypeApp("->", [TypeVar(3), TypeVar(2)]),
+      TypeApp("->", [TypeVar(2), TypeVar(1)]),
     ])
-    |> normalize_type()
     |> pretty_print_type(),
   )
 }

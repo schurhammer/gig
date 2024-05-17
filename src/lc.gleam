@@ -88,6 +88,21 @@ fn unify(t1: Type, t2: Type) -> Result(Sub, String) {
   }
 }
 
+fn unify_many(types1: List(Type), types2: List(Type)) -> Result(Sub, String) {
+  case types1, types2 {
+    [head1, ..tail1], [head2, ..tail2] ->
+      result.try(unify(head1, head2), fn(sub1) {
+        let tail1 = list.map(tail1, fn(t) { apply_sub(sub1, t) })
+        let tail2 = list.map(tail2, fn(t) { apply_sub(sub1, t) })
+        result.try(unify_many(tail1, tail2), fn(sub2) {
+          Ok(compose_sub(sub2, sub1))
+        })
+      })
+    [], [] -> Ok(dict.new())
+    _, _ -> Error("Type argument lists do not match")
+  }
+}
+
 fn unify_var(var: TypeVar, typ: Type) -> Result(Sub, String) {
   case typ {
     TypeVar(var2) if var == var2 -> Ok(dict.new())
@@ -101,21 +116,6 @@ fn unify_var(var: TypeVar, typ: Type) -> Result(Sub, String) {
 
 fn occurs(var: TypeVar, typ: Type) -> Bool {
   list.contains(ftv(typ), var)
-}
-
-fn unify_many(types1: List(Type), types2: List(Type)) -> Result(Sub, String) {
-  case types1, types2 {
-    [head1, ..tail1], [head2, ..tail2] ->
-      result.try(unify(head1, head2), fn(sub1) {
-        let tail1 = list.map(tail1, fn(t) { apply_sub(sub1, t) })
-        let tail2 = list.map(tail2, fn(t) { apply_sub(sub1, t) })
-        result.try(unify_many(tail1, tail2), fn(sub2) {
-          Ok(compose_sub(sub1, sub2))
-        })
-      })
-    [], [] -> Ok(dict.new())
-    _, _ -> Error("Type argument lists do not match")
-  }
 }
 
 fn apply_sub(sub: Sub, typ: Type) -> Type {
@@ -132,7 +132,7 @@ fn apply_sub(sub: Sub, typ: Type) -> Type {
 fn apply_sub_poly(sub: Sub, typ: Poly) -> Poly {
   case typ {
     Mono(t) -> Mono(apply_sub(sub, t))
-    Poly(a, t) -> apply_sub_poly(dict.delete(sub, a), t)
+    Poly(a, t) -> Poly(a, apply_sub_poly(dict.delete(sub, a), t))
   }
 }
 
@@ -184,18 +184,6 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
-// let ret_type = TypeVar(new_type_var())
-// use #(texp1, sub1) <- result.try(w(env, fun))
-// let env1 = apply_sub_env(sub1, env)
-// use #(texp2, sub2) <- result.try(w(env1, arg))
-// let texp1_sub2 = apply_sub_texpr(sub2, texp1)
-// let type3 = TypeApp("->", [texp2.typ, ret_type])
-// use sub3 <- result.try(unify(texp1_sub2.typ, type3))
-// let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
-// let ret_type = apply_sub(sub123, ret_type)
-// let texp1_sub3 = apply_sub_texpr(sub3, texp1_sub2)
-// let texp2_sub3 = apply_sub_texpr(sub3, texp2)
-// Ok(#(TExpApp(ret_type, texp1_sub3, texp2_sub3), sub123))
 fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
   // generate type for return value
   let ret_type = TypeVar(new_type_var())
@@ -246,12 +234,6 @@ fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
   Ok(#(TExpApp(ret_type, funtype_sub3, args_sub3), sub123))
 }
 
-// let var_type = TypeVar(new_type_var())
-// let body_env = dict.insert(env, var, Mono(var_type))
-// use #(body_texp, sub) <- result.try(w(body_env, body))
-// let var_type = apply_sub(sub, var_type)
-// let abs_type = TypeApp("->", [var_type, body_texp.typ])
-// Ok(#(TExpAbs(abs_type, var, body_texp), sub))
 fn w_abs(
   env: Env,
   params: List(String),
@@ -301,10 +283,9 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       use #(texp1, sub1) <- result.try(w(env, val))
       let type1_gen = gen(apply_sub_env(sub1, env), texp1.typ)
       let env1 = dict.insert(env, var, type1_gen)
-      // TODO this line seems to break let polymorphism
-      // let env1 = apply_sub_env(sub1, env1)
+      let env1 = apply_sub_env(sub1, env1)
       use #(texp2, sub2) <- result.try(w(env1, body))
-      Ok(#(TExpLet(texp2.typ, var, texp1, texp2), compose_sub(sub1, sub2)))
+      Ok(#(TExpLet(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
     }
   }
 }
@@ -424,19 +405,13 @@ pub fn normalize_vars_type(
     TypeApp(name, args) -> {
       let result =
         args
+        |> list.reverse
         |> list.fold(#([], sub), fn(acc, arg) {
           let #(l, sub) = acc
           let #(new_arg, new_sub) = normalize_vars_type(arg, sub)
           #([new_arg, ..l], new_sub)
         })
-      #(
-        TypeApp(
-          name,
-          result.0
-            |> list.reverse(),
-        ),
-        result.1,
-      )
+      #(TypeApp(name, result.0), result.1)
     }
   }
 }
