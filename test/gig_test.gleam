@@ -3,8 +3,8 @@ import gleeunit
 import gleeunit/should
 
 import lc.{
-  type TypeVar, ExpAbs, ExpApp, ExpInt, ExpLet, ExpVar, Mono, TypeApp, TypeVar,
-  infer, normalize_vars_type, pretty_print_type,
+  type TypeVar, ExpAbs, ExpApp, ExpBool, ExpIf, ExpInt, ExpLet, ExpVar, Mono,
+  TypeApp, TypeVar, infer, normalize_vars_type, pretty_print_type,
 }
 
 fn normalize_type(t) {
@@ -204,4 +204,54 @@ pub fn infer_compose_test() {
     ])
     |> pretty_print_type(),
   )
+}
+
+pub fn infer_if_true_test() {
+  let env = dict.new()
+  let exp = ExpIf(ExpBool(True), ExpInt(1), ExpInt(0))
+  let assert Ok(result) = infer(env, exp)
+  result
+  |> should.equal(TypeApp("Int", []))
+}
+
+pub fn infer_if_false_test() {
+  let env = dict.new()
+  let exp = ExpIf(ExpBool(False), ExpInt(1), ExpInt(0))
+  let assert Ok(result) = infer(env, exp)
+  result
+  |> should.equal(TypeApp("Int", []))
+}
+
+pub fn infer_if_type_mismatch_test() {
+  let env = dict.new()
+  let exp = ExpIf(ExpInt(1), ExpInt(1), ExpInt(0))
+  let result = infer(env, exp)
+  result
+  |> should.equal(Error("Condition expression must be of type Bool"))
+}
+
+pub fn infer_if_branch_type_mismatch_test() {
+  let env = dict.new()
+  let exp = ExpIf(ExpBool(True), ExpInt(1), ExpBool(False))
+  let result = infer(env, exp)
+  result
+  |> should.equal(Error("Types do not unify"))
+}
+
+pub fn infer_if_variable_test() {
+  let env = dict.from_list([#("x", Mono(TypeApp("Bool", [])))])
+  let exp = ExpIf(ExpVar("x"), ExpInt(1), ExpInt(0))
+  let assert Ok(result) = infer(env, exp)
+  result
+  |> should.equal(TypeApp("Int", []))
+}
+
+pub fn infer_if_complex_test() {
+  let env = dict.from_list([#("x", Mono(TypeApp("Bool", [])))])
+  let exp =
+    ExpIf(ExpVar("x"), ExpAbs(["y"], ExpVar("y")), ExpAbs(["z"], ExpVar("z")))
+  let assert Ok(result) = infer(env, exp)
+  result
+  |> normalize_type()
+  |> should.equal(TypeApp("->", [TypeVar(1), TypeVar(1)]))
 }

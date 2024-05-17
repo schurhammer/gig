@@ -17,6 +17,7 @@ pub type Exp {
   ExpApp(fun: Exp, args: List(Exp))
   ExpAbs(var: List(ExpVar), exp: Exp)
   ExpLet(var: ExpVar, val: Exp, exp: Exp)
+  ExpIf(cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 
 pub type TypeVar =
@@ -29,6 +30,7 @@ pub type TExp {
   TExpApp(typ: Type, fun: TExp, arg: List(TExp))
   TExpAbs(typ: Type, var: List(ExpVar), exp: TExp)
   TExpLet(typ: Type, var: ExpVar, val: TExp, exp: TExp)
+  TExpIf(typ: Type, cond: TExp, then_exp: TExp, else_exp: TExp)
 }
 
 pub type Type {
@@ -160,6 +162,13 @@ fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
         apply_sub_texpr(sub, val),
         apply_sub_texpr(sub, exp),
       )
+    TExpIf(typ, cond, then_exp, else_exp) ->
+      TExpIf(
+        apply_sub(sub, typ),
+        apply_sub_texpr(sub, cond),
+        apply_sub_texpr(sub, then_exp),
+        apply_sub_texpr(sub, else_exp),
+      )
   }
 }
 
@@ -287,6 +296,30 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       use #(texp2, sub2) <- result.try(w(env1, body))
       Ok(#(TExpLet(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
     }
+    ExpIf(cond, then_exp, else_exp) -> {
+      use #(texp_cond, sub_cond) <- result.try(w(env, cond))
+      use #(texp_then, sub_then) <- result.try(w(env, then_exp))
+      use #(texp_else, sub_else) <- result.try(w(env, else_exp))
+
+      let sub = compose_sub(sub_else, compose_sub(sub_then, sub_cond))
+      let cond_type = apply_sub(sub, texp_cond.typ)
+
+      case cond_type {
+        TypeApp("Bool", []) -> {
+          let then_type = apply_sub(sub, texp_then.typ)
+          let else_type = apply_sub(sub, texp_else.typ)
+          use sub <- result.try(unify(then_type, else_type))
+          let if_type = apply_sub(sub, then_type)
+
+          let texp_cond = apply_sub_texpr(sub, texp_cond)
+          let texp_then = apply_sub_texpr(sub, texp_then)
+          let texp_else = apply_sub_texpr(sub, texp_else)
+
+          Ok(#(TExpIf(if_type, texp_cond, texp_then, texp_else), sub))
+        }
+        _ -> Error("Condition expression must be of type Bool")
+      }
+    }
   }
 }
 
@@ -344,6 +377,15 @@ pub fn pretty_print_exp(exp: Exp) -> String {
       <> " in "
       <> pretty_print_exp(exp)
       <> ")"
+
+    ExpIf(cond, then_exp, else_exp) ->
+      "if ("
+      <> pretty_print_exp(cond)
+      <> ") {"
+      <> pretty_print_exp(then_exp)
+      <> "} else {"
+      <> pretty_print_exp(else_exp)
+      <> "}"
   }
 }
 
@@ -384,6 +426,14 @@ pub fn pretty_print_texp(texp: TExp) -> String {
       <> " in "
       <> pretty_print_texp(exp)
       <> ")"
+    TExpIf(_, cond, then_exp, else_exp) ->
+      "if ("
+      <> pretty_print_texp(cond)
+      <> ") {"
+      <> pretty_print_texp(then_exp)
+      <> "} else {"
+      <> pretty_print_texp(else_exp)
+      <> "}"
   }
 }
 
@@ -454,6 +504,13 @@ pub fn normalize_vars_texp(
       let #(new_val, new_sub) = normalize_vars_texp(val, new_sub)
       let #(new_exp, new_sub) = normalize_vars_texp(exp, new_sub)
       #(TExpLet(new_typ, var, new_val, new_exp), new_sub)
+    }
+    TExpIf(typ, cond, then_exp, else_exp) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      let #(new_cond, new_sub) = normalize_vars_texp(cond, new_sub)
+      let #(new_then, new_sub) = normalize_vars_texp(then_exp, new_sub)
+      let #(new_else, new_sub) = normalize_vars_texp(else_exp, new_sub)
+      #(TExpIf(new_typ, new_cond, new_then, new_else), new_sub)
     }
   }
 }
