@@ -1,6 +1,10 @@
+import gleam/bit_array
+import gleam/bool
 import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/result
+import gleam/string
 import unique_integer
 
 pub type ExpVar =
@@ -15,6 +19,9 @@ pub type Exp {
   ExpLet(var: ExpVar, val: Exp, exp: Exp)
 }
 
+pub type TypeVar =
+  Int
+
 pub type TExp {
   TExpBool(typ: Type, val: Bool)
   TExpInt(typ: Type, val: Int)
@@ -23,9 +30,6 @@ pub type TExp {
   TExpAbs(typ: Type, var: ExpVar, exp: TExp)
   TExpLet(typ: Type, var: ExpVar, val: TExp, exp: TExp)
 }
-
-pub type TypeVar =
-  Int
 
 pub type Type {
   TypeVar(var: TypeVar)
@@ -231,4 +235,166 @@ pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
     let #(texpr, _sub) = res
     Ok(texpr.typ)
   })
+}
+
+pub fn pretty_print_type(typ: Type) -> String {
+  case typ {
+    TypeVar(var) -> format_type_var(var)
+    TypeApp(name, args) -> {
+      case name == "->", args {
+        True, [head, tail] -> format_function_type(head, tail)
+        False, _ -> format_type_app(name, args)
+        _, _ -> "<err>"
+      }
+    }
+  }
+}
+
+pub fn pretty_print_exp(exp: Exp) -> String {
+  case exp {
+    ExpBool(val) -> bool.to_string(val)
+    ExpInt(val) -> int.to_string(val)
+    ExpVar(var) -> var
+    ExpApp(fun, arg) ->
+      "(" <> pretty_print_exp(fun) <> " " <> pretty_print_exp(arg) <> ")"
+    ExpAbs(var, exp) -> "(λ" <> var <> ". " <> pretty_print_exp(exp) <> ")"
+    ExpLet(var, val, exp) ->
+      "(let "
+      <> var
+      <> " = "
+      <> pretty_print_exp(val)
+      <> " in "
+      <> pretty_print_exp(exp)
+      <> ")"
+  }
+}
+
+pub fn pretty_print_texp(texp: TExp) -> String {
+  case texp {
+    TExpBool(_, val) -> bool.to_string(val)
+    TExpInt(_, val) -> int.to_string(val)
+    TExpVar(_, var) -> var
+    TExpApp(typ, fun, arg) ->
+      "("
+      <> pretty_print_texp(fun)
+      <> " "
+      <> pretty_print_texp(arg)
+      <> ")"
+      <> ": "
+      <> pretty_print_type(typ)
+    TExpAbs(typ, var, exp) ->
+      "(λ"
+      <> var
+      <> ". "
+      <> pretty_print_texp(exp)
+      <> ")"
+      <> ": "
+      <> pretty_print_type(typ)
+    TExpLet(_, var, val, exp) ->
+      "(let "
+      <> var
+      <> " = "
+      <> pretty_print_texp(val)
+      <> " in "
+      <> pretty_print_texp(exp)
+      <> ")"
+  }
+}
+
+pub fn normalize_vars_type(
+  typ: Type,
+  sub: dict.Dict(TypeVar, TypeVar),
+) -> #(Type, dict.Dict(TypeVar, TypeVar)) {
+  case typ {
+    TypeVar(var) -> {
+      case dict.get(sub, var) {
+        Ok(new_var) -> #(TypeVar(new_var), sub)
+        Error(_) -> {
+          let new_var = dict.size(sub) + 1
+          let new_sub = dict.insert(sub, var, new_var)
+          #(TypeVar(new_var), new_sub)
+        }
+      }
+    }
+    TypeApp(name, args) -> {
+      let result =
+        args
+        |> list.fold(#([], sub), fn(acc, arg) {
+          let #(l, sub) = acc
+          let #(new_arg, new_sub) = normalize_vars_type(arg, sub)
+          #([new_arg, ..l], new_sub)
+        })
+      #(
+        TypeApp(
+          name,
+          result.0
+            |> list.reverse(),
+        ),
+        result.1,
+      )
+    }
+  }
+}
+
+pub fn normalize_vars_texp(
+  texp: TExp,
+  sub: dict.Dict(TypeVar, TypeVar),
+) -> #(TExp, dict.Dict(TypeVar, TypeVar)) {
+  case texp {
+    TExpBool(typ, val) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      #(TExpBool(new_typ, val), new_sub)
+    }
+    TExpInt(typ, val) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      #(TExpInt(new_typ, val), new_sub)
+    }
+    TExpVar(typ, var) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      #(TExpVar(new_typ, var), new_sub)
+    }
+    TExpApp(typ, fun, arg) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      let #(new_fun, new_sub) = normalize_vars_texp(fun, new_sub)
+      let #(new_arg, new_sub) = normalize_vars_texp(arg, new_sub)
+      #(TExpApp(new_typ, new_fun, new_arg), new_sub)
+    }
+    TExpAbs(typ, var, exp) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      let #(new_exp, new_sub) = normalize_vars_texp(exp, new_sub)
+      #(TExpAbs(new_typ, var, new_exp), new_sub)
+    }
+    TExpLet(typ, var, val, exp) -> {
+      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
+      let #(new_val, new_sub) = normalize_vars_texp(val, new_sub)
+      let #(new_exp, new_sub) = normalize_vars_texp(exp, new_sub)
+      #(TExpLet(new_typ, var, new_val, new_exp), new_sub)
+    }
+  }
+}
+
+fn format_type_var(var: TypeVar) -> String {
+  let ascii = 96 + var
+  let assert Ok(s) = bit_array.to_string(<<ascii:int>>)
+  s
+}
+
+fn format_function_type(arg: Type, result: Type) -> String {
+  let arg_str = case arg {
+    TypeApp("->", _) -> "(" <> pretty_print_type(arg) <> ")"
+    _ -> pretty_print_type(arg)
+  }
+  let res_str = pretty_print_type(result)
+  arg_str <> " -> " <> res_str
+}
+
+fn format_type_app(name: String, args: List(Type)) -> String {
+  let args_str =
+    args
+    |> list.map(pretty_print_type)
+    |> string.join(" ")
+  case args_str {
+    "" -> name
+    s -> name <> " " <> s
+  }
 }
