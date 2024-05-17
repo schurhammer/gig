@@ -1,4 +1,3 @@
-import gleam/bool
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -8,99 +7,11 @@ import gleeunit/should
 
 import lc.{
   type Poly, type Type, type TypeVar, ExpAbs, ExpApp, ExpInt, ExpLet, ExpVar,
-  Mono, Poly, TypeApp, TypeVar, apply_sub, compose_sub, ftv, ftv_env, ftv_poly,
-  ftv_typing, generalize, infer, instantiate, occurs_check, unify, unify_many,
+  Mono, Poly, TypeApp, TypeVar, infer,
 }
 
 pub fn main() {
   gleeunit.main()
-}
-
-pub fn ftv_test() {
-  let typ = TypeApp("List", [TypeVar(1)])
-  let result = ftv(typ)
-  result
-  |> should.equal([1])
-}
-
-pub fn ftv_poly_test() {
-  let poly = Poly(1, Mono(TypeVar(2)))
-  let result = ftv_poly(poly)
-  result
-  |> should.equal([2])
-}
-
-pub fn ftv_env_test() {
-  let env =
-    dict.from_list([#("x", Mono(TypeVar(1))), #("y", Poly(2, Mono(TypeVar(3))))])
-  let result = ftv_env(env)
-  result
-  |> should.equal([1, 3])
-}
-
-pub fn ftv_typing_test() {
-  let env =
-    dict.from_list([#("x", Mono(TypeVar(1))), #("y", Poly(2, Mono(TypeVar(3))))])
-  let poly = Poly(2, Mono(TypeVar(4)))
-  let result = ftv_typing(env, poly)
-  result
-  |> should.equal([4])
-}
-
-pub fn unify_test() {
-  let type1 = TypeVar(1)
-  let type2 = TypeVar(1)
-  let result = unify(type1, type2)
-  result
-  |> should.equal(Ok(dict.new()))
-}
-
-pub fn occurs_check_test() {
-  let typ = TypeApp("List", [TypeVar(1)])
-  let result = occurs_check(1, typ)
-  result
-  |> should.equal(True)
-}
-
-pub fn apply_sub_test() {
-  let subs = dict.from_list([#(1, TypeApp("List", [TypeVar(2)]))])
-  let typ = TypeVar(1)
-  let result = apply_sub(subs, typ)
-  result
-  |> should.equal(TypeApp("List", [TypeVar(2)]))
-}
-
-pub fn unify_many_test() {
-  let types1 = [TypeVar(1), TypeVar(2)]
-  let types2 = [TypeVar(1), TypeVar(2)]
-  let result = unify_many(types1, types2)
-  result
-  |> should.equal(Ok(dict.new()))
-}
-
-pub fn compose_sub_test() {
-  let subs1 = dict.from_list([#(1, TypeVar(2))])
-  let subs2 = dict.from_list([#(2, TypeVar(3))])
-  let result = compose_sub(subs1, subs2)
-  result
-  |> should.equal(dict.from_list([#(1, TypeVar(2)), #(2, TypeVar(3))]))
-}
-
-pub fn generalize_test() {
-  let env = dict.from_list([#("x", Mono(TypeVar(1)))])
-  let typ = TypeVar(2)
-  let result = generalize(env, typ)
-  result
-  |> should.equal(Poly(2, Mono(TypeVar(2))))
-}
-
-pub fn instantiate_test() {
-  let poly = Poly(1, Mono(TypeVar(1)))
-  let result = instantiate(dict.new(), poly)
-
-  result
-  |> normalize_type_vars()
-  |> should.equal(TypeVar(1))
 }
 
 pub fn infer_var_test() {
@@ -173,8 +84,6 @@ pub fn infer_function_composition_test() {
 
 pub fn infer_poly_test() {
   let env = dict.new()
-  // let id = \x.x in id id 1
-
   let id = ExpAbs("x", ExpVar("x"))
   let assert Ok(id_type) =
     infer(
@@ -189,21 +98,6 @@ pub fn infer_poly_test() {
       ),
     )
 
-  let assert Ok(#(texp, subs)) =
-    lc.w2(
-      env,
-      ExpLet(
-        "id",
-        id,
-        ExpApp(
-          ExpApp(ExpVar("id"), ExpVar("id")),
-          ExpApp(ExpVar("id"), ExpInt(1)),
-        ),
-      ),
-    )
-  io.debug("--")
-  io.debug(subs)
-  io.debug(pretty_print_texp(texp))
   id_type
   |> normalize_type_vars()
   |> pretty_print_type()
@@ -237,17 +131,10 @@ pub fn infer_poly_fail_test() {
   |> should.equal(Error("Occurs check failed"))
 }
 
-import gleam/io
-
 pub fn infer_higher_order_function_test() {
   let env = dict.new()
   let exp = ExpAbs("f", ExpAbs("x", ExpApp(ExpVar("f"), ExpVar("x"))))
   let assert Ok(result) = infer(env, exp)
-
-  let assert Ok(#(texp, subs)) = lc.w2(env, exp)
-  io.debug("--")
-  io.debug(subs)
-  io.debug(pretty_print_texp(texp))
 
   result
   |> normalize_type_vars()
@@ -319,14 +206,6 @@ pub fn infer_compose_test() {
     |> normalize_type_vars()
     |> pretty_print_type(),
   )
-}
-
-pub fn apply_sub_2_test() {
-  let a = TypeVar(1)
-  let b = TypeApp("->", [TypeVar(2), TypeVar(3)])
-  let subs = dict.from_list([#(1, TypeApp("->", [TypeVar(2), TypeVar(3)]))])
-  apply_sub(subs, a)
-  |> should.equal(b)
 }
 
 pub fn normalize_type_vars_test() {
@@ -418,57 +297,5 @@ fn apply_mapping(typ: Type, mapping: dict.Dict(TypeVar, TypeVar)) -> Type {
       let new_args = list.map(args, fn(arg) { apply_mapping(arg, mapping) })
       TypeApp(name, new_args)
     }
-  }
-}
-
-fn print_arg(f: Type) -> String {
-  case f {
-    TypeApp("->", [a, _]) -> pretty_print_type(a)
-    _ -> "<invalid>"
-  }
-}
-
-fn print_ret(f: Type) -> String {
-  case f {
-    TypeApp("->", [_, r]) -> pretty_print_type(r)
-    _ -> "<invalid>"
-  }
-}
-
-pub fn pretty_print_texp(texp: lc.TExp) -> String {
-  case texp {
-    lc.TExpBool(typ, val) -> bool.to_string(val)
-
-    lc.TExpInt(typ, val) -> int.to_string(val)
-
-    lc.TExpVar(typ, var) -> "[" <> var <> " | " <> pretty_print_type(typ) <> "]"
-
-    lc.TExpApp(typ, fun, arg) ->
-      "{"
-      <> pretty_print_texp(fun)
-      <> " "
-      <> pretty_print_texp(arg)
-      <> " | "
-      <> pretty_print_type(typ)
-      <> "}"
-
-    lc.TExpAbs(typ, var, exp) ->
-      "(λ"
-      <> var
-      <> " -> "
-      <> pretty_print_texp(exp)
-      <> " | "
-      <> pretty_print_type(typ)
-      <> ")"
-
-    lc.TExpLet(typ, var, val, exp) ->
-      "let "
-      <> var
-      <> ": "
-      <> pretty_print_type(typ)
-      <> " = "
-      <> pretty_print_texp(val)
-      <> " in "
-      <> pretty_print_texp(exp)
   }
 }
