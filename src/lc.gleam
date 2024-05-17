@@ -201,10 +201,10 @@ fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
   let ret_type = TypeVar(new_type_var())
 
   // infer type of the function
-  use #(texp1, sub1) <- result.try(w(env, fun))
+  use #(funexp, sub1) <- result.try(w(env, fun))
 
   // infer type of each args
-  use #(args_subbed, sub2) <- result.try(
+  use #(args_sub2, sub2) <- result.try(
     list.try_fold(args, #([], sub1), fn(acc, arg) {
       let #(l, sub1) = acc
 
@@ -220,19 +220,30 @@ fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
     }),
   )
 
-  // args got reversed in the fold, fix it while adding ret type
-  let args_subbed = list.reverse(args_subbed)
-  let arg_types = list.map(args_subbed, fn(x) { x.typ })
-  let app_types = list.reverse([ret_type, ..arg_types])
+  // apply new subs to the function expression
+  let funexp_sub2 = apply_sub_texpr(sub2, funexp)
 
-  let texp1_sub2 = apply_sub_texpr(sub2, texp1)
+  // args got reversed in the fold, so reverse back
+  let args_sub2 = list.reverse(args_sub2)
 
-  let type3 = TypeApp("->", app_types)
-  use sub3 <- result.try(unify(texp1_sub2.typ, type3))
+  // create a function type based on the args
+  let arg_types_sub2 = list.map(args_sub2, fn(x) { x.typ })
+  let app_types_sub2 = [ret_type, ..list.reverse(arg_types_sub2)]
+  let args_funtype_sub2 = TypeApp("->", app_types_sub2)
+
+  // unify the function type with the one created from the args
+  use sub3 <- result.try(unify(funexp_sub2.typ, args_funtype_sub2))
+
+  // apply sub3 to the function type and args
+  let funtype_sub3 = apply_sub_texpr(sub3, funexp_sub2)
+  let args_sub3 = list.map(args_sub2, apply_sub_texpr(sub3, _))
+
+  // apply all the substitutions to the return type
+  // TODO instead of this can I extract ther return type from funtype?
   let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
   let ret_type = apply_sub(sub123, ret_type)
-  let texp1_sub3 = apply_sub_texpr(sub3, texp1_sub2)
-  Ok(#(TExpApp(ret_type, texp1_sub3, args_subbed), sub123))
+
+  Ok(#(TExpApp(ret_type, funtype_sub3, args_sub3), sub123))
 }
 
 // let var_type = TypeVar(new_type_var())
@@ -243,27 +254,33 @@ fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
 // Ok(#(TExpAbs(abs_type, var, body_texp), sub))
 fn w_abs(
   env: Env,
-  vars: List(String),
+  params: List(String),
   body: Exp,
 ) -> Result(#(TExp, Sub), String) {
-  let var_types =
-    vars
-    |> list.map(fn(x) { #(x, TypeVar(new_type_var())) })
+  // create new typevar for each parameter
+  let param_types = list.map(params, fn(x) { #(x, TypeVar(new_type_var())) })
+
+  // insert param types into environment
   let body_env =
-    var_types
-    |> list.fold(env, fn(env, item) {
+    list.fold(param_types, env, fn(env, item) {
       let #(var, var_type) = item
       dict.insert(env, var, Mono(var_type))
     })
+
+  // infer body type in new environment
   use #(body_texp, sub) <- result.try(w(body_env, body))
-  let var_types =
-    var_types
-    |> list.map(fn(item) {
+
+  // update param types with substitution from body
+  let param_types =
+    list.map(param_types, fn(item) {
       let #(_, var_type) = item
       apply_sub(sub, var_type)
     })
-  let abs_type = TypeApp("->", list.append(var_types, [body_texp.typ]))
-  Ok(#(TExpAbs(abs_type, vars, body_texp), sub))
+
+  // construct function type
+  let abs_type = TypeApp("->", [body_texp.typ, ..param_types])
+
+  Ok(#(TExpAbs(abs_type, params, body_texp), sub))
 }
 
 pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
@@ -276,7 +293,7 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
           let typ = inst(dict.new(), poly)
           Ok(#(TExpVar(typ, var), dict.new()))
         }
-        Error(_) -> Error("Unbound variable")
+        Error(_) -> Error("Unbound variable " <> var)
       }
     ExpApp(fun, args) -> w_app(env, fun, args)
     ExpAbs(vars, body) -> w_abs(env, vars, body)
@@ -315,7 +332,7 @@ pub fn pretty_print_type(typ: Type) -> String {
     TypeVar(var) -> format_type_var(var)
     TypeApp(name, args) -> {
       case name == "->", args {
-        True, [head, tail] -> format_function_type(head, tail)
+        True, [ret, args] -> format_function_type(args, ret)
         False, _ -> format_type_app(name, args)
         _, _ -> "<err>"
       }
@@ -362,8 +379,22 @@ pub fn pretty_print_texp(texp: TExp) -> String {
       <> "("
       <> string.join(list.map(arg, pretty_print_texp), ", ")
       <> ")"
-    TExpAbs(_, var, exp) ->
-      "fn(" <> string.join(var, ", ") <> ") {" <> pretty_print_texp(exp) <> "}"
+    TExpAbs(typ, var, exp) ->
+      "fn("
+      <> case typ {
+        TypeApp("->", [ret, ..args]) -> {
+          list.zip(var, args)
+          |> list.map(fn(x) { x.0 <> ": " <> pretty_print_type(x.1) })
+          |> string.join(", ")
+          <> ")"
+          <> ": "
+          <> pretty_print_type(ret)
+        }
+        _ -> "<err>)"
+      }
+      <> " {"
+      <> pretty_print_texp(exp)
+      <> "}"
     TExpLet(_, var, val, exp) ->
       "(let "
       <> var

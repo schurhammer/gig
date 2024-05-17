@@ -34,11 +34,11 @@ pub fn infer_abs_test() {
 
 pub fn infer_app_test() {
   let env =
-    dict.from_list([#("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(2)])))])
+    dict.from_list([#("f", Mono(TypeApp("->", [TypeVar(2), TypeVar(1)])))])
   let exp = ExpApp(ExpVar("f"), [ExpVar("x")])
   let result = infer(env, exp)
   result
-  |> should.equal(Error("Unbound variable"))
+  |> should.equal(Error("Unbound variable x"))
 }
 
 pub fn infer_let_test() {
@@ -46,7 +46,7 @@ pub fn infer_let_test() {
   let exp = ExpLet("x", ExpVar("y"), ExpVar("x"))
   let result = infer(env, exp)
   result
-  |> should.equal(Error("Unbound variable"))
+  |> should.equal(Error("Unbound variable y"))
 }
 
 pub fn infer_let_bound_var_test() {
@@ -74,13 +74,13 @@ pub fn infer_nested_let_test() {
 pub fn infer_function_composition_test() {
   let env =
     dict.from_list([
-      #("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(2)]))),
-      #("g", Mono(TypeApp("->", [TypeVar(2), TypeVar(3)]))),
+      #("f", Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
+      #("g", Mono(TypeApp("->", [TypeVar(3), TypeVar(2)]))),
     ])
   let exp = ExpApp(ExpVar("g"), [ExpApp(ExpVar("f"), [ExpVar("x")])])
   let result = infer(env, exp)
   result
-  |> should.equal(Error("Unbound variable"))
+  |> should.equal(Error("Unbound variable x"))
 }
 
 pub fn infer_poly_test() {
@@ -173,7 +173,7 @@ pub fn infer_const_test() {
   |> normalize_type()
   |> pretty_print_type()
   |> should.equal(
-    TypeApp("->", [TypeVar(1), TypeApp("->", [TypeVar(2), TypeVar(1)])])
+    TypeApp("->", [TypeApp("->", [TypeVar(1), TypeVar(2)]), TypeVar(1)])
     |> pretty_print_type(),
   )
 }
@@ -196,11 +196,11 @@ pub fn infer_compose_test() {
   |> pretty_print_type()
   |> should.equal(
     TypeApp("->", [
-      TypeApp("->", [TypeVar(2), TypeVar(3)]),
       TypeApp("->", [
-        TypeApp("->", [TypeVar(1), TypeVar(2)]),
-        TypeApp("->", [TypeVar(1), TypeVar(3)]),
+        TypeApp("->", [TypeVar(3), TypeVar(1)]),
+        TypeApp("->", [TypeVar(2), TypeVar(1)]),
       ]),
+      TypeApp("->", [TypeVar(3), TypeVar(2)]),
     ])
     |> normalize_type()
     |> pretty_print_type(),
