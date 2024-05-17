@@ -197,20 +197,42 @@ fn inst(sub: Sub, poly: Poly) -> Type {
 // let texp2_sub3 = apply_sub_texpr(sub3, texp2)
 // Ok(#(TExpApp(ret_type, texp1_sub3, texp2_sub3), sub123))
 fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
-  // TODO implement this properly
-  let assert [arg] = args
+  // generate type for return value
   let ret_type = TypeVar(new_type_var())
+
+  // infer type of the function
   use #(texp1, sub1) <- result.try(w(env, fun))
-  let env1 = apply_sub_env(sub1, env)
-  use #(texp2, sub2) <- result.try(w(env1, arg))
+
+  // infer type of each args
+  use #(args_subbed, sub2) <- result.try(
+    list.try_fold(args, #([], sub1), fn(acc, arg) {
+      let #(l, sub1) = acc
+
+      // create new env to use for recursive call
+      let env1 = apply_sub_env(sub1, env)
+      use #(texp2, sub2) <- result.try(w(env1, arg))
+
+      // apply new sub to the previous expressions
+      let l = list.map(l, apply_sub_texpr(sub2, _))
+
+      // add the new expression and compose the subs
+      Ok(#([texp2, ..l], compose_sub(sub2, sub1)))
+    }),
+  )
+
+  // args got reversed in the fold, fix it while adding ret type
+  let args_subbed = list.reverse(args_subbed)
+  let arg_types = list.map(args_subbed, fn(x) { x.typ })
+  let app_types = list.reverse([ret_type, ..arg_types])
+
   let texp1_sub2 = apply_sub_texpr(sub2, texp1)
-  let type3 = TypeApp("->", [texp2.typ, ret_type])
+
+  let type3 = TypeApp("->", app_types)
   use sub3 <- result.try(unify(texp1_sub2.typ, type3))
   let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
   let ret_type = apply_sub(sub123, ret_type)
   let texp1_sub3 = apply_sub_texpr(sub3, texp1_sub2)
-  let texp2_sub3 = apply_sub_texpr(sub3, texp2)
-  Ok(#(TExpApp(ret_type, texp1_sub3, [texp2_sub3]), sub123))
+  Ok(#(TExpApp(ret_type, texp1_sub3, args_subbed), sub123))
 }
 
 // let var_type = TypeVar(new_type_var())
@@ -270,9 +292,20 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   }
 }
 
+import gleam/io
+
 pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
   result.try(w(env, exp), fn(res) {
     let #(texpr, _sub) = res
+    io.println_error("")
+    io.println_error(
+      texpr
+      |> normalize_vars_texp(dict.new())
+      |> fn(x) {
+        let #(x, _) = x
+        pretty_print_texp(x)
+      },
+    )
     Ok(texpr.typ)
   })
 }
