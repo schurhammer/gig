@@ -25,7 +25,7 @@ pub fn infer_var_test() {
 
 pub fn infer_abs_test() {
   let env = dict.new()
-  let exp = ExpAbs("x", ExpVar("x"))
+  let exp = ExpAbs(["x"], ExpVar("x"))
   let assert Ok(result) = infer(env, exp)
   result
   |> normalize_type()
@@ -35,7 +35,7 @@ pub fn infer_abs_test() {
 pub fn infer_app_test() {
   let env =
     dict.from_list([#("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(2)])))])
-  let exp = ExpApp(ExpVar("f"), ExpVar("x"))
+  let exp = ExpApp(ExpVar("f"), [ExpVar("x")])
   let result = infer(env, exp)
   result
   |> should.equal(Error("Unbound variable"))
@@ -61,8 +61,8 @@ pub fn infer_nested_let_test() {
   let exp =
     ExpLet(
       "f",
-      ExpAbs("x", ExpVar("x")),
-      ExpLet("a", ExpVar("f"), ExpApp(ExpVar("a"), ExpVar("b"))),
+      ExpAbs(["x"], ExpVar("x")),
+      ExpLet("a", ExpVar("f"), ExpApp(ExpVar("a"), [ExpVar("b")])),
     )
   let env = dict.from_list([#("b", Mono(TypeVar(1)))])
   let assert Ok(result) = infer(env, exp)
@@ -77,7 +77,7 @@ pub fn infer_function_composition_test() {
       #("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(2)]))),
       #("g", Mono(TypeApp("->", [TypeVar(2), TypeVar(3)]))),
     ])
-  let exp = ExpApp(ExpVar("g"), ExpApp(ExpVar("f"), ExpVar("x")))
+  let exp = ExpApp(ExpVar("g"), [ExpApp(ExpVar("f"), [ExpVar("x")])])
   let result = infer(env, exp)
   result
   |> should.equal(Error("Unbound variable"))
@@ -85,17 +85,16 @@ pub fn infer_function_composition_test() {
 
 pub fn infer_poly_test() {
   let env = dict.new()
-  let id = ExpAbs("x", ExpVar("x"))
+  let id = ExpAbs(["x"], ExpVar("x"))
   let assert Ok(id_type) =
     infer(
       env,
       ExpLet(
         "id",
         id,
-        ExpApp(
-          ExpApp(ExpVar("id"), ExpVar("id")),
-          ExpApp(ExpVar("id"), ExpInt(1)),
-        ),
+        ExpApp(ExpApp(ExpVar("id"), [ExpVar("id")]), [
+          ExpApp(ExpVar("id"), [ExpInt(1)]),
+        ]),
       ),
     )
 
@@ -112,19 +111,18 @@ pub fn infer_poly_fail_test() {
   let env = dict.new()
   // \id. id id 1 (\x.x)
 
-  let id = ExpAbs("x", ExpVar("x"))
+  let id = ExpAbs(["x"], ExpVar("x"))
   let res =
     infer(
       env,
       ExpApp(
         ExpAbs(
-          "id",
-          ExpApp(
-            ExpApp(ExpVar("id"), ExpVar("id")),
-            ExpApp(ExpVar("id"), ExpInt(1)),
-          ),
+          ["id"],
+          ExpApp(ExpApp(ExpVar("id"), [ExpVar("id")]), [
+            ExpApp(ExpVar("id"), [ExpInt(1)]),
+          ]),
         ),
-        id,
+        [id],
       ),
     )
 
@@ -134,7 +132,7 @@ pub fn infer_poly_fail_test() {
 
 pub fn infer_higher_order_function_test() {
   let env = dict.new()
-  let exp = ExpAbs("f", ExpAbs("x", ExpApp(ExpVar("f"), ExpVar("x"))))
+  let exp = ExpAbs(["f"], ExpAbs(["x"], ExpApp(ExpVar("f"), [ExpVar("x")])))
   let assert Ok(result) = infer(env, exp)
 
   result
@@ -152,7 +150,7 @@ pub fn infer_higher_order_function_test() {
 pub fn infer_id_test() {
   let env = dict.new()
 
-  let id = ExpAbs("x", ExpVar("x"))
+  let id = ExpAbs(["x"], ExpVar("x"))
   let assert Ok(id_type) = infer(env, id)
 
   id_type
@@ -167,7 +165,7 @@ pub fn infer_id_test() {
 pub fn infer_const_test() {
   let env = dict.new()
 
-  let const_exp = ExpAbs("x", ExpAbs("y", ExpVar("x")))
+  let const_exp = ExpAbs(["x"], ExpAbs(["y"], ExpVar("x")))
 
   let assert Ok(const_type) = infer(env, const_exp)
 
@@ -185,10 +183,10 @@ pub fn infer_compose_test() {
 
   let compose =
     ExpAbs(
-      "f",
+      ["f"],
       ExpAbs(
-        "g",
-        ExpAbs("x", ExpApp(ExpVar("f"), ExpApp(ExpVar("g"), ExpVar("x")))),
+        ["g"],
+        ExpAbs(["x"], ExpApp(ExpVar("f"), [ExpApp(ExpVar("g"), [ExpVar("x")])])),
       ),
     )
   let assert Ok(compose_type) = infer(env, compose)

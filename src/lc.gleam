@@ -14,8 +14,8 @@ pub type Exp {
   ExpBool(val: Bool)
   ExpInt(val: Int)
   ExpVar(var: ExpVar)
-  ExpApp(fun: Exp, arg: Exp)
-  ExpAbs(var: ExpVar, exp: Exp)
+  ExpApp(fun: Exp, args: List(Exp))
+  ExpAbs(var: List(ExpVar), exp: Exp)
   ExpLet(var: ExpVar, val: Exp, exp: Exp)
 }
 
@@ -26,8 +26,8 @@ pub type TExp {
   TExpBool(typ: Type, val: Bool)
   TExpInt(typ: Type, val: Int)
   TExpVar(typ: Type, var: ExpVar)
-  TExpApp(typ: Type, fun: TExp, arg: TExp)
-  TExpAbs(typ: Type, var: ExpVar, exp: TExp)
+  TExpApp(typ: Type, fun: TExp, arg: List(TExp))
+  TExpAbs(typ: Type, var: List(ExpVar), exp: TExp)
   TExpLet(typ: Type, var: ExpVar, val: TExp, exp: TExp)
 }
 
@@ -149,7 +149,7 @@ fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
       TExpApp(
         apply_sub(sub, typ),
         apply_sub_texpr(sub, fun),
-        apply_sub_texpr(sub, arg),
+        list.map(arg, apply_sub_texpr(sub, _)),
       )
     TExpAbs(typ, var, exp) ->
       TExpAbs(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
@@ -184,6 +184,66 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
+// let ret_type = TypeVar(new_type_var())
+// use #(texp1, sub1) <- result.try(w(env, fun))
+// let env1 = apply_sub_env(sub1, env)
+// use #(texp2, sub2) <- result.try(w(env1, arg))
+// let texp1_sub2 = apply_sub_texpr(sub2, texp1)
+// let type3 = TypeApp("->", [texp2.typ, ret_type])
+// use sub3 <- result.try(unify(texp1_sub2.typ, type3))
+// let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
+// let ret_type = apply_sub(sub123, ret_type)
+// let texp1_sub3 = apply_sub_texpr(sub3, texp1_sub2)
+// let texp2_sub3 = apply_sub_texpr(sub3, texp2)
+// Ok(#(TExpApp(ret_type, texp1_sub3, texp2_sub3), sub123))
+fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
+  // TODO implement this properly
+  let assert [arg] = args
+  let ret_type = TypeVar(new_type_var())
+  use #(texp1, sub1) <- result.try(w(env, fun))
+  let env1 = apply_sub_env(sub1, env)
+  use #(texp2, sub2) <- result.try(w(env1, arg))
+  let texp1_sub2 = apply_sub_texpr(sub2, texp1)
+  let type3 = TypeApp("->", [texp2.typ, ret_type])
+  use sub3 <- result.try(unify(texp1_sub2.typ, type3))
+  let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
+  let ret_type = apply_sub(sub123, ret_type)
+  let texp1_sub3 = apply_sub_texpr(sub3, texp1_sub2)
+  let texp2_sub3 = apply_sub_texpr(sub3, texp2)
+  Ok(#(TExpApp(ret_type, texp1_sub3, [texp2_sub3]), sub123))
+}
+
+// let var_type = TypeVar(new_type_var())
+// let body_env = dict.insert(env, var, Mono(var_type))
+// use #(body_texp, sub) <- result.try(w(body_env, body))
+// let var_type = apply_sub(sub, var_type)
+// let abs_type = TypeApp("->", [var_type, body_texp.typ])
+// Ok(#(TExpAbs(abs_type, var, body_texp), sub))
+fn w_abs(
+  env: Env,
+  vars: List(String),
+  body: Exp,
+) -> Result(#(TExp, Sub), String) {
+  let var_types =
+    vars
+    |> list.map(fn(x) { #(x, TypeVar(new_type_var())) })
+  let body_env =
+    var_types
+    |> list.fold(env, fn(env, item) {
+      let #(var, var_type) = item
+      dict.insert(env, var, Mono(var_type))
+    })
+  use #(body_texp, sub) <- result.try(w(body_env, body))
+  let var_types =
+    var_types
+    |> list.map(fn(item) {
+      let #(_, var_type) = item
+      apply_sub(sub, var_type)
+    })
+  let abs_type = TypeApp("->", list.append(var_types, [body_texp.typ]))
+  Ok(#(TExpAbs(abs_type, vars, body_texp), sub))
+}
+
 pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   case exp {
     ExpBool(val) -> Ok(#(TExpBool(TypeApp("Bool", []), val), dict.new()))
@@ -196,28 +256,8 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
         }
         Error(_) -> Error("Unbound variable")
       }
-    ExpApp(fun, arg) -> {
-      let ret_type = TypeVar(new_type_var())
-      use #(texp1, sub1) <- result.try(w(env, fun))
-      let env1 = apply_sub_env(sub1, env)
-      use #(texp2, sub2) <- result.try(w(env1, arg))
-      let texp1_sub2 = apply_sub_texpr(sub2, texp1)
-      let type3 = TypeApp("->", [texp2.typ, ret_type])
-      use sub3 <- result.try(unify(texp1_sub2.typ, type3))
-      let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
-      let ret_type = apply_sub(sub123, ret_type)
-      let texp1_sub3 = apply_sub_texpr(sub3, texp1_sub2)
-      let texp2_sub3 = apply_sub_texpr(sub3, texp2)
-      Ok(#(TExpApp(ret_type, texp1_sub3, texp2_sub3), sub123))
-    }
-    ExpAbs(var, body) -> {
-      let var_type = TypeVar(new_type_var())
-      let body_env = dict.insert(env, var, Mono(var_type))
-      use #(body_texp, sub) <- result.try(w(body_env, body))
-      let var_type = apply_sub(sub, var_type)
-      let abs_type = TypeApp("->", [var_type, body_texp.typ])
-      Ok(#(TExpAbs(abs_type, var, body_texp), sub))
-    }
+    ExpApp(fun, args) -> w_app(env, fun, args)
+    ExpAbs(vars, body) -> w_abs(env, vars, body)
     ExpLet(var, val, body) -> {
       use #(texp1, sub1) <- result.try(w(env, val))
       let type1_gen = gen(apply_sub_env(sub1, env), texp1.typ)
@@ -256,8 +296,15 @@ pub fn pretty_print_exp(exp: Exp) -> String {
     ExpInt(val) -> int.to_string(val)
     ExpVar(var) -> var
     ExpApp(fun, arg) ->
-      "(" <> pretty_print_exp(fun) <> " " <> pretty_print_exp(arg) <> ")"
-    ExpAbs(var, exp) -> "(λ" <> var <> ". " <> pretty_print_exp(exp) <> ")"
+      case fun {
+        ExpVar(var) -> var
+        _ -> "{" <> pretty_print_exp(fun) <> "}"
+      }
+      <> "("
+      <> string.join(list.map(arg, pretty_print_exp), ", ")
+      <> ")"
+    ExpAbs(var, exp) ->
+      "fn(" <> string.join(var, ", ") <> ") {" <> pretty_print_exp(exp) <> "}"
     ExpLet(var, val, exp) ->
       "(let "
       <> var
@@ -274,22 +321,16 @@ pub fn pretty_print_texp(texp: TExp) -> String {
     TExpBool(_, val) -> bool.to_string(val)
     TExpInt(_, val) -> int.to_string(val)
     TExpVar(_, var) -> var
-    TExpApp(typ, fun, arg) ->
-      "("
-      <> pretty_print_texp(fun)
-      <> " "
-      <> pretty_print_texp(arg)
+    TExpApp(_, fun, arg) ->
+      case fun {
+        TExpVar(_, var) -> var
+        _ -> "{" <> pretty_print_texp(fun) <> "}"
+      }
+      <> "("
+      <> string.join(list.map(arg, pretty_print_texp), ", ")
       <> ")"
-      <> ": "
-      <> pretty_print_type(typ)
-    TExpAbs(typ, var, exp) ->
-      "(λ"
-      <> var
-      <> ". "
-      <> pretty_print_texp(exp)
-      <> ")"
-      <> ": "
-      <> pretty_print_type(typ)
+    TExpAbs(_, var, exp) ->
+      "fn(" <> string.join(var, ", ") <> ") {" <> pretty_print_texp(exp) <> "}"
     TExpLet(_, var, val, exp) ->
       "(let "
       <> var
@@ -353,11 +394,16 @@ pub fn normalize_vars_texp(
       let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
       #(TExpVar(new_typ, var), new_sub)
     }
-    TExpApp(typ, fun, arg) -> {
+    TExpApp(typ, fun, args) -> {
       let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
       let #(new_fun, new_sub) = normalize_vars_texp(fun, new_sub)
-      let #(new_arg, new_sub) = normalize_vars_texp(arg, new_sub)
-      #(TExpApp(new_typ, new_fun, new_arg), new_sub)
+      let #(new_args, new_sub) =
+        list.fold(args, #([], new_sub), fn(acc, arg) {
+          let #(l, new_sub) = acc
+          let #(new_arg, new_sub) = normalize_vars_texp(arg, new_sub)
+          #(list.append(l, [new_arg]), new_sub)
+        })
+      #(TExpApp(new_typ, new_fun, new_args), new_sub)
     }
     TExpAbs(typ, var, exp) -> {
       let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
