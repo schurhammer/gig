@@ -193,87 +193,6 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
-fn w_app(env: Env, fun: Exp, args: List(Exp)) -> Result(#(TExp, Sub), String) {
-  // generate type for return value
-  let ret_type = TypeVar(new_type_var())
-
-  // infer type of the function
-  use #(funexp, sub1) <- result.try(w(env, fun))
-
-  // infer type of each args
-  use #(args_sub2, sub2) <- result.try(
-    list.try_fold(args, #([], sub1), fn(acc, arg) {
-      let #(l, sub1) = acc
-
-      // create new env to use for recursive call
-      let env1 = apply_sub_env(sub1, env)
-      use #(texp2, sub2) <- result.try(w(env1, arg))
-
-      // apply new sub to the previous expressions
-      let l = list.map(l, apply_sub_texpr(sub2, _))
-
-      // add the new expression and compose the subs
-      Ok(#([texp2, ..l], compose_sub(sub2, sub1)))
-    }),
-  )
-
-  // apply new subs to the function expression
-  let funexp_sub2 = apply_sub_texpr(sub2, funexp)
-
-  // args got reversed in the fold, so reverse back
-  let args_sub2 = list.reverse(args_sub2)
-
-  // create a function type based on the args
-  let arg_types_sub2 = list.map(args_sub2, fn(x) { x.typ })
-  let app_types_sub2 = [ret_type, ..list.reverse(arg_types_sub2)]
-  let args_funtype_sub2 = TypeApp("->", app_types_sub2)
-
-  // unify the function type with the one created from the args
-  use sub3 <- result.try(unify(funexp_sub2.typ, args_funtype_sub2))
-
-  // apply sub3 to the function type and args
-  let funtype_sub3 = apply_sub_texpr(sub3, funexp_sub2)
-  let args_sub3 = list.map(args_sub2, apply_sub_texpr(sub3, _))
-
-  // apply all the substitutions to the return type
-  // TODO instead of this can I extract ther return type from funtype?
-  let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
-  let ret_type = apply_sub(sub123, ret_type)
-
-  Ok(#(TExpApp(ret_type, funtype_sub3, args_sub3), sub123))
-}
-
-fn w_abs(
-  env: Env,
-  params: List(String),
-  body: Exp,
-) -> Result(#(TExp, Sub), String) {
-  // create new typevar for each parameter
-  let param_types = list.map(params, fn(x) { #(x, TypeVar(new_type_var())) })
-
-  // insert param types into environment
-  let body_env =
-    list.fold(param_types, env, fn(env, item) {
-      let #(var, var_type) = item
-      dict.insert(env, var, Mono(var_type))
-    })
-
-  // infer body type in new environment
-  use #(body_texp, sub) <- result.try(w(body_env, body))
-
-  // update param types with substitution from body
-  let param_types =
-    list.map(param_types, fn(item) {
-      let #(_, var_type) = item
-      apply_sub(sub, var_type)
-    })
-
-  // construct function type
-  let abs_type = TypeApp("->", [body_texp.typ, ..param_types])
-
-  Ok(#(TExpAbs(abs_type, params, body_texp), sub))
-}
-
 pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   case exp {
     ExpBool(val) -> Ok(#(TExpBool(TypeApp("Bool", []), val), dict.new()))
@@ -281,36 +200,126 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
     ExpVar(var) ->
       case dict.get(env, var) {
         Ok(poly) -> {
+          // Instantiate the polymorphic type to get a monomorphic type
           let typ = inst(dict.new(), poly)
           Ok(#(TExpVar(typ, var), dict.new()))
         }
         Error(_) -> Error("Unbound variable " <> var)
       }
-    ExpApp(fun, args) -> w_app(env, fun, args)
-    ExpAbs(vars, body) -> w_abs(env, vars, body)
+    ExpApp(fun, args) -> {
+      // Generate a type variable for the return value
+      let ret_type = TypeVar(new_type_var())
+
+      // Infer the type of the function being applied
+      use #(funexp, sub1) <- result.try(w(env, fun))
+
+      // Infer the type of each argument
+      use #(args_sub2, sub2) <- result.try(
+        list.try_fold(args, #([], sub1), fn(acc, arg) {
+          let #(l, sub1) = acc
+
+          // Create a new environment with applied substitutions for recursive call
+          let env1 = apply_sub_env(sub1, env)
+          use #(texp2, sub2) <- result.try(w(env1, arg))
+
+          // Apply the new substitutions to the previously inferred expressions
+          let l = list.map(l, apply_sub_texpr(sub2, _))
+
+          // Add the new expression and compose the substitutions
+          Ok(#([texp2, ..l], compose_sub(sub2, sub1)))
+        }),
+      )
+
+      // Apply the new substitutions to the function expression
+      let funexp_sub2 = apply_sub_texpr(sub2, funexp)
+
+      // Reverse the argument list to its original order
+      let args_sub2 = list.reverse(args_sub2)
+
+      // Create a function type from the argument types
+      let arg_types_sub2 = list.map(args_sub2, fn(x) { x.typ })
+      let app_types_sub2 = [ret_type, ..list.reverse(arg_types_sub2)]
+      let args_funtype_sub2 = TypeApp("->", app_types_sub2)
+
+      // Unify the inferred function type with the created function type
+      use sub3 <- result.try(unify(funexp_sub2.typ, args_funtype_sub2))
+
+      // Apply the latest substitutions to the function type and arguments
+      let funtype_sub3 = apply_sub_texpr(sub3, funexp_sub2)
+      let args_sub3 = list.map(args_sub2, apply_sub_texpr(sub3, _))
+
+      // Apply all substitutions to the return type
+      let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
+      let ret_type = apply_sub(sub123, ret_type)
+
+      Ok(#(TExpApp(ret_type, funtype_sub3, args_sub3), sub123))
+    }
+    ExpAbs(params, body) -> {
+      // Create a new type variable for each parameter
+      let param_types =
+        list.map(params, fn(x) { #(x, TypeVar(new_type_var())) })
+
+      // Insert parameter types into the environment
+      let body_env =
+        list.fold(param_types, env, fn(env, item) {
+          let #(var, var_type) = item
+          dict.insert(env, var, Mono(var_type))
+        })
+
+      // Infer the type of the body in the new environment
+      use #(body_texp, sub) <- result.try(w(body_env, body))
+
+      // Update parameter types with substitutions from the body
+      let param_types =
+        list.map(param_types, fn(item) {
+          let #(_, var_type) = item
+          apply_sub(sub, var_type)
+        })
+
+      // Construct the function type
+      let abs_type = TypeApp("->", [body_texp.typ, ..param_types])
+
+      Ok(#(TExpAbs(abs_type, params, body_texp), sub))
+    }
     ExpLet(var, val, body) -> {
+      // Infer the type of the value being bound
       use #(texp1, sub1) <- result.try(w(env, val))
+
+      // Generalize the inferred type within the current environment
       let type1_gen = gen(apply_sub_env(sub1, env), texp1.typ)
+
+      // Insert the generalized type into the environment
       let env1 = dict.insert(env, var, type1_gen)
       let env1 = apply_sub_env(sub1, env1)
+
+      // Infer the type of the body within the updated environment
       use #(texp2, sub2) <- result.try(w(env1, body))
+
+      // Combine the substitutions and return the type of the let expression
       Ok(#(TExpLet(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
     }
     ExpIf(cond, then_exp, else_exp) -> {
+      // Infer the type of the condition, then, and else branch
       use #(texp_cond, sub_cond) <- result.try(w(env, cond))
       use #(texp_then, sub_then) <- result.try(w(env, then_exp))
       use #(texp_else, sub_else) <- result.try(w(env, else_exp))
 
+      // Combine the substitutions
       let sub = compose_sub(sub_else, compose_sub(sub_then, sub_cond))
-      let cond_type = apply_sub(sub, texp_cond.typ)
 
+      // Apply the combined substitutions to the condition, then, and else branch
+      let cond_type = apply_sub(sub, texp_cond.typ)
+      let then_type = apply_sub(sub, texp_then.typ)
+      let else_type = apply_sub(sub, texp_else.typ)
+
+      // Ensure the condition is of type Bool
       case cond_type {
         TypeApp("Bool", []) -> {
-          let then_type = apply_sub(sub, texp_then.typ)
-          let else_type = apply_sub(sub, texp_else.typ)
+          // Unify the types of the then and else branches
           use sub <- result.try(unify(then_type, else_type))
-          let if_type = apply_sub(sub, then_type)
 
+          // Apply the final substitutions to the if expression
+          let if_type = apply_sub(sub, then_type)
           let texp_cond = apply_sub_texpr(sub, texp_cond)
           let texp_then = apply_sub_texpr(sub, texp_then)
           let texp_else = apply_sub_texpr(sub, texp_else)
