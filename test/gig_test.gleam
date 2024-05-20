@@ -17,6 +17,20 @@ pub fn main() {
   gleeunit.main()
 }
 
+const bool = TypeApp("Bool", [])
+
+const int = TypeApp("Int", [])
+
+const add = #("+", Mono(TypeApp("->", [int, int, int])))
+
+const sub = #("-", Mono(TypeApp("->", [int, int, int])))
+
+const mul = #("*", Mono(TypeApp("->", [int, int, int])))
+
+const div = #("/", Mono(TypeApp("->", [int, int, int])))
+
+const eq = #("==", Poly(1, Mono(TypeApp("->", [bool, TypeVar(1), TypeVar(1)]))))
+
 pub fn infer_var_test() {
   let env = dict.from_list([#("x", Mono(TypeVar(1)))])
   let exp = ExpVar("x")
@@ -323,22 +337,6 @@ pub fn infer_zero_arg_function_def_test() {
   )
 }
 
-const bool = TypeApp("Bool", [])
-
-const int = TypeApp("Int", [])
-
-const prelude = [
-  #("==", Poly(1, Mono(TypeApp("->", [bool, TypeVar(1), TypeVar(1)])))),
-  #("*", Poly(1, Mono(TypeApp("->", [int, int, int])))),
-  #("/", Poly(1, Mono(TypeApp("->", [int, int, int])))),
-  #("+", Poly(1, Mono(TypeApp("->", [int, int, int])))),
-  #("-", Poly(1, Mono(TypeApp("->", [int, int, int])))),
-]
-
-fn without_prelude(env: Env) {
-  list.fold(prelude, env, fn(env, i) { dict.delete(env, i.0) })
-}
-
 pub fn w_module_simple_function_test() {
   let env = dict.new()
 
@@ -349,55 +347,20 @@ pub fn w_module_simple_function_test() {
   let module = Module(functions)
 
   let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ1)) = dict.get(env, "f")
+  let assert Ok(Mono(typ2)) = dict.get(env, "g")
 
-  let expected_env =
-    dict.from_list([
-      #("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))),
-      #("g", Mono(TypeApp("->", [TypeApp("Int", []), TypeVar(2)]))),
-    ])
+  typ1
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeVar(1), TypeVar(1)]))
 
-  env
-  |> without_prelude()
-  |> should.equal(expected_env)
-}
-
-pub fn w_module_recursive_function_test() {
-  let env = dict.from_list(prelude)
-
-  let functions = [
-    Function(
-      "fact",
-      ExpAbs(
-        ["n"],
-        ExpIf(
-          ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
-          ExpInt(1),
-          ExpApp(ExpVar("*"), [
-            ExpVar("n"),
-            ExpApp(ExpVar("fact"), [
-              ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
-            ]),
-          ]),
-        ),
-      ),
-    ),
-  ]
-  let module = Module(functions)
-
-  let assert Ok(env) = w_module(env, module)
-
-  let expected_env =
-    dict.from_list([
-      #("fact", Mono(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))),
-    ])
-
-  env
-  |> without_prelude()
-  |> should.equal(expected_env)
+  typ2
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeVar(1)]))
 }
 
 pub fn w_module_mutually_recursive_functions_test() {
-  let env = dict.from_list(prelude)
+  let env = dict.from_list([eq, sub])
 
   let functions = [
     Function(
@@ -430,20 +393,146 @@ pub fn w_module_mutually_recursive_functions_test() {
   let module = Module(functions)
 
   let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ1)) = dict.get(env, "is_even")
+  let assert Ok(Mono(typ2)) = dict.get(env, "is_odd")
 
-  let expected_env =
-    dict.from_list([
-      #(
-        "is_even",
-        Mono(TypeApp("->", [TypeApp("Int", []), TypeApp("Bool", [])])),
-      ),
-      #(
-        "is_odd",
-        Mono(TypeApp("->", [TypeApp("Int", []), TypeApp("Bool", [])])),
-      ),
-    ])
+  typ1
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeApp("Bool", []), TypeApp("Int", [])]))
 
-  env
-  |> without_prelude()
-  |> should.equal(expected_env)
+  typ2
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeApp("Bool", []), TypeApp("Int", [])]))
+}
+
+pub fn w_module_simple_recursive_function_test() {
+  let env = dict.from_list([add])
+
+  let functions = [
+    Function("f", ExpAbs(["x"], ExpApp(ExpVar("f"), [ExpVar("x")]))),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ)) = dict.get(env, "f")
+
+  typ
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeVar(2), TypeVar(1)]))
+}
+
+pub fn w_module_function_arg_test() {
+  let env = dict.from_list([add])
+
+  let functions = [
+    Function(
+      "f",
+      ExpAbs(["x"], ExpApp(ExpVar("+"), [ExpVar("x"), ExpVar("x")])),
+    ),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ)) = dict.get(env, "f")
+
+  typ
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
+}
+
+pub fn w_module_recursive_test() {
+  let env = dict.from_list([add])
+
+  let functions = [
+    Function(
+      "f",
+      ExpAbs(
+        ["x"],
+        ExpApp(ExpVar("f"), [ExpApp(ExpVar("+"), [ExpVar("x"), ExpVar("x")])]),
+      ),
+    ),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ)) = dict.get(env, "f")
+
+  typ
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeVar(1), TypeApp("Int", [])]))
+}
+
+pub fn w_module_recursive_2_test() {
+  let env = dict.from_list([add])
+
+  let functions = [
+    Function(
+      "f",
+      ExpAbs(
+        ["x"],
+        ExpApp(ExpVar("+"), [ExpApp(ExpVar("f"), [ExpVar("x")]), ExpVar("x")]),
+      ),
+    ),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ)) = dict.get(env, "f")
+
+  typ
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
+}
+
+pub fn w_module_recursive_3_test() {
+  let env = dict.from_list([])
+
+  let functions = [
+    Function("f", ExpAbs(["x"], ExpApp(ExpVar("g"), [ExpVar("x")]))),
+    Function("g", ExpAbs(["x"], ExpApp(ExpVar("f"), [ExpVar("x")]))),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ1)) = dict.get(env, "f")
+  let assert Ok(Mono(typ2)) = dict.get(env, "g")
+
+  typ1
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeVar(2), TypeVar(1)]))
+  typ2
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeVar(2), TypeVar(1)]))
+}
+
+pub fn w_module_recursive_function_test() {
+  let env = dict.from_list([eq, sub, mul])
+
+  let functions = [
+    Function(
+      "fact",
+      ExpAbs(
+        ["n"],
+        ExpIf(
+          ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
+          ExpInt(1),
+          ExpApp(ExpVar("*"), [
+            ExpVar("n"),
+            ExpApp(ExpVar("fact"), [
+              ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
+            ]),
+          ]),
+        ),
+      ),
+    ),
+  ]
+
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+  let assert Ok(Mono(typ)) = dict.get(env, "fact")
+
+  typ
+  |> normalize_type
+  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
 }

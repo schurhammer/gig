@@ -201,6 +201,10 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
+fn f(x) {
+  f(x + x)
+}
+
 fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   case exp {
     ExpBool(val) -> Ok(#(TExpBool(TypeApp("Bool", []), val), dict.new()))
@@ -309,28 +313,33 @@ fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
     ExpIf(cond, then_exp, else_exp) -> {
       // Infer the type of the condition, then, and else branch
       use #(texp_cond, sub_cond) <- result.try(w(env, cond))
+      let env = apply_sub_env(sub_cond, env)
+
       use #(texp_then, sub_then) <- result.try(w(env, then_exp))
+      let env = apply_sub_env(sub_then, env)
+      let texp_cond = apply_sub_texpr(sub_then, texp_cond)
+
       use #(texp_else, sub_else) <- result.try(w(env, else_exp))
-
-      // Combine the substitutions
-      let sub = compose_sub(sub_else, compose_sub(sub_then, sub_cond))
-
-      // Apply the combined substitutions to the condition, then, and else branch
-      let cond_type = apply_sub(sub, texp_cond.typ)
-      let then_type = apply_sub(sub, texp_then.typ)
-      let else_type = apply_sub(sub, texp_else.typ)
+      let texp_cond = apply_sub_texpr(sub_else, texp_cond)
+      let texp_then = apply_sub_texpr(sub_else, texp_then)
 
       // Ensure the condition is of type Bool
-      case cond_type {
+      case texp_cond.typ {
         TypeApp("Bool", []) -> {
           // Unify the types of the then and else branches
-          use sub <- result.try(unify(then_type, else_type))
+          use sub <- result.try(unify(texp_then.typ, texp_else.typ))
 
           // Apply the final substitutions to the if expression
-          let if_type = apply_sub(sub, then_type)
+          let if_type = apply_sub(sub, texp_then.typ)
           let texp_cond = apply_sub_texpr(sub, texp_cond)
           let texp_then = apply_sub_texpr(sub, texp_then)
           let texp_else = apply_sub_texpr(sub, texp_else)
+
+          let sub =
+            compose_sub(
+              sub,
+              compose_sub(sub_else, compose_sub(sub_then, sub_cond)),
+            )
 
           Ok(#(TExpIf(if_type, texp_cond, texp_then, texp_else), sub))
         }
@@ -348,57 +357,30 @@ fn extend_env(env: Env, bindings: List(#(ExpVar, Type))) -> Env {
 }
 
 pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
-  // // Create a new type variable for each function
-  // let param_types =
-  //   list.map(module.functions, fn(fun) { #(fun.name, TypeVar(new_type_var())) })
-
-  // // Insert function types into the environment
-  // let funs_env =
-  //   list.fold(param_types, env, fn(env, item) {
-  //     let #(var, var_type) = item
-  //     dict.insert(env, var, Mono(var_type))
-  //   })
-
-  // // Infer the type of each function
-  // use #(funs_sub, sub) <- result.try(
-  //   list.try_fold(module.functions, #([], dict.new()), fn(acc, fun) {
-  //     let #(l, sub) = acc
-
-  //     // Create a new environment with applied substitutions for recursive calls
-  //     let env1 = apply_sub_env(sub, funs_env)
-  //     let infer_result = w(env1, fun.body)
-
-  //     use #(texp2, sub2) <- result.try(infer_result)
-
-  //     // Apply the new substitutions to the previously inferred expressions
-  //     let l = list.map(l, fn(te) { apply_sub_texpr(sub2, te) })
-
-  //     // Add the new expression and compose the substitutions
-  //     Ok(#([texp2, ..l], compose_sub(sub2, sub)))
-  //   }),
-  // )
-
-  // // Apply the final substitutions to the environment
-  // let env = apply_sub_env(sub, funs_env)
-
-  // Step 1: Create an initial environment with type variables for each binding
+  // Create an initial environment with type variables for each binding
   let initial_env =
     list.fold(module.functions, env, fn(env, x) {
       dict.insert(env, x.name, Mono(TypeVar(new_type_var())))
     })
 
-  // Step 2: Infer types for each binding expression
   // Infer types for all binding expressions
   use #(bindings_texp, sub) <- result.try(
     list.try_fold(module.functions, #([], dict.new()), fn(acc, x) {
-      let env1 = apply_sub_env(acc.1, initial_env)
-      use #(texp, sub) <- result.try(w(env1, x.body))
-      let combined_sub = compose_sub(sub, acc.1)
-      Ok(#([#(x.name, texp), ..acc.0], combined_sub))
+      let #(l, sub) = acc
+      let env1 = apply_sub_env(sub, initial_env)
+      use #(texp, sub2) <- result.try(w(env1, x.body))
+      let combined_sub = compose_sub(sub2, sub)
+      let l =
+        list.map(l, fn(x) {
+          let #(name, texp) = x
+          let texp = apply_sub_texpr(sub, texp)
+          #(name, texp)
+        })
+      Ok(#([#(x.name, texp), ..l], combined_sub))
     }),
   )
 
-  // Step 3: Extend the environment with the inferred types of the bindings
+  // Extend the environment with the inferred types of the bindings
   let updated_env =
     extend_env(
       env,
@@ -408,18 +390,6 @@ pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
       }),
     )
   let updated_env = apply_sub_env(sub, updated_env)
-
-  // Step 4: Infer the type of the body expression using the updated environment
-  // use #(texp_body, sub_body) <- result.try(w(updated_env, body))
-
-  // Combine the substitutions from the bindings and the body
-  // let combined_sub = compose_sub(sub_body, sub)
-
-  // Apply all substitutions to the type of the body expression
-  // let rec_type = apply_sub(combined_sub, texp_body.typ)
-
-  // Return the typed recursive expression and the combined substitution
-  // Ok(#(TExpRec(rec_type, bindings_texp, texp_body), combined_sub))
 
   Ok(updated_env)
 }
@@ -617,9 +587,10 @@ pub fn normalize_vars_texp(
 }
 
 fn format_type_var(var: TypeVar) -> String {
-  let ascii = 96 + var
-  let assert Ok(s) = bit_array.to_string(<<ascii:int>>)
-  s
+  // let ascii = 96 + var
+  // let assert Ok(s) = bit_array.to_string(<<ascii:int>>)
+  // s
+  "t" <> int.to_string(var)
 }
 
 fn format_function_type(args: List(Type), result: Type) -> String {
