@@ -10,6 +10,14 @@ import unique_integer
 pub type ExpVar =
   String
 
+pub type Module {
+  Module(functions: List(Function))
+}
+
+pub type Function {
+  Function(name: ExpVar, body: Exp)
+}
+
 pub type Exp {
   ExpBool(val: Bool)
   ExpInt(val: Int)
@@ -193,7 +201,7 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
-pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
+fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   case exp {
     ExpBool(val) -> Ok(#(TExpBool(TypeApp("Bool", []), val), dict.new()))
     ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
@@ -332,6 +340,90 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   }
 }
 
+fn extend_env(env: Env, bindings: List(#(ExpVar, Type))) -> Env {
+  list.fold(bindings, env, fn(env, binding) {
+    let #(var, typ) = binding
+    dict.insert(env, var, Mono(typ))
+  })
+}
+
+pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
+  // // Create a new type variable for each function
+  // let param_types =
+  //   list.map(module.functions, fn(fun) { #(fun.name, TypeVar(new_type_var())) })
+
+  // // Insert function types into the environment
+  // let funs_env =
+  //   list.fold(param_types, env, fn(env, item) {
+  //     let #(var, var_type) = item
+  //     dict.insert(env, var, Mono(var_type))
+  //   })
+
+  // // Infer the type of each function
+  // use #(funs_sub, sub) <- result.try(
+  //   list.try_fold(module.functions, #([], dict.new()), fn(acc, fun) {
+  //     let #(l, sub) = acc
+
+  //     // Create a new environment with applied substitutions for recursive calls
+  //     let env1 = apply_sub_env(sub, funs_env)
+  //     let infer_result = w(env1, fun.body)
+
+  //     use #(texp2, sub2) <- result.try(infer_result)
+
+  //     // Apply the new substitutions to the previously inferred expressions
+  //     let l = list.map(l, fn(te) { apply_sub_texpr(sub2, te) })
+
+  //     // Add the new expression and compose the substitutions
+  //     Ok(#([texp2, ..l], compose_sub(sub2, sub)))
+  //   }),
+  // )
+
+  // // Apply the final substitutions to the environment
+  // let env = apply_sub_env(sub, funs_env)
+
+  // Step 1: Create an initial environment with type variables for each binding
+  let initial_env =
+    list.fold(module.functions, env, fn(env, x) {
+      dict.insert(env, x.name, Mono(TypeVar(new_type_var())))
+    })
+
+  // Step 2: Infer types for each binding expression
+  // Infer types for all binding expressions
+  use #(bindings_texp, sub) <- result.try(
+    list.try_fold(module.functions, #([], dict.new()), fn(acc, x) {
+      let env1 = apply_sub_env(acc.1, initial_env)
+      use #(texp, sub) <- result.try(w(env1, x.body))
+      let combined_sub = compose_sub(sub, acc.1)
+      Ok(#([#(x.name, texp), ..acc.0], combined_sub))
+    }),
+  )
+
+  // Step 3: Extend the environment with the inferred types of the bindings
+  let updated_env =
+    extend_env(
+      env,
+      list.map(bindings_texp, fn(x) {
+        let #(var, texp) = x
+        #(var, texp.typ)
+      }),
+    )
+  let updated_env = apply_sub_env(sub, updated_env)
+
+  // Step 4: Infer the type of the body expression using the updated environment
+  // use #(texp_body, sub_body) <- result.try(w(updated_env, body))
+
+  // Combine the substitutions from the bindings and the body
+  // let combined_sub = compose_sub(sub_body, sub)
+
+  // Apply all substitutions to the type of the body expression
+  // let rec_type = apply_sub(combined_sub, texp_body.typ)
+
+  // Return the typed recursive expression and the combined substitution
+  // Ok(#(TExpRec(rec_type, bindings_texp, texp_body), combined_sub))
+
+  Ok(updated_env)
+}
+
 import gleam/io
 
 pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
@@ -355,7 +447,7 @@ pub fn pretty_print_type(typ: Type) -> String {
     TypeVar(var) -> format_type_var(var)
     TypeApp(name, args) -> {
       case name == "->", args {
-        True, [ret, args] -> format_function_type(args, ret)
+        True, [ret, ..args] -> format_function_type(args, ret)
         False, _ -> format_type_app(name, args)
         _, _ -> "<err>"
       }
@@ -419,7 +511,7 @@ pub fn pretty_print_texp(texp: TExp) -> String {
           |> list.map(fn(x) { x.0 <> ": " <> pretty_print_type(x.1) })
           |> string.join(", ")
           <> ")"
-          <> ": "
+          <> " -> "
           <> pretty_print_type(ret)
         }
         _ -> "<err>)"
@@ -530,13 +622,13 @@ fn format_type_var(var: TypeVar) -> String {
   s
 }
 
-fn format_function_type(arg: Type, result: Type) -> String {
-  let arg_str = case arg {
-    TypeApp("->", _) -> "(" <> pretty_print_type(arg) <> ")"
-    _ -> pretty_print_type(arg)
-  }
-  let res_str = pretty_print_type(result)
-  arg_str <> " -> " <> res_str
+fn format_function_type(args: List(Type), result: Type) -> String {
+  "fn("
+  <> list.map(args, pretty_print_type)
+  |> string.join(", ")
+  <> ")"
+  <> " -> "
+  <> pretty_print_type(result)
 }
 
 fn format_type_app(name: String, args: List(Type)) -> String {

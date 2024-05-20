@@ -1,10 +1,12 @@
 import gleam/dict
+import gleam/list
 import gleeunit
 import gleeunit/should
 
 import lc.{
-  type TypeVar, ExpAbs, ExpApp, ExpBool, ExpIf, ExpInt, ExpLet, ExpVar, Mono,
-  TypeApp, TypeVar, infer, normalize_vars_type, pretty_print_type,
+  type Env, type TypeVar, ExpAbs, ExpApp, ExpBool, ExpIf, ExpInt, ExpLet, ExpVar,
+  Function, Module, Mono, Poly, TypeApp, TypeVar, infer, normalize_vars_type,
+  pretty_print_type, w_module,
 }
 
 fn normalize_type(t) {
@@ -254,4 +256,194 @@ pub fn infer_if_complex_test() {
   result
   |> normalize_type()
   |> should.equal(TypeApp("->", [TypeVar(1), TypeVar(1)]))
+}
+
+pub fn infer_multiple_args_test() {
+  let env =
+    dict.from_list([
+      #("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(2), TypeVar(3)]))),
+      #("x", Mono(TypeVar(4))),
+      #("y", Mono(TypeVar(5))),
+    ])
+
+  let exp = ExpApp(ExpVar("f"), [ExpVar("x"), ExpVar("y")])
+  let assert Ok(result) = infer(env, exp)
+
+  result
+  |> normalize_type()
+  |> pretty_print_type()
+  |> should.equal(
+    TypeVar(1)
+    |> pretty_print_type(),
+  )
+}
+
+pub fn infer_zero_args_test() {
+  let env = dict.from_list([#("f", Mono(TypeVar(1)))])
+
+  let exp = ExpApp(ExpVar("f"), [])
+  let assert Ok(result) = infer(env, exp)
+
+  result
+  |> normalize_type()
+  |> pretty_print_type()
+  |> should.equal(
+    TypeVar(1)
+    |> pretty_print_type(),
+  )
+}
+
+pub fn infer_multi_arg_function_def_test() {
+  let env = dict.new()
+
+  let func_def = ExpAbs(["x", "y"], ExpVar("x"))
+  let assert Ok(func_type) = infer(env, func_def)
+
+  func_type
+  |> normalize_type()
+  |> pretty_print_type()
+  |> should.equal(
+    TypeApp("->", [TypeVar(2), TypeVar(2), TypeVar(1)])
+    |> pretty_print_type(),
+  )
+}
+
+pub fn infer_zero_arg_function_def_test() {
+  let env = dict.new()
+
+  let func_def = ExpAbs([], ExpInt(42))
+  let assert Ok(func_type) = infer(env, func_def)
+
+  func_type
+  |> normalize_type()
+  |> pretty_print_type()
+  |> should.equal(
+    TypeApp("->", [TypeApp("Int", [])])
+    |> pretty_print_type(),
+  )
+}
+
+const bool = TypeApp("Bool", [])
+
+const int = TypeApp("Int", [])
+
+const prelude = [
+  #("==", Poly(1, Mono(TypeApp("->", [bool, TypeVar(1), TypeVar(1)])))),
+  #("*", Poly(1, Mono(TypeApp("->", [int, int, int])))),
+  #("/", Poly(1, Mono(TypeApp("->", [int, int, int])))),
+  #("+", Poly(1, Mono(TypeApp("->", [int, int, int])))),
+  #("-", Poly(1, Mono(TypeApp("->", [int, int, int])))),
+]
+
+fn without_prelude(env: Env) {
+  list.fold(prelude, env, fn(env, i) { dict.delete(env, i.0) })
+}
+
+pub fn w_module_simple_function_test() {
+  let env = dict.new()
+
+  let functions = [
+    Function("f", ExpAbs(["x"], ExpVar("x"))),
+    Function("g", ExpAbs(["y"], ExpInt(42))),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+
+  let expected_env =
+    dict.from_list([
+      #("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))),
+      #("g", Mono(TypeApp("->", [TypeApp("Int", []), TypeVar(2)]))),
+    ])
+
+  env
+  |> without_prelude()
+  |> should.equal(expected_env)
+}
+
+pub fn w_module_recursive_function_test() {
+  let env = dict.from_list(prelude)
+
+  let functions = [
+    Function(
+      "fact",
+      ExpAbs(
+        ["n"],
+        ExpIf(
+          ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
+          ExpInt(1),
+          ExpApp(ExpVar("*"), [
+            ExpVar("n"),
+            ExpApp(ExpVar("fact"), [
+              ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
+            ]),
+          ]),
+        ),
+      ),
+    ),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+
+  let expected_env =
+    dict.from_list([
+      #("fact", Mono(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))),
+    ])
+
+  env
+  |> without_prelude()
+  |> should.equal(expected_env)
+}
+
+pub fn w_module_mutually_recursive_functions_test() {
+  let env = dict.from_list(prelude)
+
+  let functions = [
+    Function(
+      "is_even",
+      ExpAbs(
+        ["n"],
+        ExpIf(
+          ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
+          ExpBool(True),
+          ExpApp(ExpVar("is_odd"), [
+            ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
+          ]),
+        ),
+      ),
+    ),
+    Function(
+      "is_odd",
+      ExpAbs(
+        ["n"],
+        ExpIf(
+          ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
+          ExpBool(False),
+          ExpApp(ExpVar("is_even"), [
+            ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
+          ]),
+        ),
+      ),
+    ),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = w_module(env, module)
+
+  let expected_env =
+    dict.from_list([
+      #(
+        "is_even",
+        Mono(TypeApp("->", [TypeApp("Int", []), TypeApp("Bool", [])])),
+      ),
+      #(
+        "is_odd",
+        Mono(TypeApp("->", [TypeApp("Int", []), TypeApp("Bool", [])])),
+      ),
+    ])
+
+  env
+  |> without_prelude()
+  |> should.equal(expected_env)
 }
