@@ -1,16 +1,19 @@
 import gleam/dict
-import gleam/list
 import gleeunit
 import gleeunit/should
 
 import lc.{
-  type Env, type TypeVar, ExpAbs, ExpApp, ExpBool, ExpIf, ExpInt, ExpLet, ExpVar,
-  Function, Module, Mono, Poly, TypeApp, TypeVar, infer, normalize_vars_type,
-  pretty_print_type, w_module,
+  type TypeVar, ExpAbs, ExpApp, ExpBool, ExpIf, ExpInt, ExpLet, ExpVar, Function,
+  Module, Mono, Poly, TypeApp, TypeVar, infer, normalize_vars_poly,
+  normalize_vars_type, pretty_print_type, w_module,
 }
 
 fn normalize_type(t) {
   normalize_vars_type(t, dict.new()).0
+}
+
+fn normalize_poly(t) {
+  normalize_vars_poly(t, dict.new()).0
 }
 
 pub fn main() {
@@ -26,8 +29,6 @@ const add = #("+", Mono(TypeApp("->", [int, int, int])))
 const sub = #("-", Mono(TypeApp("->", [int, int, int])))
 
 const mul = #("*", Mono(TypeApp("->", [int, int, int])))
-
-const div = #("/", Mono(TypeApp("->", [int, int, int])))
 
 const eq = #("==", Poly(1, Mono(TypeApp("->", [bool, TypeVar(1), TypeVar(1)]))))
 
@@ -347,16 +348,19 @@ pub fn w_module_simple_function_test() {
   let module = Module(functions)
 
   let assert Ok(env) = w_module(env, module)
-  let assert Ok(Mono(typ1)) = dict.get(env, "f")
-  let assert Ok(Mono(typ2)) = dict.get(env, "g")
+  let assert Ok(typ1) = dict.get(env, "f")
+  let assert Ok(typ2) = dict.get(env, "g")
 
   typ1
-  |> normalize_type
-  |> should.equal(TypeApp("->", [TypeVar(1), TypeVar(1)]))
+  |> normalize_poly
+  |> should.equal(Poly(
+    1,
+    Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))),
+  ))
 
   typ2
-  |> normalize_type
-  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeVar(1)]))
+  |> normalize_poly
+  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeApp("Int", []), TypeVar(1)]))))
 }
 
 pub fn w_module_mutually_recursive_functions_test() {
@@ -414,11 +418,14 @@ pub fn w_module_simple_recursive_function_test() {
   let module = Module(functions)
 
   let assert Ok(env) = w_module(env, module)
-  let assert Ok(Mono(typ)) = dict.get(env, "f")
+  let assert Ok(typ) = dict.get(env, "f")
 
   typ
-  |> normalize_type
-  |> should.equal(TypeApp("->", [TypeVar(2), TypeVar(1)]))
+  |> normalize_poly
+  |> should.equal(Poly(
+    1,
+    Poly(2, Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
+  ))
 }
 
 pub fn w_module_function_arg_test() {
@@ -455,11 +462,11 @@ pub fn w_module_recursive_test() {
   let module = Module(functions)
 
   let assert Ok(env) = w_module(env, module)
-  let assert Ok(Mono(typ)) = dict.get(env, "f")
+  let assert Ok(typ) = dict.get(env, "f")
 
   typ
-  |> normalize_type
-  |> should.equal(TypeApp("->", [TypeVar(1), TypeApp("Int", [])]))
+  |> normalize_poly
+  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeApp("Int", [])]))))
 }
 
 pub fn w_module_recursive_2_test() {
@@ -494,15 +501,21 @@ pub fn w_module_recursive_3_test() {
   let module = Module(functions)
 
   let assert Ok(env) = w_module(env, module)
-  let assert Ok(Mono(typ1)) = dict.get(env, "f")
-  let assert Ok(Mono(typ2)) = dict.get(env, "g")
+  let assert Ok(typ1) = dict.get(env, "f")
+  let assert Ok(typ2) = dict.get(env, "g")
 
   typ1
-  |> normalize_type
-  |> should.equal(TypeApp("->", [TypeVar(2), TypeVar(1)]))
+  |> normalize_poly
+  |> should.equal(Poly(
+    1,
+    Poly(2, Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
+  ))
   typ2
-  |> normalize_type
-  |> should.equal(TypeApp("->", [TypeVar(2), TypeVar(1)]))
+  |> normalize_poly
+  |> should.equal(Poly(
+    1,
+    Poly(2, Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
+  ))
 }
 
 pub fn w_module_recursive_function_test() {

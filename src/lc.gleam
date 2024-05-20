@@ -349,13 +349,6 @@ fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   }
 }
 
-fn extend_env(env: Env, bindings: List(#(ExpVar, Type))) -> Env {
-  list.fold(bindings, env, fn(env, binding) {
-    let #(var, typ) = binding
-    dict.insert(env, var, Mono(typ))
-  })
-}
-
 pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
   // Create an initial environment with type variables for each binding
   let initial_env =
@@ -382,14 +375,10 @@ pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
 
   // Extend the environment with the inferred types of the bindings
   let updated_env =
-    extend_env(
-      env,
-      list.map(bindings_texp, fn(x) {
-        let #(var, texp) = x
-        #(var, texp.typ)
-      }),
-    )
-  let updated_env = apply_sub_env(sub, updated_env)
+    list.fold(bindings_texp, env, fn(env, binding) {
+      let #(var, texp) = binding
+      dict.insert(env, var, gen(env, texp.typ))
+    })
 
   Ok(updated_env)
 }
@@ -534,6 +523,31 @@ pub fn normalize_vars_type(
         })
       #(TypeApp(name, result.0), result.1)
     }
+  }
+}
+
+pub fn normalize_vars_poly(
+  typ: Poly,
+  sub: dict.Dict(TypeVar, TypeVar),
+) -> #(Poly, dict.Dict(TypeVar, TypeVar)) {
+  case typ {
+    Mono(t) -> {
+      let #(m, s) = normalize_vars_type(t, sub)
+      #(Mono(m), s)
+    }
+    Poly(var, t) ->
+      case dict.get(sub, var) {
+        Ok(var) -> {
+          let #(inner, sub) = normalize_vars_poly(t, sub)
+          #(Poly(var, inner), sub)
+        }
+        Error(_) -> {
+          let new_var = dict.size(sub) + 1
+          let sub = dict.insert(sub, var, new_var)
+          let #(inner, sub) = normalize_vars_poly(t, sub)
+          #(Poly(new_var, inner), sub)
+        }
+      }
   }
 }
 
