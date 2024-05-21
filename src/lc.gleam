@@ -1,5 +1,3 @@
-import gleam/bit_array
-import gleam/bool
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -19,7 +17,6 @@ pub type Function {
 }
 
 pub type Exp {
-  ExpBool(val: Bool)
   ExpInt(val: Int)
   ExpVar(var: ExpVar)
   ExpApp(fun: Exp, args: List(Exp))
@@ -31,8 +28,15 @@ pub type Exp {
 pub type TypeVar =
   Int
 
+pub type TModule {
+  TModule(functions: List(TFunction))
+}
+
+pub type TFunction {
+  TFunction(name: ExpVar, body: TExp)
+}
+
 pub type TExp {
-  TExpBool(typ: Type, val: Bool)
   TExpInt(typ: Type, val: Int)
   TExpVar(typ: Type, var: ExpVar)
   TExpApp(typ: Type, fun: TExp, arg: List(TExp))
@@ -152,7 +156,6 @@ fn apply_sub_env(sub: Sub, env: Env) -> Env {
 
 fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
   case texp {
-    TExpBool(_, _) -> texp
     TExpInt(_, _) -> texp
     TExpVar(typ, var) -> TExpVar(apply_sub(sub, typ), var)
     TExpApp(typ, fun, arg) ->
@@ -207,7 +210,6 @@ fn f(x) {
 
 fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   case exp {
-    ExpBool(val) -> Ok(#(TExpBool(TypeApp("Bool", []), val), dict.new()))
     ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
     ExpVar(var) ->
       case dict.get(env, var) {
@@ -349,7 +351,7 @@ fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   }
 }
 
-pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
+pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   // Create an initial environment with type variables for each binding
   let initial_env =
     list.fold(module.functions, env, fn(env, x) {
@@ -357,7 +359,7 @@ pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
     })
 
   // Infer types for all binding expressions
-  use #(bindings_texp, sub) <- result.try(
+  use #(functions, sub) <- result.try(
     list.try_fold(module.functions, #([], dict.new()), fn(acc, x) {
       let #(l, sub) = acc
       let env1 = apply_sub_env(sub, initial_env)
@@ -365,25 +367,33 @@ pub fn w_module(env: Env, module: Module) -> Result(Env, String) {
       let combined_sub = compose_sub(sub2, sub)
       let l =
         list.map(l, fn(x) {
-          let #(name, texp) = x
+          let TFunction(name, texp) = x
           let texp = apply_sub_texpr(sub, texp)
-          #(name, texp)
+          TFunction(name, texp)
         })
-      Ok(#([#(x.name, texp), ..l], combined_sub))
+      Ok(#([TFunction(x.name, texp), ..l], combined_sub))
     }),
   )
 
   // Extend the environment with the inferred types of the bindings
-  let updated_env =
-    list.fold(bindings_texp, env, fn(env, binding) {
-      let #(var, texp) = binding
-      dict.insert(env, var, gen(env, texp.typ))
-    })
+  // let updated_env =
+  //   list.fold(functions, env, fn(env, fun) {
+  //     dict.insert(env, fun.name, gen(env, fun.body.typ))
+  //   })
 
-  Ok(updated_env)
+  Ok(TModule(functions: functions))
 }
 
 import gleam/io
+
+pub fn infer_module(env: Env, module: Module) -> Result(Env, String) {
+  use t <- result.try(w_module(env, module))
+
+  list.fold(t.functions, env, fn(env, fun) {
+    dict.insert(env, fun.name, gen(env, fun.body.typ))
+  })
+  |> Ok
+}
 
 pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
   result.try(w(env, exp), fn(res) {
@@ -416,7 +426,6 @@ pub fn pretty_print_type(typ: Type) -> String {
 
 pub fn pretty_print_exp(exp: Exp) -> String {
   case exp {
-    ExpBool(val) -> bool.to_string(val)
     ExpInt(val) -> int.to_string(val)
     ExpVar(var) -> var
     ExpApp(fun, arg) ->
@@ -451,7 +460,6 @@ pub fn pretty_print_exp(exp: Exp) -> String {
 
 pub fn pretty_print_texp(texp: TExp) -> String {
   case texp {
-    TExpBool(_, val) -> bool.to_string(val)
     TExpInt(_, val) -> int.to_string(val)
     TExpVar(_, var) -> var
     TExpApp(_, fun, arg) ->
@@ -556,10 +564,6 @@ pub fn normalize_vars_texp(
   sub: dict.Dict(TypeVar, TypeVar),
 ) -> #(TExp, dict.Dict(TypeVar, TypeVar)) {
   case texp {
-    TExpBool(typ, val) -> {
-      let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
-      #(TExpBool(new_typ, val), new_sub)
-    }
     TExpInt(typ, val) -> {
       let #(new_typ, new_sub) = normalize_vars_type(typ, sub)
       #(TExpInt(new_typ, val), new_sub)

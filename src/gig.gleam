@@ -1,191 +1,199 @@
-// import glance as g
-// import gleam/int
-// import gleam/io
-// import gleam/list
-// import gleam/option.{None, Some}
-// import types as t
+import glance as g
+import gleam/dict
+import gleam/int
+import gleam/io
+import gleam/list
+import gleam/option.{None, Some}
+import gleam/result
+import lc as c
 
-// type Context {
-//   Context(env: t.Env, uid: Int)
-// }
+fn module_to_core(mod: g.Module) {
+  let funs = list.map(mod.functions, fn(fun) { function_to_core(fun) })
+  c.Module(functions: funs)
+}
 
-// fn new_context() -> Context {
-//   Context([], 1)
-// }
+fn function_to_core(def: g.Definition(g.Function)) {
+  //   Function(
+  //     name: String,
+  //     publicity: Publicity,
+  //     parameters: List(FunctionParameter),
+  //     return: Option(Type),
+  //     body: List(Statement),
+  //     location: Span,
+  //   )
+  let fun = def.definition
+  let params =
+    fun.parameters
+    |> list.map(fn(param) {
+      case param.name {
+        g.Named(n) -> n
+        _ -> "_"
+      }
+    })
 
-// fn next_type_var(con: Context) -> #(Context, t.Type) {
-//   #(Context(..con, uid: con.uid + 1), t.TypeVar(con.uid))
-// }
+  let body = block_to_core(fun.body)
+  c.Function(fun.name, c.ExpAbs(params, body))
+}
 
-// fn bind_env(con: Context, name: String, bind_type: t.Poly) -> Context {
-//   let env = [#(name, bind_type), ..con.env]
+const panic_exp = c.ExpApp(c.ExpVar("panic"), [])
 
-//   env
-//   |> io.debug
+fn block_to_core(block: List(g.Statement)) -> c.Exp {
+  case block {
+    [] -> panic_exp
+    [x] ->
+      case x {
+        g.Use(..) -> todo
+        // if the assignment is in the last position we can just ignore the pattern
+        g.Assignment(value: e, ..) -> expression_to_core(e)
+        g.Expression(e) -> expression_to_core(e)
+      }
+    [x, ..xs] ->
+      case x {
+        g.Use(..) -> todo
+        g.Assignment(pattern: p, value: e, ..) -> todo
+        g.Expression(e) ->
+          c.ExpLet("_", expression_to_core(e), block_to_core(xs))
+      }
+  }
+}
 
-//   Context(..con, env: env)
-// }
+fn pattern_check_to_core(pattern: g.Pattern, subject: c.Exp) -> c.Exp {
+  case pattern {
+    g.PatternInt(value) -> {
+      let value = int_to_core(value)
+      c.ExpApp(c.ExpVar("equal"), [value, subject])
+    }
+    g.PatternVariable(_) -> c.ExpVar("True")
+    _ -> todo
+  }
+}
 
-// fn check_module(con: Context, mod: g.Module) -> Context {
-//   mod.functions
-//   |> list.fold(con, fn(con, d) { check_function(con, d.definition).0 })
-// }
+fn pattern_bind_to_core(pattern: g.Pattern, exp: c.Exp) -> c.Exp {
+  todo
+}
 
-// fn check_function(con: Context, fun: g.Function) -> #(Context, t.Expression) {
-//   let outer_env = con.env
-//   let con =
-//     fun.parameters
-//     |> list.fold(con, fn(con, param) {
-//       case param.name {
-//         g.Named(name) ->
-//           case param.type_ {
-//             Some(ann_type) -> bind_env(con, name, ann_type)
-//             None -> {
-//               let #(con, var_type) = next_type_var(con)
-//               bind_env(con, name, var_type)
-//             }
-//           }
-//         g.Discarded(_) -> con
-//       }
-//     })
+fn int_to_core(value: String) {
+  let assert Ok(n) = int.parse(value)
+  c.ExpInt(n)
+}
 
-//   let #(con, ret_type_ann) = case fun.return {
-//     Some(ret_type) -> #(con, ret_type)
-//     None -> next_type_var(con)
-//   }
+fn expression_to_core(e: g.Expression) -> c.Exp {
+  case e {
+    g.Int(n) -> int_to_core(n)
+    g.Variable(s) -> c.ExpVar(s)
+    g.BinaryOperator(name, left, right) ->
+      case name {
+        g.Eq ->
+          c.ExpApp(c.ExpVar("equal"), [
+            expression_to_core(left),
+            expression_to_core(right),
+          ])
+        g.AddInt ->
+          c.ExpApp(c.ExpVar("add_int"), [
+            expression_to_core(left),
+            expression_to_core(right),
+          ])
+        g.SubInt ->
+          c.ExpApp(c.ExpVar("sub_int"), [
+            expression_to_core(left),
+            expression_to_core(right),
+          ])
+        g.MultInt ->
+          c.ExpApp(c.ExpVar("mul_int"), [
+            expression_to_core(left),
+            expression_to_core(right),
+          ])
+        g.DivInt ->
+          c.ExpApp(c.ExpVar("div_int"), [
+            expression_to_core(left),
+            expression_to_core(right),
+          ])
+        _ -> todo
+      }
+    g.Call(function, arguments) ->
+      c.ExpApp(
+        expression_to_core(function),
+        list.map(arguments, fn(x) { expression_to_core(x.item) }),
+      )
+    g.Case(subjects, clauses) -> {
+      let exp =
+        clauses
+        |> list.reverse
+        |> list.fold(panic_exp, fn(else_exp, clause) {
+          let cond =
+            list.map(clause.patterns, fn(patterns) {
+              list.index_map(patterns, fn(pattern, i) {
+                let subject = c.ExpVar("SUBJECT" <> int.to_string(i))
+                pattern_check_to_core(pattern, subject)
+              })
+              |> list.reduce(fn(a, b) { c.ExpApp(c.ExpVar("and_bool"), [a, b]) })
+              |> result.unwrap(c.ExpVar("False"))
+            })
+            |> list.reduce(fn(a, b) { c.ExpApp(c.ExpVar("or_bool"), [a, b]) })
+            |> result.unwrap(c.ExpVar("False"))
+          let then_exp = expression_to_core(clause.body)
+          c.ExpIf(cond, then_exp, else_exp)
+        })
+      // TODO bind pattern
+      list.index_fold(subjects, exp, fn(exp, sub, i) {
+        c.ExpLet("SUBJECT" <> int.to_string(i), expression_to_core(sub), exp)
+      })
+    }
+    _ -> {
+      io.println_error("Not Implemented:")
+      io.debug(e)
+      todo
+    }
+  }
+}
 
-//   let #(_, ret_type) =
-//     fun.body
-//     |> list.fold(#(con, ret_type_ann), fn(con, d) { check_statement(con.0, d) })
+const bool = c.TypeApp("Bool", [])
 
-//   let ret_type = unify(ret_type_ann, ret_type)
+const int = c.TypeApp("Int", [])
 
-//   // add the function to the context
-//   // TODO it should be a function type not just the return type
-//   #(bind_env(Context(..con, env: outer_env), fun.name, ret_type), ret_type)
-// }
+const prelude = [
+  #("panic", c.Poly(1, c.Mono(c.TypeApp("->", [c.TypeVar(1)])))),
+  #(
+    "equal",
+    c.Poly(1, c.Mono(c.TypeApp("->", [bool, c.TypeVar(1), c.TypeVar(1)]))),
+  ),
+  // bool
+  #("True", c.Mono(bool)), #("False", c.Mono(bool)),
+  #("and_bool", c.Mono(c.TypeApp("->", [bool, bool, bool]))),
+  #("or_bool", c.Mono(c.TypeApp("->", [bool, bool, bool]))),
+  // int
+  #("add_int", c.Mono(c.TypeApp("->", [int, int, int]))),
+  #("sub_int", c.Mono(c.TypeApp("->", [int, int, int]))),
+  #("mul_int", c.Mono(c.TypeApp("->", [int, int, int]))),
+  #("div_int", c.Mono(c.TypeApp("->", [int, int, int]))),
+]
 
-// fn check_statement(con: Context, sta: g.Statement) -> #(Context, t.Expression) {
-//   case sta {
-//     // g.Assignment(_kind, pat, ann, exp) -> {
-//     //   // find the type of the expression
-//     //   let expr_type = check_expression(con, exp)
-//     //   // make sure the expression matches the type annotation
-//     //   case ann {
-//     //     Some(ann) -> {
-//     //       let assert True = expr_type == ann
-//     //       Nil
-//     //     }
-//     //     None -> Nil
-//     //   }
-//     //   // add variables to context based on the pattern
-//     //   case pat {
-//     //     g.PatternVariable(name) -> #(bind_env(con, name, expr_type), expr_type)
-//     //     _ -> todo
-//     //   }
-//     // }
-//     g.Expression(exp) -> {
-//       #(con, check_expression(con, exp))
-//     }
-//     g.Use(..) -> todo
-//   }
-// }
-
-// fn find_in_context(con: Context, name: String) -> Result(t.Poly, Nil) {
-//   con.env
-//   |> list.find_map(fn(x) {
-//     case x {
-//       #(n, t) if n == name -> Ok(t)
-//       _ -> Error(Nil)
-//     }
-//   })
-// }
-
-// // TODO unify needs to alter the env too
-// fn unify(a: g.Type, b: g.Type) -> g.Type {
-//   case a, b {
-//     a, b if a == b -> a
-//     g.VariableType(_), b -> b
-//     a, g.VariableType(_) -> a
-//     _, _ -> {
-//       io.debug(#("failed to unify", a, b))
-//       panic
-//     }
-//   }
-// }
-
-// fn check_expression(con: Context, exp: g.Expression) -> t.Expression {
-//   case exp {
-//     g.Int(x) -> {
-//       let assert Ok(x) = int.parse(x)
-//       t.Int(t.TypeFun("Int", []), x)
-//     }
-//     g.String(x) -> t.String(t.TypeFun("String", []), x)
-//     g.Variable(name) -> {
-//       let assert Ok(typ) = find_in_context(con, name)
-//       t.Variable(t.inst(typ), name)
-//     }
-//     g.Call(fun, args) -> {
-//       let fun = check_expression(con, fun)
-//       let args = list.map(args, fn(arg) { check_expression(con, arg.item) })
-
-//       let subs = case fun.typ {
-//         t.TypeFun(name, params) -> {
-//           let assert Ok(zip) = list.strict_zip(params, args)
-//           let sub =
-//             list.fold(zip, [], fn(acc, pair) {
-//               let #(param_type, arg_type) = pair
-//               t.compose_sub(acc, t.mgu(param_type, arg_type.typ))
-//             })
-//           // t.Call(
-//           //   t.Function(apply_sub(sub, return_type), apply_sub(sub, param_types)),
-//           //   arg_types,
-//           // )
-//         }
-//         _ -> {
-//           io.debug(#("Expected a function type, but got", fun))
-//           panic
-//         }
-//       }
-//       todo
-//     }
-//     g.BinaryOperator(op, left, right) -> {
-//       check_expression(
-//         con,
-//         g.Call(g.Variable(bin_op_name(op)), [
-//           g.Field(option.None, left),
-//           g.Field(option.None, right),
-//         ]),
-//       )
-//     }
-//     _ -> {
-//       io.println_error("\n\ncontext\n---")
-//       io.debug(con)
-//       io.println_error("\nexpression\n---")
-//       io.debug(exp)
-//       io.println_error("\n")
-//       todo
-//     }
-//   }
-// }
-
-// fn bin_op_name(op: g.BinaryOperator) -> String {
-//   case op {
-//     g.AddInt -> "add_int"
-//     _ -> todo
-//   }
-// }
-
-// pub fn main() {
-//   let assert Ok(module) =
-//     g.module(
-//       "
-//       fn f(x, y) {
-//         x + 6
-//       }
-//   ",
-//     )
-//   check_module(new_context(), module)
-//   |> io.debug
-//   Nil
-// }
+pub fn main() {
+  let assert Ok(module) =
+    g.module(
+      "
+      fn fact(n) {
+        case n {
+          0 -> 1
+          n -> n * fact(n - 1)
+        }
+      }
+  ",
+    )
+  let core = module_to_core(module)
+  io.debug(core)
+  io.println_error("\n")
+  list.each(core.functions, fn(fun) {
+    fun.body
+    |> c.pretty_print_exp
+    |> io.println_error()
+  })
+  io.println_error("\n")
+  let assert Ok(res) = c.w_module(dict.from_list(prelude), core)
+  list.each(res.functions, fn(fun) {
+    fun.body
+    |> c.pretty_print_texp
+    |> io.println_error()
+  })
+  Nil
+}

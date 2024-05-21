@@ -3,9 +3,9 @@ import gleeunit
 import gleeunit/should
 
 import lc.{
-  type TypeVar, ExpAbs, ExpApp, ExpBool, ExpIf, ExpInt, ExpLet, ExpVar, Function,
-  Module, Mono, Poly, TypeApp, TypeVar, infer, normalize_vars_poly,
-  normalize_vars_type, pretty_print_type, w_module,
+  type TypeVar, ExpAbs, ExpApp, ExpIf, ExpInt, ExpLet, ExpVar, Function, Module,
+  Mono, Poly, TypeApp, TypeVar, infer, infer_module, normalize_vars_poly,
+  normalize_vars_type, pretty_print_type,
 }
 
 fn normalize_type(t) {
@@ -23,6 +23,10 @@ pub fn main() {
 const bool = TypeApp("Bool", [])
 
 const int = TypeApp("Int", [])
+
+const true = #("True", Mono(bool))
+
+const false = #("False", Mono(bool))
 
 const add = #("+", Mono(TypeApp("->", [int, int, int])))
 
@@ -224,16 +228,16 @@ pub fn infer_compose_test() {
 }
 
 pub fn infer_if_true_test() {
-  let env = dict.new()
-  let exp = ExpIf(ExpBool(True), ExpInt(1), ExpInt(0))
+  let env = dict.from_list([true, false])
+  let exp = ExpIf(ExpVar("True"), ExpInt(1), ExpInt(0))
   let assert Ok(result) = infer(env, exp)
   result
   |> should.equal(TypeApp("Int", []))
 }
 
 pub fn infer_if_false_test() {
-  let env = dict.new()
-  let exp = ExpIf(ExpBool(False), ExpInt(1), ExpInt(0))
+  let env = dict.from_list([true, false])
+  let exp = ExpIf(ExpVar("False"), ExpInt(1), ExpInt(0))
   let assert Ok(result) = infer(env, exp)
   result
   |> should.equal(TypeApp("Int", []))
@@ -248,8 +252,8 @@ pub fn infer_if_type_mismatch_test() {
 }
 
 pub fn infer_if_branch_type_mismatch_test() {
-  let env = dict.new()
-  let exp = ExpIf(ExpBool(True), ExpInt(1), ExpBool(False))
+  let env = dict.from_list([true, false])
+  let exp = ExpIf(ExpVar("True"), ExpInt(1), ExpVar("False"))
   let result = infer(env, exp)
   result
   |> should.equal(Error("Types do not unify"))
@@ -347,7 +351,7 @@ pub fn w_module_simple_function_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ1) = dict.get(env, "f")
   let assert Ok(typ2) = dict.get(env, "g")
 
@@ -364,7 +368,7 @@ pub fn w_module_simple_function_test() {
 }
 
 pub fn w_module_mutually_recursive_functions_test() {
-  let env = dict.from_list([eq, sub])
+  let env = dict.from_list([eq, sub, true, false])
 
   let functions = [
     Function(
@@ -373,7 +377,7 @@ pub fn w_module_mutually_recursive_functions_test() {
         ["n"],
         ExpIf(
           ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
-          ExpBool(True),
+          ExpVar("True"),
           ExpApp(ExpVar("is_odd"), [
             ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
           ]),
@@ -386,7 +390,7 @@ pub fn w_module_mutually_recursive_functions_test() {
         ["n"],
         ExpIf(
           ExpApp(ExpVar("=="), [ExpVar("n"), ExpInt(0)]),
-          ExpBool(False),
+          ExpVar("False"),
           ExpApp(ExpVar("is_even"), [
             ExpApp(ExpVar("-"), [ExpVar("n"), ExpInt(1)]),
           ]),
@@ -396,7 +400,7 @@ pub fn w_module_mutually_recursive_functions_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ1)) = dict.get(env, "is_even")
   let assert Ok(Mono(typ2)) = dict.get(env, "is_odd")
 
@@ -417,7 +421,7 @@ pub fn w_module_simple_recursive_function_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ) = dict.get(env, "f")
 
   typ
@@ -439,7 +443,7 @@ pub fn w_module_function_arg_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ)) = dict.get(env, "f")
 
   typ
@@ -461,7 +465,7 @@ pub fn w_module_recursive_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ) = dict.get(env, "f")
 
   typ
@@ -483,7 +487,7 @@ pub fn w_module_recursive_2_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ)) = dict.get(env, "f")
 
   typ
@@ -500,7 +504,7 @@ pub fn w_module_recursive_3_test() {
   ]
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ1) = dict.get(env, "f")
   let assert Ok(typ2) = dict.get(env, "g")
 
@@ -542,7 +546,7 @@ pub fn w_module_recursive_function_test() {
 
   let module = Module(functions)
 
-  let assert Ok(env) = w_module(env, module)
+  let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ)) = dict.get(env, "fact")
 
   typ
