@@ -188,7 +188,7 @@ fn compose_sub(sub1: Sub, sub2: Sub) -> Sub {
   dict.fold(sub1, sub2_applied, fn(acc, var, typ) { dict.insert(acc, var, typ) })
 }
 
-fn gen(env: Env, typ: Type) -> Poly {
+pub fn gen(env: Env, typ: Type) -> Poly {
   let vars =
     ftv_typing(env, Mono(typ))
     |> list.unique()
@@ -206,7 +206,7 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
-fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
+pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   case exp {
     ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
     ExpVar(var) ->
@@ -366,6 +366,7 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
       let env1 = apply_sub_env(sub1, initial_env)
       use #(texp, sub2) <- result.try(w(env1, fun.body))
       // should this be unify?
+      // also we should probably generalise at some point?
       let sub2 = dict.insert(sub2, var, texp.typ)
       let combined_sub = compose_sub(sub2, sub1)
       let l =
@@ -379,33 +380,6 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   )
 
   Ok(TModule(functions: functions))
-}
-
-import gleam/io
-
-pub fn infer_module(env: Env, module: Module) -> Result(Env, String) {
-  use t <- result.try(w_module(env, module))
-
-  list.fold(t.functions, env, fn(env, fun) {
-    dict.insert(env, fun.name, gen(env, fun.body.typ))
-  })
-  |> Ok
-}
-
-pub fn infer(env: Env, exp: Exp) -> Result(Type, String) {
-  result.try(w(env, exp), fn(res) {
-    let #(texpr, _sub) = res
-    io.println_error("")
-    io.println_error(
-      texpr
-      |> normalize_vars_texp(dict.new())
-      |> fn(x) {
-        let #(x, _) = x
-        pretty_print_texp(x)
-      },
-    )
-    Ok(texpr.typ)
-  })
 }
 
 pub fn pretty_print_type(typ: Type) -> String {

@@ -1,11 +1,14 @@
 import gleam/dict
+import gleam/io
+import gleam/list
+import gleam/result
 import gleeunit
 import gleeunit/should
 
 import core.{
   type TypeVar, ExpAbs, ExpApp, ExpIf, ExpInt, ExpLet, ExpVar, Function, Module,
-  Mono, Poly, TypeApp, TypeVar, infer, infer_module, normalize_vars_poly,
-  normalize_vars_type, pretty_print_type,
+  Mono, Poly, TypeApp, TypeVar, normalize_vars_poly, normalize_vars_type,
+  pretty_print_type,
 }
 
 fn normalize_type(t) {
@@ -14,6 +17,31 @@ fn normalize_type(t) {
 
 fn normalize_poly(t) {
   normalize_vars_poly(t, dict.new()).0
+}
+
+fn infer_module(env: core.Env, module: core.Module) -> Result(core.Env, String) {
+  use t <- result.try(core.w_module(env, module))
+
+  list.fold(t.functions, env, fn(env, fun) {
+    dict.insert(env, fun.name, core.gen(env, fun.body.typ))
+  })
+  |> Ok
+}
+
+fn infer(env: core.Env, exp: core.Exp) -> Result(core.Type, String) {
+  result.try(core.w(env, exp), fn(res) {
+    let #(texpr, _sub) = res
+    io.println_error("")
+    io.println_error(
+      texpr
+      |> core.normalize_vars_texp(dict.new())
+      |> fn(x) {
+        let #(x, _) = x
+        core.pretty_print_texp(x)
+      },
+    )
+    Ok(texpr.typ)
+  })
 }
 
 pub fn main() {
