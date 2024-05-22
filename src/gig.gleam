@@ -50,7 +50,8 @@ fn block_to_core(block: List(g.Statement)) -> c.Exp {
     [x, ..xs] ->
       case x {
         g.Use(..) -> todo
-        g.Assignment(pattern: p, value: e, ..) -> todo
+        g.Assignment(pattern: p, value: e, ..) ->
+          pattern_bind_to_core(p, expression_to_core(e), block_to_core(xs))
         g.Expression(e) ->
           c.ExpLet("_", expression_to_core(e), block_to_core(xs))
       }
@@ -183,7 +184,8 @@ pub fn main() {
     g.module(
       "
       fn fact(n) {
-        case n {
+        let m = n
+        case m {
           0 | 1 -> 1
           x -> x * fact(x - 1)
         }
