@@ -2,7 +2,7 @@ import gleam/dict
 import gleeunit
 import gleeunit/should
 
-import lc.{
+import core.{
   type TypeVar, ExpAbs, ExpApp, ExpIf, ExpInt, ExpLet, ExpVar, Function, Module,
   Mono, Poly, TypeApp, TypeVar, infer, infer_module, normalize_vars_poly,
   normalize_vars_type, pretty_print_type,

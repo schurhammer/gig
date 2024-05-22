@@ -1,3 +1,4 @@
+import core as c
 import glance as g
 import gleam/dict
 import gleam/int
@@ -5,7 +6,6 @@ import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
-import lc as c
 
 fn module_to_core(mod: g.Module) {
   let funs = list.map(mod.functions, fn(fun) { function_to_core(fun) })
@@ -13,14 +13,6 @@ fn module_to_core(mod: g.Module) {
 }
 
 fn function_to_core(def: g.Definition(g.Function)) {
-  //   Function(
-  //     name: String,
-  //     publicity: Publicity,
-  //     parameters: List(FunctionParameter),
-  //     return: Option(Type),
-  //     body: List(Statement),
-  //     location: Span,
-  //   )
   let fun = def.definition
   let params =
     fun.parameters
