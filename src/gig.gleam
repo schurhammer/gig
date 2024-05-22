@@ -68,8 +68,12 @@ fn pattern_check_to_core(pattern: g.Pattern, subject: c.Exp) -> c.Exp {
   }
 }
 
-fn pattern_bind_to_core(pattern: g.Pattern, exp: c.Exp) -> c.Exp {
-  todo
+fn pattern_bind_to_core(pattern: g.Pattern, subject: c.Exp, exp: c.Exp) -> c.Exp {
+  case pattern {
+    g.PatternInt(_) -> exp
+    g.PatternVariable(x) -> c.ExpLet(x, subject, exp)
+    _ -> todo
+  }
 }
 
 fn int_to_core(value: String) {
@@ -118,25 +122,31 @@ fn expression_to_core(e: g.Expression) -> c.Exp {
     g.Case(subjects, clauses) -> {
       let exp =
         clauses
+        // unwrap alternative case patterns into multiple clauses
+        // we do this because they bind variables differently
+        |> list.flat_map(fn(clause: g.Clause) {
+          list.map(clause.patterns, fn(patterns) { #(patterns, clause.body) })
+        })
         |> list.reverse
         |> list.fold(panic_exp, fn(else_exp, clause) {
+          let #(patterns, body) = clause
           let cond =
-            list.map(clause.patterns, fn(patterns) {
-              list.index_map(patterns, fn(pattern, i) {
-                let subject = c.ExpVar("SUBJECT" <> int.to_string(i))
-                pattern_check_to_core(pattern, subject)
-              })
-              |> list.reduce(fn(a, b) { c.ExpApp(c.ExpVar("and_bool"), [a, b]) })
-              |> result.unwrap(c.ExpVar("False"))
+            list.index_map(patterns, fn(pattern, i) {
+              let subject = c.ExpVar("S" <> int.to_string(i))
+              pattern_check_to_core(pattern, subject)
             })
-            |> list.reduce(fn(a, b) { c.ExpApp(c.ExpVar("or_bool"), [a, b]) })
+            |> list.reduce(fn(a, b) { c.ExpApp(c.ExpVar("and_bool"), [a, b]) })
             |> result.unwrap(c.ExpVar("False"))
-          let then_exp = expression_to_core(clause.body)
+          let then_exp =
+            list.index_fold(patterns, expression_to_core(body), fn(exp, pat, i) {
+              let subject = c.ExpVar("S" <> int.to_string(i))
+              pattern_bind_to_core(pat, subject, exp)
+            })
+
           c.ExpIf(cond, then_exp, else_exp)
         })
-      // TODO bind pattern
       list.index_fold(subjects, exp, fn(exp, sub, i) {
-        c.ExpLet("SUBJECT" <> int.to_string(i), expression_to_core(sub), exp)
+        c.ExpLet("S" <> int.to_string(i), expression_to_core(sub), exp)
       })
     }
     _ -> {
@@ -174,8 +184,8 @@ pub fn main() {
       "
       fn fact(n) {
         case n {
-          0 -> 1
-          n -> n * fact(n - 1)
+          0 | 1 -> 1
+          x -> x * fact(x - 1)
         }
       }
   ",
