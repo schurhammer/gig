@@ -104,10 +104,10 @@ pub fn infer_function_composition_test() {
   |> should.equal(Error("Unbound variable x"))
 }
 
-pub fn infer_poly_test() {
+pub fn infer_poly_fail_1_test() {
   let env = dict.new()
   let id = ExpAbs(["x"], ExpVar("x"))
-  let assert Ok(id_type) =
+  let res =
     infer(
       env,
       ExpLet(
@@ -119,16 +119,32 @@ pub fn infer_poly_test() {
       ),
     )
 
-  id_type
-  |> normalize_type()
-  |> pretty_print_type()
-  |> should.equal(
-    TypeApp("Int", [])
-    |> pretty_print_type(),
-  )
+  res
+  |> should.equal(Error("Occurs check failed"))
 }
 
-pub fn infer_poly_fail_test() {
+pub fn infer_poly_fail_2_test() {
+  let env = dict.new()
+  let id = ExpAbs(["x"], ExpVar("x"))
+  let res =
+    infer(
+      env,
+      ExpLet(
+        "id",
+        id,
+        ExpLet(
+          "_",
+          ExpApp(ExpVar("id"), [ExpInt(1)]),
+          ExpApp(ExpVar("id"), [ExpVar("id")]),
+        ),
+      ),
+    )
+
+  res
+  |> should.equal(Error("Types do not unify"))
+}
+
+pub fn infer_poly_fail_3_test() {
   let env = dict.new()
   // \id. id id 1 (\x.x)
 

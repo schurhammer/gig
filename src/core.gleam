@@ -300,10 +300,12 @@ fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       use #(texp1, sub1) <- result.try(w(env, val))
 
       // Generalize the inferred type within the current environment
-      let type1_gen = gen(apply_sub_env(sub1, env), texp1.typ)
+      // let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
 
-      // Insert the generalized type into the environment
-      let env1 = dict.insert(env, var, type1_gen)
+      // Gleam does not generalize types here
+      let type1 = Mono(texp1.typ)
+
+      let env1 = dict.insert(env, var, type1)
       let env1 = apply_sub_env(sub1, env1)
 
       // Infer the type of the body within the updated environment
