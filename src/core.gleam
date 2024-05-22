@@ -358,7 +358,6 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
       dict.insert(env, fun.name, Mono(TypeVar(var)))
     })
 
-  io.debug(initial_env)
   // Infer types for all binding expressions
   use #(functions, sub) <- result.try(
     list.try_fold(funs, #([], dict.new()), fn(acc, x) {
@@ -369,10 +368,6 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
       // should this be unify?
       let sub2 = dict.insert(sub2, var, texp.typ)
       let combined_sub = compose_sub(sub2, sub1)
-      io.debug(#("texp", texp))
-      io.debug(#("sub1", sub1))
-      io.debug(#("sub2", sub2))
-      io.debug(#("combined_sub", combined_sub))
       let l =
         list.map(l, fn(x) {
           let TFunction(name, texp) = x
