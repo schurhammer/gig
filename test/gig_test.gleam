@@ -373,10 +373,7 @@ pub fn w_module_simple_function_test() {
 
   typ1
   |> normalize_poly
-  |> should.equal(Poly(
-    1,
-    Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))),
-  ))
+  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))))
 
   typ2
   |> normalize_poly
@@ -568,4 +565,29 @@ pub fn w_module_recursive_function_test() {
   typ
   |> normalize_type
   |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
+}
+
+pub fn w_module_simple_function_2_test() {
+  let env = dict.new()
+
+  let functions = [
+    Function("f", ExpAbs(["x"], ExpVar("x"))),
+    Function("g", ExpAbs([], ExpVar("f"))),
+  ]
+  let module = Module(functions)
+
+  let assert Ok(env) = infer_module(env, module)
+  let assert Ok(typ1) = dict.get(env, "f")
+  let assert Ok(typ2) = dict.get(env, "g")
+
+  typ1
+  |> normalize_poly
+  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))))
+
+  typ2
+  |> normalize_poly
+  |> should.equal(Poly(
+    1,
+    Mono(TypeApp("->", [TypeApp("->", [TypeVar(1), TypeVar(1)])])),
+  ))
 }

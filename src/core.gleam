@@ -189,7 +189,9 @@ fn compose_sub(sub1: Sub, sub2: Sub) -> Sub {
 }
 
 fn gen(env: Env, typ: Type) -> Poly {
-  let vars = ftv_typing(env, Mono(typ))
+  let vars =
+    ftv_typing(env, Mono(typ))
+    |> list.unique()
   list.fold(vars, Mono(typ), fn(acc, var) { Poly(var, acc) })
 }
 
@@ -202,10 +204,6 @@ fn inst(sub: Sub, poly: Poly) -> Type {
       inst(sub, poly)
     }
   }
-}
-
-fn f(x) {
-  f(x + x)
 }
 
 fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
@@ -299,9 +297,6 @@ fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       // Infer the type of the value being bound
       use #(texp1, sub1) <- result.try(w(env, val))
 
-      // Generalize the inferred type within the current environment
-      // let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
-
       // Gleam does not generalize types here
       let type1 = Mono(texp1.typ)
 
@@ -355,33 +350,38 @@ fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
 
 pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   // Create an initial environment with type variables for each binding
+  let funs = list.map(module.functions, fn(x) { #(new_type_var(), x) })
+
   let initial_env =
-    list.fold(module.functions, env, fn(env, x) {
-      dict.insert(env, x.name, Mono(TypeVar(new_type_var())))
+    list.fold(funs, env, fn(env, x) {
+      let #(var, fun) = x
+      dict.insert(env, fun.name, Mono(TypeVar(var)))
     })
 
+  io.debug(initial_env)
   // Infer types for all binding expressions
   use #(functions, sub) <- result.try(
-    list.try_fold(module.functions, #([], dict.new()), fn(acc, x) {
-      let #(l, sub) = acc
-      let env1 = apply_sub_env(sub, initial_env)
-      use #(texp, sub2) <- result.try(w(env1, x.body))
-      let combined_sub = compose_sub(sub2, sub)
+    list.try_fold(funs, #([], dict.new()), fn(acc, x) {
+      let #(var, fun) = x
+      let #(l, sub1) = acc
+      let env1 = apply_sub_env(sub1, initial_env)
+      use #(texp, sub2) <- result.try(w(env1, fun.body))
+      // should this be unify?
+      let sub2 = dict.insert(sub2, var, texp.typ)
+      let combined_sub = compose_sub(sub2, sub1)
+      io.debug(#("texp", texp))
+      io.debug(#("sub1", sub1))
+      io.debug(#("sub2", sub2))
+      io.debug(#("combined_sub", combined_sub))
       let l =
         list.map(l, fn(x) {
           let TFunction(name, texp) = x
-          let texp = apply_sub_texpr(sub, texp)
+          let texp = apply_sub_texpr(sub2, texp)
           TFunction(name, texp)
         })
-      Ok(#([TFunction(x.name, texp), ..l], combined_sub))
+      Ok(#([TFunction(fun.name, texp), ..l], combined_sub))
     }),
   )
-
-  // Extend the environment with the inferred types of the bindings
-  // let updated_env =
-  //   list.fold(functions, env, fn(env, fun) {
-  //     dict.insert(env, fun.name, gen(env, fun.body.typ))
-  //   })
 
   Ok(TModule(functions: functions))
 }
