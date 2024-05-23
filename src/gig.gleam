@@ -165,6 +165,7 @@ const prelude = [
   #("sub_int", c.Mono(c.TypeFun(int, [int, int]))),
   #("mul_int", c.Mono(c.TypeFun(int, [int, int]))),
   #("div_int", c.Mono(c.TypeFun(int, [int, int]))),
+  #("print_int", c.Mono(c.TypeFun(int, [int]))),
 ]
 
 pub fn main() {
@@ -175,8 +176,12 @@ pub fn main() {
         let m = n
         case m {
           0 | 1 -> 1
-          x -> x * fact(x - 1)
+          n -> n * fact(n - 1)
         }
+      }
+      fn main() {
+        print_int(fact(6))
+        0
       }
   ",
     )

@@ -370,7 +370,119 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
   }
 }
 
+fn rename_var(replace: String, with: String, in: Exp) -> Exp {
+  case in {
+    ExpInt(_) -> in
+    ExpVar(var) ->
+      case var == replace {
+        True -> ExpVar(with)
+        False -> in
+      }
+    ExpApp(fun, args) -> {
+      let fun = rename_var(replace, with, fun)
+      let args = list.map(args, rename_var(replace, with, _))
+      ExpApp(fun, args)
+    }
+    ExpAbs(vars, exp) ->
+      case list.contains(vars, replace) {
+        True -> in
+        False -> ExpAbs(vars, rename_var(replace, with, exp))
+      }
+    ExpLet(var, val, exp) ->
+      case var == replace {
+        True -> ExpLet(var, rename_var(replace, with, val), exp)
+        False ->
+          ExpLet(
+            var,
+            rename_var(replace, with, val),
+            rename_var(replace, with, exp),
+          )
+      }
+    ExpIf(cond, then_exp, else_exp) ->
+      ExpIf(
+        rename_var(replace, with, cond),
+        rename_var(replace, with, then_exp),
+        rename_var(replace, with, else_exp),
+      )
+  }
+}
+
+fn unshadow(taken: List(String), i: Int, exp: Exp) {
+  case exp {
+    ExpInt(_) -> exp
+    ExpVar(_) -> exp
+    ExpApp(fun, args) -> {
+      let fun = unshadow(taken, i, fun)
+      let args = list.map(args, unshadow(taken, i, _))
+      ExpApp(fun, args)
+    }
+    ExpAbs(vars, exp) -> {
+      let #(_, _, vars, exp) =
+        list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
+          let #(taken, i, vars, exp) = acc
+          case list.contains(taken, var) {
+            True -> {
+              let new_var = "V" <> int.to_string(i) <> "_" <> var
+              let i = i + 1
+              let exp = rename_var(var, new_var, exp)
+              let var = new_var
+              let taken = [var, ..taken]
+              let exp = unshadow(taken, i, exp)
+              let vars = [var, ..vars]
+              #(taken, i, vars, exp)
+            }
+            False -> {
+              let taken = [var, ..taken]
+              let exp = unshadow(taken, i, exp)
+              let vars = [var, ..vars]
+              #(taken, i, vars, exp)
+            }
+          }
+        })
+      let vars = list.reverse(vars)
+      ExpAbs(vars, exp)
+    }
+    ExpLet(var, val, exp) ->
+      case list.contains(taken, var) {
+        True -> {
+          let val = unshadow(taken, i, val)
+          let new_var = "V" <> int.to_string(i) <> "_" <> var
+          let i = i + 1
+          let exp = rename_var(var, new_var, exp)
+          let var = new_var
+          let taken = [var, ..taken]
+          let exp = unshadow(taken, i, exp)
+          ExpLet(var, val, exp)
+        }
+        False -> {
+          let val = unshadow(taken, i, val)
+          let taken = [var, ..taken]
+          let exp = unshadow(taken, i, exp)
+          ExpLet(var, val, exp)
+        }
+      }
+    ExpIf(cond, then_exp, else_exp) -> {
+      let cond = unshadow(taken, i, cond)
+      let then_exp = unshadow(taken, i, then_exp)
+      let else_exp = unshadow(taken, i, else_exp)
+      ExpIf(cond, then_exp, else_exp)
+    }
+  }
+}
+
+fn unshadow_module(module: Module) -> Module {
+  let fun_names = list.map(module.functions, fn(fun) { fun.name })
+  let functions =
+    list.map(module.functions, fn(fun) {
+      Function(fun.name, unshadow(fun_names, 1, fun.body))
+    })
+  let types = module.types
+  Module(types, functions)
+}
+
 pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
+  let module = unshadow_module(module)
+
   // Create an initial environment with type variables for each binding
   let funs = list.map(module.functions, fn(x) { #(new_type_var(), x) })
 
@@ -478,7 +590,7 @@ fn compile_function(fun: TFunction) -> String {
 
 pub fn compile_module(mod: TModule) -> String {
   list.map(mod.functions, compile_function)
-  |> string.join("\n")
+  |> string.join("\n\n")
 }
 
 pub fn pretty_print_type(typ: Type) -> String {
