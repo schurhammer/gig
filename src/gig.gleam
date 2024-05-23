@@ -153,7 +153,7 @@ const bool = c.TypeApp("Bool", [])
 
 const int = c.TypeApp("Int", [])
 
-const prelude = [
+pub const prelude = [
   #("panic", c.Poly(1, c.Mono(c.TypeFun(c.TypeVar(1), [])))),
   #("equal", c.Poly(1, c.Mono(c.TypeFun(bool, [c.TypeVar(1), c.TypeVar(1)])))),
   // bool
@@ -173,8 +173,7 @@ pub fn main() {
     g.module(
       "
       fn fact(n) {
-        let m = n
-        case m {
+        case n {
           0 | 1 -> 1
           n -> n * fact(n - 1)
         }
@@ -202,6 +201,6 @@ pub fn main() {
   })
   let output = c.compile_module(module)
   io.println_error("\n\noutput:\n")
-  io.print_error(output)
+  io.println_error(output)
   Nil
 }

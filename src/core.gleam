@@ -320,6 +320,7 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       use #(texp1, sub1) <- result.try(w(env, val))
 
       // Gleam does not generalize types here
+      // let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
       let type1 = Mono(texp1.typ)
 
       let env1 = dict.insert(env, var, type1)
@@ -489,27 +490,38 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   let initial_env =
     list.fold(funs, env, fn(env, x) {
       let #(var, fun) = x
-      dict.insert(env, fun.name, Mono(TypeVar(var)))
+      dict.insert(env, fun.name, Poly(var, Mono(TypeVar(var))))
     })
 
+  // TODO I think we need to order the functions
+  // 1. infer functions called by the current function first
+  // 2. infer mutually recursive functions together
+  // 3. maybe there is some recursive solution to this
+
   // Infer types for all binding expressions
-  use #(functions, sub) <- result.try(
-    list.try_fold(funs, #([], dict.new()), fn(acc, x) {
+  use #(functions, env, sub) <- result.try(
+    list.try_fold(funs, #([], initial_env, dict.new()), fn(acc, x) {
       let #(var, fun) = x
-      let #(l, sub1) = acc
-      let env1 = apply_sub_env(sub1, initial_env)
-      use #(texp, sub2) <- result.try(w(env1, fun.body))
-      // should this be unify?
-      // also we should probably generalise at some point?
-      let sub2 = dict.insert(sub2, var, texp.typ)
-      let combined_sub = compose_sub(sub2, sub1)
+      let #(l, env, sub) = acc
+
+      use #(texp1, sub1) <- result.try(w(env, fun.body))
+
+      let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
+
+      let env1 = dict.insert(env, fun.name, type1)
+      let env1 = apply_sub_env(sub1, env1)
+
+      let sub1 = dict.insert(sub1, var, texp1.typ)
+      let combined_sub = compose_sub(sub1, sub)
+
       let l =
         list.map(l, fn(x) {
           let TFunction(name, texp) = x
-          let texp = apply_sub_texpr(sub2, texp)
+          let texp = apply_sub_texpr(sub1, texp)
           TFunction(name, texp)
         })
-      Ok(#([TFunction(fun.name, texp), ..l], combined_sub))
+
+      Ok(#([TFunction(fun.name, texp1), ..l], env1, combined_sub))
     }),
   )
 
@@ -528,6 +540,8 @@ fn compile_type_name(typ: Type) -> String {
 fn hit_target(target: String, with: String) {
   case target {
     "" -> with
+    // TODO not sure if this is always valid
+    // "RETURN" -> "return " <> with <> ";\n"
     target -> target <> " = " <> with <> ";\n"
   }
 }
@@ -561,7 +575,7 @@ fn compile_texp(arg: TExp, target: String, id: Int) -> String {
       <> compile_texp(then_exp, target, id + 1)
       <> "} else {\n"
       <> compile_texp(else_exp, target, id + 1)
-      <> "}"
+      <> "}\n"
   }
 }
 
@@ -582,9 +596,9 @@ fn compile_function(fun: TFunction) -> String {
   |> string.join(", ")
   <> ") {\n"
   <> compile_type_name(ret)
-  <> " RET;\n"
-  <> compile_texp(body, "RET", 1)
-  <> "\nreturn RET;\n"
+  <> " RETURN;\n"
+  <> compile_texp(body, "RETURN", 1)
+  <> "return RETURN;\n"
   <> "}"
 }
 
