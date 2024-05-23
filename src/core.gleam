@@ -9,7 +9,19 @@ pub type ExpVar =
   String
 
 pub type Module {
-  Module(functions: List(Function))
+  Module(types: List(TypeDef), functions: List(Function))
+}
+
+pub type TypeDef {
+  TypeDef(name: String, params: List(String), body: List(VariantDef))
+}
+
+pub type VariantDef {
+  VariantDef(name: String, fields: List(Field))
+}
+
+pub type Field {
+  Field(name: String, typ: String)
 }
 
 pub type Function {
@@ -48,6 +60,7 @@ pub type TExp {
 pub type Type {
   TypeVar(var: TypeVar)
   TypeApp(typ: String, args: List(Type))
+  TypeFun(ret: Type, args: List(Type))
 }
 
 pub type Poly {
@@ -65,6 +78,7 @@ fn ftv(typ: Type) -> List(TypeVar) {
   case typ {
     TypeVar(a) -> [a]
     TypeApp(_, args) -> list.flat_map(args, ftv)
+    TypeFun(ret, args) -> list.flatten([ftv(ret), ..list.map(args, ftv)])
   }
 }
 
@@ -98,7 +112,14 @@ fn unify(t1: Type, t2: Type) -> Result(Sub, String) {
     typ, TypeVar(var) -> unify_var(var, typ)
     TypeApp(typ1, args1), TypeApp(typ2, args2) if typ1 == typ2 ->
       unify_many(args1, args2)
-    _, _ -> Error("Types do not unify")
+    TypeFun(typ1, args1), TypeFun(typ2, args2) ->
+      unify_many([typ1, ..args1], [typ2, ..args2])
+    _, _ -> {
+      io.println_error("\n\nfailed to unify\n")
+      io.debug(t1)
+      io.debug(t2)
+      Error("Types do not unify")
+    }
   }
 }
 
@@ -140,6 +161,8 @@ fn apply_sub(sub: Sub, typ: Type) -> Type {
         _ -> typ
       }
     TypeApp(name, args) -> TypeApp(name, list.map(args, apply_sub(sub, _)))
+    TypeFun(ret, args) ->
+      TypeFun(apply_sub(sub, ret), list.map(args, apply_sub(sub, _)))
   }
 }
 
@@ -250,8 +273,7 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
 
       // Create a function type from the argument types
       let arg_types_sub2 = list.map(args_sub2, fn(x) { x.typ })
-      let app_types_sub2 = [ret_type, ..list.reverse(arg_types_sub2)]
-      let args_funtype_sub2 = TypeApp("->", app_types_sub2)
+      let args_funtype_sub2 = TypeFun(ret_type, arg_types_sub2)
 
       // Unify the inferred function type with the created function type
       use sub3 <- result.try(unify(funexp_sub2.typ, args_funtype_sub2))
@@ -289,7 +311,7 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
         })
 
       // Construct the function type
-      let abs_type = TypeApp("->", [body_texp.typ, ..param_types])
+      let abs_type = TypeFun(body_texp.typ, param_types)
 
       Ok(#(TExpAbs(abs_type, params, body_texp), sub))
     }
@@ -382,16 +404,88 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   Ok(TModule(functions: functions))
 }
 
+fn compile_type_name(typ: Type) -> String {
+  case typ {
+    TypeVar(_) -> panic as "type vars should be resolved"
+    TypeApp(name, args) ->
+      string.join([name, ..list.map(args, compile_type_name)], "_")
+    TypeFun(..) -> todo as "todo function types"
+  }
+}
+
+fn hit_target(target: String, with: String) {
+  case target {
+    "" -> with
+    target -> target <> " = " <> with <> ";\n"
+  }
+}
+
+fn compile_texp(arg: TExp, target: String, id: Int) -> String {
+  case arg {
+    TExpInt(_, val) -> hit_target(target, int.to_string(val))
+
+    TExpVar(_, val) -> hit_target(target, val)
+    TExpApp(typ, fun, args) ->
+      hit_target(
+        target,
+        compile_texp(fun, "", id)
+          <> "("
+          <> list.map(args, compile_texp(_, "", id)) |> string.join(", ")
+          <> ")",
+      )
+
+    TExpAbs(..) -> panic as "functions should be lifted"
+    TExpLet(typ, var, val, exp) ->
+      compile_type_name(typ)
+      <> " "
+      <> var
+      <> ";\n"
+      <> compile_texp(val, var, id)
+      <> compile_texp(exp, target, id)
+    TExpIf(typ, cond, then_exp, else_exp) ->
+      "if ("
+      <> compile_texp(cond, "", id)
+      <> ") {\n"
+      <> compile_texp(then_exp, target, id + 1)
+      <> "} else {\n"
+      <> compile_texp(else_exp, target, id + 1)
+      <> "}"
+  }
+}
+
+import gleam/io
+
+fn compile_function(fun: TFunction) -> String {
+  let assert TExpAbs(typ, params, body) = fun.body
+  let assert TypeFun(ret, param_types) = typ
+  compile_type_name(ret)
+  <> " "
+  <> fun.name
+  <> "("
+  <> list.zip(params, param_types)
+  |> list.map(fn(p) {
+    let #(name, typ) = p
+    compile_type_name(typ) <> " " <> name
+  })
+  |> string.join(", ")
+  <> ") {\n"
+  <> compile_type_name(ret)
+  <> " RET;\n"
+  <> compile_texp(body, "RET", 1)
+  <> "\nreturn RET;\n"
+  <> "}"
+}
+
+pub fn compile_module(mod: TModule) -> String {
+  list.map(mod.functions, compile_function)
+  |> string.join("\n")
+}
+
 pub fn pretty_print_type(typ: Type) -> String {
   case typ {
     TypeVar(var) -> format_type_var(var)
-    TypeApp(name, args) -> {
-      case name == "->", args {
-        True, [ret, ..args] -> format_function_type(args, ret)
-        False, _ -> format_type_app(name, args)
-        _, _ -> "<err>"
-      }
-    }
+    TypeApp(name, args) -> format_type_app(name, args)
+    TypeFun(ret, args) -> format_function_type(args, ret)
   }
 }
 
@@ -444,7 +538,7 @@ pub fn pretty_print_texp(texp: TExp) -> String {
     TExpAbs(typ, var, exp) ->
       "fn("
       <> case typ {
-        TypeApp("->", [ret, ..args]) -> {
+        TypeFun(ret, args) -> {
           list.zip(var, args)
           |> list.map(fn(x) { x.0 <> ": " <> pretty_print_type(x.1) })
           |> string.join(", ")
@@ -501,6 +595,18 @@ pub fn normalize_vars_type(
           #([new_arg, ..l], new_sub)
         })
       #(TypeApp(name, result.0), result.1)
+    }
+    TypeFun(ret, args) -> {
+      let #(args, sub) =
+        args
+        |> list.reverse
+        |> list.fold(#([], sub), fn(acc, arg) {
+          let #(l, sub) = acc
+          let #(new_arg, new_sub) = normalize_vars_type(arg, sub)
+          #([new_arg, ..l], new_sub)
+        })
+      let #(ret, sub) = normalize_vars_type(ret, sub)
+      #(TypeFun(ret, args), sub)
     }
   }
 }
@@ -576,9 +682,6 @@ pub fn normalize_vars_texp(
 }
 
 fn format_type_var(var: TypeVar) -> String {
-  // let ascii = 96 + var
-  // let assert Ok(s) = bit_array.to_string(<<ascii:int>>)
-  // s
   "t" <> int.to_string(var)
 }
 

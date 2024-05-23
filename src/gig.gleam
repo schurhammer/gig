@@ -4,12 +4,11 @@ import gleam/dict
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{None, Some}
 import gleam/result
 
-fn module_to_core(mod: g.Module) {
+pub fn module_to_core(mod: g.Module) {
   let funs = list.map(mod.functions, fn(fun) { function_to_core(fun) })
-  c.Module(functions: funs)
+  c.Module(types: [], functions: funs)
 }
 
 fn function_to_core(def: g.Definition(g.Function)) {
@@ -155,20 +154,17 @@ const bool = c.TypeApp("Bool", [])
 const int = c.TypeApp("Int", [])
 
 const prelude = [
-  #("panic", c.Poly(1, c.Mono(c.TypeApp("->", [c.TypeVar(1)])))),
-  #(
-    "equal",
-    c.Poly(1, c.Mono(c.TypeApp("->", [bool, c.TypeVar(1), c.TypeVar(1)]))),
-  ),
+  #("panic", c.Poly(1, c.Mono(c.TypeFun(c.TypeVar(1), [])))),
+  #("equal", c.Poly(1, c.Mono(c.TypeFun(bool, [c.TypeVar(1), c.TypeVar(1)])))),
   // bool
   #("True", c.Mono(bool)), #("False", c.Mono(bool)),
-  #("and_bool", c.Mono(c.TypeApp("->", [bool, bool, bool]))),
-  #("or_bool", c.Mono(c.TypeApp("->", [bool, bool, bool]))),
+  #("and_bool", c.Mono(c.TypeFun(bool, [bool, bool]))),
+  #("or_bool", c.Mono(c.TypeFun(bool, [bool, bool]))),
   // int
-  #("add_int", c.Mono(c.TypeApp("->", [int, int, int]))),
-  #("sub_int", c.Mono(c.TypeApp("->", [int, int, int]))),
-  #("mul_int", c.Mono(c.TypeApp("->", [int, int, int]))),
-  #("div_int", c.Mono(c.TypeApp("->", [int, int, int]))),
+  #("add_int", c.Mono(c.TypeFun(int, [int, int]))),
+  #("sub_int", c.Mono(c.TypeFun(int, [int, int]))),
+  #("mul_int", c.Mono(c.TypeFun(int, [int, int]))),
+  #("div_int", c.Mono(c.TypeFun(int, [int, int]))),
 ]
 
 pub fn main() {
@@ -193,11 +189,14 @@ pub fn main() {
     |> io.println_error()
   })
   io.println_error("\n")
-  let assert Ok(res) = c.w_module(dict.from_list(prelude), core)
-  list.each(res.functions, fn(fun) {
+  let assert Ok(module) = c.w_module(dict.from_list(prelude), core)
+  list.each(module.functions, fn(fun) {
     fun.body
     |> c.pretty_print_texp
     |> io.println_error()
   })
+  let output = c.compile_module(module)
+  io.println_error("\n\noutput:\n")
+  io.print_error(output)
   Nil
 }

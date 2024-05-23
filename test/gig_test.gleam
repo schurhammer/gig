@@ -1,15 +1,16 @@
+import core.{
+  type TypeVar, ExpAbs, ExpApp, ExpIf, ExpInt, ExpLet, ExpVar, Function, Module,
+  Mono, Poly, TypeApp, TypeFun, TypeVar, normalize_vars_poly,
+  normalize_vars_type, pretty_print_type,
+}
+import gig
+import glance
 import gleam/dict
 import gleam/io
 import gleam/list
 import gleam/result
 import gleeunit
 import gleeunit/should
-
-import core.{
-  type TypeVar, ExpAbs, ExpApp, ExpIf, ExpInt, ExpLet, ExpVar, Function, Module,
-  Mono, Poly, TypeApp, TypeVar, normalize_vars_poly, normalize_vars_type,
-  pretty_print_type,
-}
 
 fn normalize_type(t) {
   normalize_vars_type(t, dict.new()).0
@@ -56,13 +57,13 @@ const true = #("True", Mono(bool))
 
 const false = #("False", Mono(bool))
 
-const add = #("+", Mono(TypeApp("->", [int, int, int])))
+const add = #("+", Mono(TypeFun(int, [int, int])))
 
-const sub = #("-", Mono(TypeApp("->", [int, int, int])))
+const sub = #("-", Mono(TypeFun(int, [int, int])))
 
-const mul = #("*", Mono(TypeApp("->", [int, int, int])))
+const mul = #("*", Mono(TypeFun(int, [int, int])))
 
-const eq = #("==", Poly(1, Mono(TypeApp("->", [bool, TypeVar(1), TypeVar(1)]))))
+const eq = #("==", Poly(1, Mono(TypeFun(bool, [TypeVar(1), TypeVar(1)]))))
 
 pub fn infer_var_test() {
   let env = dict.from_list([#("x", Mono(TypeVar(1)))])
@@ -78,12 +79,11 @@ pub fn infer_abs_test() {
   let assert Ok(result) = infer(env, exp)
   result
   |> normalize_type()
-  |> should.equal(TypeApp("->", [TypeVar(1), TypeVar(1)]))
+  |> should.equal(TypeFun(TypeVar(1), [TypeVar(1)]))
 }
 
 pub fn infer_app_test() {
-  let env =
-    dict.from_list([#("f", Mono(TypeApp("->", [TypeVar(2), TypeVar(1)])))])
+  let env = dict.from_list([#("f", Mono(TypeFun(TypeVar(2), [TypeVar(1)])))])
   let exp = ExpApp(ExpVar("f"), [ExpVar("x")])
   let result = infer(env, exp)
   result
@@ -123,8 +123,8 @@ pub fn infer_nested_let_test() {
 pub fn infer_function_composition_test() {
   let env =
     dict.from_list([
-      #("f", Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
-      #("g", Mono(TypeApp("->", [TypeVar(3), TypeVar(2)]))),
+      #("f", Mono(TypeFun(TypeVar(2), [TypeVar(1)]))),
+      #("g", Mono(TypeFun(TypeVar(3), [TypeVar(2)]))),
     ])
   let exp = ExpApp(ExpVar("g"), [ExpApp(ExpVar("f"), [ExpVar("x")])])
   let result = infer(env, exp)
@@ -204,9 +204,8 @@ pub fn infer_higher_order_function_test() {
   |> normalize_type()
   |> pretty_print_type
   |> should.equal(
-    TypeApp("->", [
-      TypeApp("->", [TypeVar(2), TypeVar(1)]),
-      TypeApp("->", [TypeVar(2), TypeVar(1)]),
+    TypeFun(TypeFun(TypeVar(2), [TypeVar(1)]), [
+      TypeFun(TypeVar(2), [TypeVar(1)]),
     ])
     |> pretty_print_type,
   )
@@ -222,7 +221,7 @@ pub fn infer_id_test() {
   |> normalize_type()
   |> pretty_print_type()
   |> should.equal(
-    TypeApp("->", [TypeVar(1), TypeVar(1)])
+    TypeFun(TypeVar(1), [TypeVar(1)])
     |> pretty_print_type(),
   )
 }
@@ -238,7 +237,7 @@ pub fn infer_const_test() {
   |> normalize_type()
   |> pretty_print_type()
   |> should.equal(
-    TypeApp("->", [TypeApp("->", [TypeVar(1), TypeVar(2)]), TypeVar(1)])
+    TypeFun(TypeFun(TypeVar(1), [TypeVar(2)]), [TypeVar(1)])
     |> pretty_print_type(),
   )
 }
@@ -260,13 +259,12 @@ pub fn infer_compose_test() {
   |> normalize_type()
   |> pretty_print_type()
   |> should.equal(
-    TypeApp("->", [
-      TypeApp("->", [
-        TypeApp("->", [TypeVar(2), TypeVar(3)]),
-        TypeApp("->", [TypeVar(1), TypeVar(3)]),
+    TypeFun(
+      TypeFun(TypeFun(TypeVar(2), [TypeVar(3)]), [
+        TypeFun(TypeVar(1), [TypeVar(3)]),
       ]),
-      TypeApp("->", [TypeVar(2), TypeVar(1)]),
-    ])
+      [TypeFun(TypeVar(2), [TypeVar(1)])],
+    )
     |> pretty_print_type(),
   )
 }
@@ -318,13 +316,13 @@ pub fn infer_if_complex_test() {
   let assert Ok(result) = infer(env, exp)
   result
   |> normalize_type()
-  |> should.equal(TypeApp("->", [TypeVar(1), TypeVar(1)]))
+  |> should.equal(TypeFun(TypeVar(1), [TypeVar(1)]))
 }
 
 pub fn infer_multiple_args_test() {
   let env =
     dict.from_list([
-      #("f", Mono(TypeApp("->", [TypeVar(1), TypeVar(2), TypeVar(3)]))),
+      #("f", Mono(TypeFun(TypeVar(1), [TypeVar(2), TypeVar(3)]))),
       #("x", Mono(TypeVar(4))),
       #("y", Mono(TypeVar(5))),
     ])
@@ -366,7 +364,7 @@ pub fn infer_multi_arg_function_def_test() {
   |> normalize_type()
   |> pretty_print_type()
   |> should.equal(
-    TypeApp("->", [TypeVar(2), TypeVar(2), TypeVar(1)])
+    TypeFun(TypeVar(2), [TypeVar(2), TypeVar(1)])
     |> pretty_print_type(),
   )
 }
@@ -381,7 +379,7 @@ pub fn infer_zero_arg_function_def_test() {
   |> normalize_type()
   |> pretty_print_type()
   |> should.equal(
-    TypeApp("->", [TypeApp("Int", [])])
+    TypeFun(TypeApp("Int", []), [])
     |> pretty_print_type(),
   )
 }
@@ -393,7 +391,7 @@ pub fn w_module_simple_function_test() {
     Function("f", ExpAbs(["x"], ExpVar("x"))),
     Function("g", ExpAbs(["y"], ExpInt(42))),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ1) = dict.get(env, "f")
@@ -401,11 +399,11 @@ pub fn w_module_simple_function_test() {
 
   typ1
   |> normalize_poly
-  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))))
+  |> should.equal(Poly(1, Mono(TypeFun(TypeVar(1), [TypeVar(1)]))))
 
   typ2
   |> normalize_poly
-  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeApp("Int", []), TypeVar(1)]))))
+  |> should.equal(Poly(1, Mono(TypeFun(TypeApp("Int", []), [TypeVar(1)]))))
 }
 
 pub fn w_module_mutually_recursive_functions_test() {
@@ -439,7 +437,7 @@ pub fn w_module_mutually_recursive_functions_test() {
       ),
     ),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ1)) = dict.get(env, "is_even")
@@ -447,11 +445,11 @@ pub fn w_module_mutually_recursive_functions_test() {
 
   typ1
   |> normalize_type
-  |> should.equal(TypeApp("->", [TypeApp("Bool", []), TypeApp("Int", [])]))
+  |> should.equal(TypeFun(TypeApp("Bool", []), [TypeApp("Int", [])]))
 
   typ2
   |> normalize_type
-  |> should.equal(TypeApp("->", [TypeApp("Bool", []), TypeApp("Int", [])]))
+  |> should.equal(TypeFun(TypeApp("Bool", []), [TypeApp("Int", [])]))
 }
 
 pub fn w_module_simple_recursive_function_test() {
@@ -460,17 +458,14 @@ pub fn w_module_simple_recursive_function_test() {
   let functions = [
     Function("f", ExpAbs(["x"], ExpApp(ExpVar("f"), [ExpVar("x")]))),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ) = dict.get(env, "f")
 
   typ
   |> normalize_poly
-  |> should.equal(Poly(
-    1,
-    Poly(2, Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
-  ))
+  |> should.equal(Poly(1, Poly(2, Mono(TypeFun(TypeVar(2), [TypeVar(1)])))))
 }
 
 pub fn w_module_function_arg_test() {
@@ -482,14 +477,14 @@ pub fn w_module_function_arg_test() {
       ExpAbs(["x"], ExpApp(ExpVar("+"), [ExpVar("x"), ExpVar("x")])),
     ),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ)) = dict.get(env, "f")
 
   typ
   |> normalize_type
-  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
+  |> should.equal(TypeFun(TypeApp("Int", []), [TypeApp("Int", [])]))
 }
 
 pub fn w_module_recursive_test() {
@@ -504,14 +499,14 @@ pub fn w_module_recursive_test() {
       ),
     ),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ) = dict.get(env, "f")
 
   typ
   |> normalize_poly
-  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeApp("Int", [])]))))
+  |> should.equal(Poly(1, Mono(TypeFun(TypeVar(1), [TypeApp("Int", [])]))))
 }
 
 pub fn w_module_recursive_2_test() {
@@ -526,14 +521,14 @@ pub fn w_module_recursive_2_test() {
       ),
     ),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ)) = dict.get(env, "f")
 
   typ
   |> normalize_type
-  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
+  |> should.equal(TypeFun(TypeApp("Int", []), [TypeApp("Int", [])]))
 }
 
 pub fn w_module_recursive_3_test() {
@@ -543,7 +538,7 @@ pub fn w_module_recursive_3_test() {
     Function("f", ExpAbs(["x"], ExpApp(ExpVar("g"), [ExpVar("x")]))),
     Function("g", ExpAbs(["x"], ExpApp(ExpVar("f"), [ExpVar("x")]))),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ1) = dict.get(env, "f")
@@ -551,16 +546,10 @@ pub fn w_module_recursive_3_test() {
 
   typ1
   |> normalize_poly
-  |> should.equal(Poly(
-    1,
-    Poly(2, Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
-  ))
+  |> should.equal(Poly(1, Poly(2, Mono(TypeFun(TypeVar(2), [TypeVar(1)])))))
   typ2
   |> normalize_poly
-  |> should.equal(Poly(
-    1,
-    Poly(2, Mono(TypeApp("->", [TypeVar(2), TypeVar(1)]))),
-  ))
+  |> should.equal(Poly(1, Poly(2, Mono(TypeFun(TypeVar(2), [TypeVar(1)])))))
 }
 
 pub fn w_module_recursive_function_test() {
@@ -585,14 +574,14 @@ pub fn w_module_recursive_function_test() {
     ),
   ]
 
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(Mono(typ)) = dict.get(env, "fact")
 
   typ
   |> normalize_type
-  |> should.equal(TypeApp("->", [TypeApp("Int", []), TypeApp("Int", [])]))
+  |> should.equal(TypeFun(TypeApp("Int", []), [TypeApp("Int", [])]))
 }
 
 pub fn w_module_simple_function_2_test() {
@@ -602,7 +591,7 @@ pub fn w_module_simple_function_2_test() {
     Function("f", ExpAbs(["x"], ExpVar("x"))),
     Function("g", ExpAbs([], ExpVar("f"))),
   ]
-  let module = Module(functions)
+  let module = Module([], functions)
 
   let assert Ok(env) = infer_module(env, module)
   let assert Ok(typ1) = dict.get(env, "f")
@@ -610,12 +599,9 @@ pub fn w_module_simple_function_2_test() {
 
   typ1
   |> normalize_poly
-  |> should.equal(Poly(1, Mono(TypeApp("->", [TypeVar(1), TypeVar(1)]))))
+  |> should.equal(Poly(1, Mono(TypeFun(TypeVar(1), [TypeVar(1)]))))
 
   typ2
   |> normalize_poly
-  |> should.equal(Poly(
-    1,
-    Mono(TypeApp("->", [TypeApp("->", [TypeVar(1), TypeVar(1)])])),
-  ))
+  |> should.equal(Poly(1, Mono(TypeFun(TypeFun(TypeVar(1), [TypeVar(1)]), []))))
 }
