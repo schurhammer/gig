@@ -1,8 +1,8 @@
 import gleam/io
 import gleeunit/should
-import graph.{insert_edge, insert_node, kosaraju, new}
+import graph.{connected_components, insert_edge, insert_node, new}
 
-pub fn topological_sort_test() {
+pub fn conencted_components_test() {
   // Test case 1: Acyclic graph
   let graph =
     new()
@@ -16,10 +16,8 @@ pub fn topological_sort_test() {
     |> insert_edge(4, 3)
     |> insert_edge(3, 1)
 
-  // let expected = [[4], [3], [1], [5], [2]]
-  // topological_sort(graph) |> should.equal(expected)
-  kosaraju(graph)
-  |> io.debug()
+  let expected = [[2], [5], [1], [3], [4]]
+  connected_components(graph) |> should.equal(expected)
 
   // Test case 2: Graph with mutually recursive nodes
   let graph =
@@ -35,10 +33,8 @@ pub fn topological_sort_test() {
     |> insert_edge(3, 4)
     |> insert_edge(4, 5)
 
-  // let expected = [[1, 2], [3], [4], [5]]
-  // topological_sort(graph) |> should.equal(expected)
-  kosaraju(graph)
-  |> io.debug()
+  let expected = [[5], [4], [3], [1, 2]]
+  connected_components(graph) |> should.equal(expected)
 
   // Test case 3: Graph with multiple mutually recursive groups
   let graph =
@@ -55,15 +51,12 @@ pub fn topological_sort_test() {
     |> insert_edge(4, 3)
     |> insert_edge(5, 6)
 
-  // let expected = [[1, 2], [3, 4], [5], [6]]
-  // topological_sort(graph) |> should.equal(expected)
-  kosaraju(graph)
-  |> io.debug()
+  let expected = [[6], [5], [3, 4], [1, 2]]
+  connected_components(graph) |> should.equal(expected)
 
   // Test case 4: Empty graph
   let graph = new()
-  // let expected = []
-  // topological_sort(graph) |> should.equal(expected)
-  kosaraju(graph)
-  |> io.debug()
+  let expected = []
+  connected_components(graph)
+  |> should.equal(expected)
 }

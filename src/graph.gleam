@@ -15,16 +15,19 @@ pub fn insert_node(g: Graph(a), node: a) -> Graph(a) {
   Graph(adj: [#(node, []), ..g.adj])
 }
 
-/// Insert a directed edge into the graph.
+/// Insert a directed edge into the graph. Ignores nodes not in the graph.
 pub fn insert_edge(g: Graph(a), from: a, to: a) -> Graph(a) {
-  Graph(
-    list.map(g.adj, fn(x) {
-      case x.0 == from {
-        True -> #(x.0, [to, ..x.1])
-        False -> x
-      }
-    }),
-  )
+  let adj = case list.find(g.adj, fn(x) { x.0 == to }) {
+    Ok(_) ->
+      list.map(g.adj, fn(x) {
+        case x.0 == from {
+          True -> #(x.0, [to, ..x.1])
+          False -> x
+        }
+      })
+    Error(_) -> g.adj
+  }
+  Graph(adj)
 }
 
 pub fn neighbours(g: Graph(a), from: a) -> List(a) {
@@ -49,7 +52,7 @@ fn reverse_graph(g: Graph(a)) -> Graph(a) {
   )
 }
 
-pub fn kosaraju(g: Graph(a)) {
+pub fn connected_components(g: Graph(a)) -> List(List(a)) {
   let #(_, l) =
     list.fold(g.adj, #([], []), fn(acc, i) {
       let #(v, l) = acc
@@ -57,8 +60,9 @@ pub fn kosaraju(g: Graph(a)) {
     })
 
   let r = reverse_graph(g)
-  let a = list.fold(r.adj, [], fn(a, i) { assign(r, a, i.0, i.0) })
-  a
+  list.fold(l, [], fn(a, i) { assign(r, a, i, i) })
+  |> list.chunk(fn(i) { i.1 })
+  |> list.map(list.map(_, fn(x: #(a, a)) { x.0 }))
 }
 
 fn visit(g: Graph(a), v: List(a), l: List(a), u: a) -> #(List(a), List(a)) {

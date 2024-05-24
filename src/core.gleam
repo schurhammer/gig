@@ -3,6 +3,7 @@ import gleam/int
 import gleam/list
 import gleam/result
 import gleam/string
+import graph
 import unique_integer
 
 pub type ExpVar =
@@ -485,48 +486,81 @@ fn unshadow_module(module: Module) -> Module {
   Module(types, functions)
 }
 
+fn call_graph(
+  g: graph.Graph(String),
+  from: String,
+  e: Exp,
+) -> graph.Graph(String) {
+  case e {
+    ExpInt(_) -> g
+    ExpVar(to) -> graph.insert_edge(g, from, to)
+    ExpApp(fun, args) -> {
+      let g = call_graph(g, from, fun)
+      list.fold(args, g, fn(g, arg) { call_graph(g, from, arg) })
+    }
+    ExpAbs(_, exp) -> call_graph(g, from, exp)
+    ExpLet(_, val, exp) -> {
+      let g = call_graph(g, from, val)
+      call_graph(g, from, exp)
+    }
+    ExpIf(cond, then_e, else_e) -> {
+      let g = call_graph(g, from, cond)
+      let g = call_graph(g, from, then_e)
+      call_graph(g, from, else_e)
+    }
+  }
+}
+
 pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   let module = unshadow_module(module)
 
+  let funs = module.functions
+
   // Create an initial environment with type variables for each binding
-  let funs = list.map(module.functions, fn(x) { #(new_type_var(), x) })
+  let fun_vars = list.map(module.functions, fn(x) { #(new_type_var(), x) })
 
   let initial_env =
-    list.fold(funs, env, fn(env, x) {
+    list.fold(fun_vars, env, fn(env, x) {
       let #(var, fun) = x
       dict.insert(env, fun.name, Poly(var, Mono(TypeVar(var))))
     })
 
-  // TODO I think we need to order the functions
-  // 1. infer functions called by the current function first
-  // 2. infer mutually recursive functions together
-  // 3. maybe there is some recursive solution to this
+  // Find mutually recursive functions and order of functions
+  let groups =
+    list.fold(funs, graph.new(), fn(g, fun) { graph.insert_node(g, fun.name) })
+    |> list.fold(funs, _, fn(g, fun) { call_graph(g, fun.name, fun.body) })
+    |> graph.connected_components()
 
-  // Infer types for all binding expressions
+  let fun_by_name =
+    dict.from_list(list.map(fun_vars, fn(x) { #({ x.1 }.name, x) }))
+
   use #(functions, env, sub) <- result.try(
-    list.try_fold(funs, #([], initial_env, dict.new()), fn(acc, x) {
-      let #(var, fun) = x
-      let #(l, env, sub) = acc
+    list.try_fold(groups, #([], initial_env, dict.new()), fn(acc, group) {
+      list.try_fold(group, acc, fn(acc, name) {
+        let assert Ok(#(var, fun)) = dict.get(fun_by_name, name)
 
-      use #(texp1, sub1) <- result.try(w(env, fun.body))
+        io.debug(fun.name)
+        let #(l, env, sub) = acc
 
-      // let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
+        use #(texp1, sub1) <- result.try(w(env, fun.body))
 
-      // let env1 = dict.insert(env, fun.name, type1)
-      // let env1 = apply_sub_env(sub1, env1)
-      let env1 = apply_sub_env(sub1, env)
+        let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
+        let env1 = dict.insert(env, fun.name, type1)
+        // let env1 = apply_sub_env(sub1, env1)
+        let env1 = apply_sub_env(sub1, env1)
 
-      let sub1 = dict.insert(sub1, var, texp1.typ)
-      let combined_sub = compose_sub(sub1, sub)
+        let sub1 = dict.insert(sub1, var, texp1.typ)
+        let combined_sub = compose_sub(sub1, sub)
 
-      let l =
-        list.map(l, fn(x) {
-          let TFunction(name, texp) = x
-          let texp = apply_sub_texpr(sub1, texp)
-          TFunction(name, texp)
-        })
+        let l =
+          list.map(l, fn(x) {
+            let TFunction(name, texp) = x
+            let texp = apply_sub_texpr(sub1, texp)
+            TFunction(name, texp)
+          })
 
-      Ok(#([TFunction(fun.name, texp1), ..l], env1, combined_sub))
+        Ok(#([TFunction(fun.name, texp1), ..l], env1, combined_sub))
+      })
     }),
   )
 
