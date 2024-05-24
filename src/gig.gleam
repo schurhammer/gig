@@ -199,7 +199,7 @@ pub fn main() {
     |> c.pretty_print_texp
     |> io.println_error()
   })
-  let output = c.compile_module(module)
+  let output = c.codegen_module(module)
   io.println_error("\n\noutput:\n")
   io.println_error(output)
   Nil

@@ -46,7 +46,7 @@ pub type TModule {
 }
 
 pub type TFunction {
-  TFunction(name: ExpVar, body: TExp)
+  TFunction(name: ExpVar, body: TExp, typ: Poly)
 }
 
 pub type TExp {
@@ -178,7 +178,7 @@ fn apply_sub_env(sub: Sub, env: Env) -> Env {
   dict.map_values(env, fn(_, v) { apply_sub_poly(sub, v) })
 }
 
-fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
+pub fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
   case texp {
     TExpInt(_, _) -> texp
     TExpVar(typ, var) -> TExpVar(apply_sub(sub, typ), var)
@@ -231,9 +231,6 @@ fn inst(sub: Sub, poly: Poly) -> Type {
 }
 
 pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
-  io.println_error("\n--")
-  io.debug(exp)
-
   case exp {
     ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
     ExpVar(var) ->
@@ -373,7 +370,6 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       }
     }
   }
-  |> io.debug()
 }
 
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {
@@ -423,7 +419,7 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
       ExpApp(fun, args)
     }
     ExpAbs(vars, exp) -> {
-      let #(_, _, vars, exp) =
+      let #(taken, i, vars, exp) =
         list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
           let #(taken, i, vars, exp) = acc
           case list.contains(taken, var) {
@@ -445,6 +441,7 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
             }
           }
         })
+      let exp = unshadow(taken, i, exp)
       let vars = list.reverse(vars)
       ExpAbs(vars, exp)
     }
@@ -554,12 +551,12 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
 
         let l =
           list.map(l, fn(x) {
-            let TFunction(name, texp) = x
+            let TFunction(name, texp, typ) = x
             let texp = apply_sub_texpr(sub1, texp)
-            TFunction(name, texp)
+            TFunction(name, texp, typ)
           })
 
-        Ok(#([TFunction(fun.name, texp1), ..l], env1, combined_sub))
+        Ok(#([TFunction(fun.name, texp1, type1), ..l], env1, combined_sub))
       })
     }),
   )
@@ -576,7 +573,7 @@ fn compile_type_name(typ: Type) -> String {
   }
 }
 
-fn hit_target(target: String, with: String) {
+fn codegen_target(target: String, with: String) {
   case target {
     "" -> with
     // TODO not sure if this is always valid
@@ -585,17 +582,17 @@ fn hit_target(target: String, with: String) {
   }
 }
 
-fn compile_texp(arg: TExp, target: String, id: Int) -> String {
+fn codegen_texp(arg: TExp, target: String, id: Int) -> String {
   case arg {
-    TExpInt(_, val) -> hit_target(target, int.to_string(val))
+    TExpInt(_, val) -> codegen_target(target, int.to_string(val))
 
-    TExpVar(_, val) -> hit_target(target, val)
+    TExpVar(_, val) -> codegen_target(target, val)
     TExpApp(typ, fun, args) ->
-      hit_target(
+      codegen_target(
         target,
-        compile_texp(fun, "", id)
+        codegen_texp(fun, "", id)
           <> "("
-          <> list.map(args, compile_texp(_, "", id)) |> string.join(", ")
+          <> list.map(args, codegen_texp(_, "", id)) |> string.join(", ")
           <> ")",
       )
 
@@ -605,22 +602,22 @@ fn compile_texp(arg: TExp, target: String, id: Int) -> String {
       <> " "
       <> var
       <> ";\n"
-      <> compile_texp(val, var, id)
-      <> compile_texp(exp, target, id)
+      <> codegen_texp(val, var, id)
+      <> codegen_texp(exp, target, id)
     TExpIf(typ, cond, then_exp, else_exp) ->
       "if ("
-      <> compile_texp(cond, "", id)
+      <> codegen_texp(cond, "", id)
       <> ") {\n"
-      <> compile_texp(then_exp, target, id + 1)
+      <> codegen_texp(then_exp, target, id + 1)
       <> "} else {\n"
-      <> compile_texp(else_exp, target, id + 1)
+      <> codegen_texp(else_exp, target, id + 1)
       <> "}\n"
   }
 }
 
 import gleam/io
 
-fn compile_function(fun: TFunction) -> String {
+fn codegen_function(fun: TFunction) -> String {
   let assert TExpAbs(typ, params, body) = fun.body
   let assert TypeFun(ret, param_types) = typ
   compile_type_name(ret)
@@ -636,13 +633,13 @@ fn compile_function(fun: TFunction) -> String {
   <> ") {\n"
   <> compile_type_name(ret)
   <> " RETURN;\n"
-  <> compile_texp(body, "RETURN", 1)
+  <> codegen_texp(body, "RETURN", 1)
   <> "return RETURN;\n"
   <> "}"
 }
 
-pub fn compile_module(mod: TModule) -> String {
-  list.map(mod.functions, compile_function)
+pub fn codegen_module(mod: TModule) -> String {
+  list.map(mod.functions, codegen_function)
   |> string.join("\n\n")
 }
 

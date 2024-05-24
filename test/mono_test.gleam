@@ -1,6 +1,7 @@
 import core
 import gig
 import glance
+import monomorphise
 
 import gleam/dict
 import gleam/io
@@ -13,10 +14,18 @@ pub fn main() {
     glance.module(
       "
       fn id(x) {
+        a(1)
+        x
+      }
+      fn a(x) {
+        x
+      }
+      fn not_called(x) {
         x
       }
       fn main() {
         id(1)
+        0
       }
   ",
     )
@@ -31,5 +40,11 @@ pub fn main() {
   list.each(module.functions, fn(fun) { pprint.debug(fun) })
 
   io.println_error("\nMONO\n")
+  let module = monomorphise.run(module)
+  list.each(module.functions, fn(fun) { pprint.debug(fun) })
+
+  io.println_error("\nCODEGEN\n")
+  let output = core.codegen_module(module)
+  io.println_error(output)
   Nil
 }
