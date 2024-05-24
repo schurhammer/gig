@@ -230,6 +230,9 @@ fn inst(sub: Sub, poly: Poly) -> Type {
 }
 
 pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
+  io.println_error("\n--")
+  io.debug(exp)
+
   case exp {
     ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
     ExpVar(var) ->
@@ -369,6 +372,7 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
       }
     }
   }
+  |> io.debug()
 }
 
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {
@@ -506,10 +510,11 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
 
       use #(texp1, sub1) <- result.try(w(env, fun.body))
 
-      let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
+      // let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
 
-      let env1 = dict.insert(env, fun.name, type1)
-      let env1 = apply_sub_env(sub1, env1)
+      // let env1 = dict.insert(env, fun.name, type1)
+      // let env1 = apply_sub_env(sub1, env1)
+      let env1 = apply_sub_env(sub1, env)
 
       let sub1 = dict.insert(sub1, var, texp1.typ)
       let combined_sub = compose_sub(sub1, sub)

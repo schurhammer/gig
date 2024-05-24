@@ -16,10 +16,7 @@ pub fn main() {
         x
       }
       fn main() {
-        let t = 1 == 1
-        let a = id(t)
-        let b = id(1)
-        b
+        id(1)
       }
   ",
     )
