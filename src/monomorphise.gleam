@@ -19,7 +19,8 @@ pub fn run(poly: TModule) -> TModule {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
 
   let m = MM(poly, TModule([]))
-  let #(m, name) = instantiate(m, "main", main.body.typ)
+  let assert Mono(typ) = main.typ
+  let #(m, name) = instantiate(m, "main", typ)
 
   m.mono
 }
@@ -37,7 +38,11 @@ fn unify_type(poly: Type, mono: Type) -> List(#(Int, Type)) {
           |> list.flat_map(fn(x) { unify_type(x.0, x.1) }),
       )
 
-    _, _ -> panic
+    _, _ -> {
+      io.debug(poly)
+      io.debug(mono)
+      panic
+    }
   }
 }
 
@@ -80,9 +85,9 @@ fn instantiate_fun(fun: TFunction, typ: Type) -> TFunction {
 
   let sub = dict.from_list(subs.1)
 
-  let mono_body = core.apply_sub_texpr(sub, fun.body)
+  let mono_body = core.apply_sub_texpr(sub, fun.body1)
 
-  TFunction(mono_name, mono_body, Mono(typ))
+  TFunction(mono_name, fun.params, mono_body, Mono(typ))
 }
 
 fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
@@ -94,8 +99,8 @@ fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
         Ok(_) -> #(m, inst.name)
         // add instantiation
         _ -> {
-          let #(m, exp) = mm(m, inst.body)
-          let inst = TFunction(inst.name, exp, Mono(exp.typ))
+          let #(m, exp) = mm(m, inst.body1)
+          let inst = TFunction(inst.name, inst.params, exp, inst.typ)
           let funs = [inst, ..m.mono.functions]
           let mono = TModule(funs)
           let m = MM(..m, mono: mono)

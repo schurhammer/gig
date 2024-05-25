@@ -23,7 +23,7 @@ fn function_to_core(def: g.Definition(g.Function)) {
     })
 
   let body = block_to_core(fun.body)
-  c.Function(fun.name, c.ExpAbs(params, body))
+  c.Function(fun.name, params, body)
 }
 
 const panic_exp = c.ExpApp(c.ExpVar("panic"), [])
@@ -141,6 +141,18 @@ fn expression_to_core(e: g.Expression) -> c.Exp {
         c.ExpLet("S" <> int.to_string(i), expression_to_core(sub), exp)
       })
     }
+    g.Fn(args, ret, body) -> {
+      let params =
+        args
+        |> list.map(fn(param) {
+          case param.name {
+            g.Named(n) -> n
+            _ -> "_"
+          }
+        })
+      let body = block_to_core(body)
+      c.ExpAbs(params, body)
+    }
     _ -> {
       io.println_error("Not Implemented:")
       io.debug(e)
@@ -188,17 +200,12 @@ pub fn main() {
   io.debug(core)
   io.println_error("\n")
   list.each(core.functions, fn(fun) {
-    fun.body
+    c.ExpAbs(fun.params, fun.body1)
     |> c.pretty_print_exp
     |> io.println_error()
   })
   io.println_error("\n")
   let assert Ok(module) = c.w_module(dict.from_list(prelude), core)
-  list.each(module.functions, fn(fun) {
-    fun.body
-    |> c.pretty_print_texp
-    |> io.println_error()
-  })
   let output = c.codegen_module(module)
   io.println_error("\n\noutput:\n")
   io.println_error(output)

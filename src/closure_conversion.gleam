@@ -1,42 +1,102 @@
 import core.{
-  type Exp, type Function, ExpAbs, ExpApp, ExpIf, ExpInt, ExpLet, ExpVar,
-  Function,
+  type TExp, type TFunction, type TModule, type Type, TExpAbs, TExpApp, TExpIf,
+  TExpInt, TExpLet, TExpVar, TFunction, TModule,
 }
 
+import env
+import gleam/io
 import gleam/list
 
-// TODO move to typed expressions? need to know the types of stuff to put in closure
+// TODO direct calls to top level functions could be added,
+// but any higher-order usage probably need to be closure converted
+// otherwise it could introduce problematic polymorphism
+// especially in functions that return higher order functions
 
 // assumptions:
-// 1. renaming has been done such that there is no shadowing of values
+// 1. renaming has been done such that there is no shadowing
 
 type CC {
-  CC(funs: List(Function), uid: Int)
+  CC(mod: TModule, uid: Int)
 }
 
-fn cc(c: CC, s: List(#(String)), e: Exp) -> #(CC, Exp) {
+type Env =
+  env.Env(String, Type)
+
+pub fn cc_module(mod: TModule) {
+  let c = CC(mod, 1)
+  list.fold(mod.functions, c, fn(c, fun) {
+    let #(c, e) = cc(c, fun.body1)
+    c
+  })
+  mod
+}
+
+fn combine(a: List(a), b: List(a)) -> List(a) {
+  list.fold(a, b, fn(b, a) { [a, ..b] })
+}
+
+fn fv(n: List(String), e: TExp) -> List(String) {
   case e {
-    ExpInt(_) -> #(c, e)
-    ExpVar(_) -> #(c, e)
-    ExpApp(fun, args) -> {
-      let #(c, fun) = cc(c, s, fun)
-      let #(c, args) =
-        list.fold(args, #(c, []), fn(acc, arg) {
-          let #(c, args) = acc
-          let #(c, arg) = cc(c, s, arg)
-          #(c, [arg, ..args])
+    TExpInt(_, _) -> []
+    TExpVar(typ, var) -> {
+      case list.contains(n, var) {
+        True -> []
+        False -> [var]
+      }
+    }
+    TExpApp(typ, fun, args) -> {
+      let v = fv(n, fun)
+      list.fold(args, v, fn(v, arg) { combine(fv(n, arg), v) })
+    }
+    TExpAbs(typ, vars, exp) -> {
+      let n = combine(vars, n)
+      fv(n, exp)
+    }
+    TExpLet(typ, var, val, exp) -> {
+      let n = [var, ..n]
+      let v = fv(n, exp)
+      combine(v, fv(n, exp))
+    }
+    TExpIf(typ, cond, then_e, else_e) -> {
+      let v = fv(n, cond)
+      let v = combine(v, fv(n, then_e))
+      combine(v, fv(n, else_e))
+    }
+  }
+}
+
+fn cc(m: CC, e: TExp) -> #(CC, TExp) {
+  case e {
+    TExpInt(_, _) -> #(m, e)
+    TExpVar(typ, var) -> {
+      #(m, TExpVar(typ, var))
+    }
+    TExpApp(typ, fun, args) -> {
+      let #(m, fun) = cc(m, fun)
+      let #(m, args) =
+        list.fold(args, #(m, []), fn(acc, arg) {
+          let #(m, args) = acc
+          let #(m, arg) = cc(m, arg)
+          #(m, [arg, ..args])
         })
       let args = list.reverse(args)
-      #(c, ExpApp(fun, args))
+      #(m, TExpApp(typ, fun, args))
     }
-    ExpAbs(vars, exp) -> {
-      let #(c, exp) = cc(c, s, e)
-      #(c, exp)
+    TExpAbs(typ, vars, exp) -> {
+      io.debug(vars)
+      let #(m, exp) = cc(m, exp)
+      #(m, TExpAbs(typ, vars, exp))
     }
-    ExpLet(var, val, exp) -> {
-      let #(c, exp) = cc(c, s, e)
-      #(c, exp)
+    TExpLet(typ, var, val, exp) -> {
+      let #(m, val) = cc(m, val)
+      let #(m, exp) = cc(m, exp)
+      #(m, TExpLet(typ, var, val, exp))
     }
-    ExpIf(cond, then_e, else_e) -> #(c, e)
+    TExpIf(typ, cond, then_e, else_e) -> {
+      let #(m, cond) = cc(m, cond)
+      let #(m, then_e) = cc(m, then_e)
+      let #(m, else_e) = cc(m, else_e)
+      #(m, TExpIf(typ, cond, then_e, else_e))
+    }
   }
 }

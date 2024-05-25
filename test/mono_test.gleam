@@ -1,3 +1,4 @@
+import closure_conversion
 import core
 import gig
 import glance
@@ -24,7 +25,9 @@ pub fn main() {
         x
       }
       fn main() {
-        id(1)
+        let x = 1
+        let add_x = fn(y) { y + x }
+        id(add_x(1))
         0
       }
   ",
@@ -43,8 +46,12 @@ pub fn main() {
   let module = monomorphise.run(module)
   list.each(module.functions, fn(fun) { pprint.debug(fun) })
 
-  io.println_error("\nCODEGEN\n")
-  let output = core.codegen_module(module)
-  io.println_error(output)
+  io.println_error("\nCLOSURES\n")
+  closure_conversion.cc_module(module)
+
+  // io.println_error("\nCODEGEN\n")
+  // let output = core.codegen_module(module)
+  // io.println_error(output)
+
   Nil
 }

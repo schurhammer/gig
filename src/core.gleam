@@ -26,7 +26,7 @@ pub type Field {
 }
 
 pub type Function {
-  Function(name: ExpVar, body: Exp)
+  Function(name: ExpVar, params: List(String), body1: Exp)
 }
 
 pub type Exp {
@@ -46,7 +46,7 @@ pub type TModule {
 }
 
 pub type TFunction {
-  TFunction(name: ExpVar, body: TExp, typ: Poly)
+  TFunction(name: ExpVar, params: List(String), body1: TExp, typ: Poly)
 }
 
 pub type TExp {
@@ -477,7 +477,8 @@ fn unshadow_module(module: Module) -> Module {
   let fun_names = list.map(module.functions, fn(fun) { fun.name })
   let functions =
     list.map(module.functions, fn(fun) {
-      Function(fun.name, unshadow(fun_names, 1, fun.body))
+      // TODO probably need to pass params to unshadow somehow
+      Function(fun.name, fun.params, unshadow(fun_names, 1, fun.body1))
     })
   let types = module.types
   Module(types, functions)
@@ -525,7 +526,7 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   // Find mutually recursive functions and order of functions
   let groups =
     list.fold(funs, graph.new(), fn(g, fun) { graph.insert_node(g, fun.name) })
-    |> list.fold(funs, _, fn(g, fun) { call_graph(g, fun.name, fun.body) })
+    |> list.fold(funs, _, fn(g, fun) { call_graph(g, fun.name, fun.body1) })
     |> graph.connected_components()
 
   let fun_by_name =
@@ -539,24 +540,33 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
         io.debug(fun.name)
         let #(l, env, sub) = acc
 
-        use #(texp1, sub1) <- result.try(w(env, fun.body))
+        let fun_exp = ExpAbs(fun.params, fun.body1)
 
-        let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
-        let env1 = dict.insert(env, fun.name, type1)
+        use #(texp1, sub1) <- result.try(w(env, fun_exp))
+
+        let assert TExpAbs(fun_typ, params, body) = texp1
+        let fun_type_gen = gen(apply_sub_env(sub1, env), fun_typ)
+        let env1 = dict.insert(env, fun.name, fun_type_gen)
         // let env1 = apply_sub_env(sub1, env1)
         let env1 = apply_sub_env(sub1, env1)
 
-        let sub1 = dict.insert(sub1, var, texp1.typ)
+        // TODO is this line needed/correct?
+        let sub1 = dict.insert(sub1, var, fun_typ)
+
         let combined_sub = compose_sub(sub1, sub)
 
         let l =
           list.map(l, fn(x) {
-            let TFunction(name, texp, typ) = x
-            let texp = apply_sub_texpr(sub1, texp)
-            TFunction(name, texp, typ)
+            let TFunction(name, vars, body, typ) = x
+            let body = apply_sub_texpr(sub1, body)
+            TFunction(name, vars, body, typ)
           })
 
-        Ok(#([TFunction(fun.name, texp1, type1), ..l], env1, combined_sub))
+        Ok(#(
+          [TFunction(fun.name, params, body, fun_type_gen), ..l],
+          env1,
+          combined_sub,
+        ))
       })
     }),
   )
@@ -618,8 +628,9 @@ fn codegen_texp(arg: TExp, target: String, id: Int) -> String {
 import gleam/io
 
 fn codegen_function(fun: TFunction) -> String {
-  let assert TExpAbs(typ, params, body) = fun.body
-  let assert TypeFun(ret, param_types) = typ
+  let params = fun.params
+  let body = fun.body1
+  let assert Mono(TypeFun(ret, param_types)) = fun.typ
   compile_type_name(ret)
   <> " "
   <> fun.name
@@ -639,7 +650,9 @@ fn codegen_function(fun: TFunction) -> String {
 }
 
 pub fn codegen_module(mod: TModule) -> String {
-  list.map(mod.functions, codegen_function)
+  // TODO instead of just reversing we should emit forward declarations
+  let funs = list.reverse(mod.functions)
+  list.map(funs, codegen_function)
   |> string.join("\n\n")
 }
 
