@@ -200,7 +200,7 @@ pub fn main() {
   io.debug(core)
   io.println_error("\n")
   list.each(core.functions, fn(fun) {
-    c.ExpAbs(fun.params, fun.body1)
+    c.ExpAbs(fun.params, fun.body)
     |> c.pretty_print_exp
     |> io.println_error()
   })

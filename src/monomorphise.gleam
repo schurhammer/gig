@@ -85,7 +85,7 @@ fn instantiate_fun(fun: TFunction, typ: Type) -> TFunction {
 
   let sub = dict.from_list(subs.1)
 
-  let mono_body = core.apply_sub_texpr(sub, fun.body1)
+  let mono_body = core.apply_sub_texpr(sub, fun.body)
 
   TFunction(mono_name, fun.params, mono_body, Mono(typ))
 }
@@ -99,7 +99,7 @@ fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
         Ok(_) -> #(m, inst.name)
         // add instantiation
         _ -> {
-          let #(m, exp) = mm(m, inst.body1)
+          let #(m, exp) = mm(m, inst.body)
           let inst = TFunction(inst.name, inst.params, exp, inst.typ)
           let funs = [inst, ..m.mono.functions]
           let mono = TModule(funs)

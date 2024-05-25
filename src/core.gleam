@@ -26,7 +26,7 @@ pub type Field {
 }
 
 pub type Function {
-  Function(name: ExpVar, params: List(String), body1: Exp)
+  Function(name: ExpVar, params: List(String), body: Exp)
 }
 
 pub type Exp {
@@ -46,7 +46,7 @@ pub type TModule {
 }
 
 pub type TFunction {
-  TFunction(name: ExpVar, params: List(String), body1: TExp, typ: Poly)
+  TFunction(name: ExpVar, params: List(String), body: TExp, typ: Poly)
 }
 
 pub type TExp {
@@ -478,7 +478,7 @@ fn unshadow_module(module: Module) -> Module {
   let functions =
     list.map(module.functions, fn(fun) {
       // TODO probably need to pass params to unshadow somehow
-      Function(fun.name, fun.params, unshadow(fun_names, 1, fun.body1))
+      Function(fun.name, fun.params, unshadow(fun_names, 1, fun.body))
     })
   let types = module.types
   Module(types, functions)
@@ -526,8 +526,8 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   // Find mutually recursive functions and order of functions
   let groups =
     list.fold(funs, graph.new(), fn(g, fun) { graph.insert_node(g, fun.name) })
-    |> list.fold(funs, _, fn(g, fun) { call_graph(g, fun.name, fun.body1) })
-    |> graph.connected_components()
+    |> list.fold(funs, _, fn(g, fun) { call_graph(g, fun.name, fun.body) })
+    |> graph.strongly_connected_components()
 
   let fun_by_name =
     dict.from_list(list.map(fun_vars, fn(x) { #({ x.1 }.name, x) }))
@@ -540,7 +540,7 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
         io.debug(fun.name)
         let #(l, env, sub) = acc
 
-        let fun_exp = ExpAbs(fun.params, fun.body1)
+        let fun_exp = ExpAbs(fun.params, fun.body)
 
         use #(texp1, sub1) <- result.try(w(env, fun_exp))
 
@@ -579,7 +579,10 @@ fn compile_type_name(typ: Type) -> String {
     TypeVar(_) -> panic as "type vars should be resolved"
     TypeApp(name, args) ->
       string.join([name, ..list.map(args, compile_type_name)], "_")
-    TypeFun(..) -> todo as "todo function types"
+    TypeFun(..) -> {
+      // TODO what do
+      "void*"
+    }
   }
 }
 
@@ -608,7 +611,7 @@ fn codegen_texp(arg: TExp, target: String, id: Int) -> String {
 
     TExpAbs(..) -> panic as "functions should be lifted"
     TExpLet(typ, var, val, exp) ->
-      compile_type_name(typ)
+      compile_type_name(val.typ)
       <> " "
       <> var
       <> ";\n"
@@ -629,7 +632,7 @@ import gleam/io
 
 fn codegen_function(fun: TFunction) -> String {
   let params = fun.params
-  let body = fun.body1
+  let body = fun.body
   let assert Mono(TypeFun(ret, param_types)) = fun.typ
   compile_type_name(ret)
   <> " "

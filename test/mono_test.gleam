@@ -47,11 +47,12 @@ pub fn main() {
   list.each(module.functions, fn(fun) { pprint.debug(fun) })
 
   io.println_error("\nCLOSURES\n")
-  closure_conversion.cc_module(module)
+  let module = closure_conversion.cc_module(module)
+  list.each(module.functions, fn(fun) { pprint.debug(fun) })
 
-  // io.println_error("\nCODEGEN\n")
-  // let output = core.codegen_module(module)
-  // io.println_error(output)
+  io.println_error("\nCODEGEN\n")
+  let output = core.codegen_module(module)
+  io.println_error(output)
 
   Nil
 }

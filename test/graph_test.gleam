@@ -1,6 +1,6 @@
 import gleam/io
 import gleeunit/should
-import graph.{connected_components, insert_edge, insert_node, new}
+import graph.{insert_edge, insert_node, new, strongly_connected_components}
 
 pub fn conencted_components_test() {
   // Test case 1: Acyclic graph
@@ -17,7 +17,7 @@ pub fn conencted_components_test() {
     |> insert_edge(3, 1)
 
   let expected = [[2], [5], [1], [3], [4]]
-  connected_components(graph) |> should.equal(expected)
+  strongly_connected_components(graph) |> should.equal(expected)
 
   // Test case 2: Graph with mutually recursive nodes
   let graph =
@@ -34,7 +34,7 @@ pub fn conencted_components_test() {
     |> insert_edge(4, 5)
 
   let expected = [[5], [4], [3], [1, 2]]
-  connected_components(graph) |> should.equal(expected)
+  strongly_connected_components(graph) |> should.equal(expected)
 
   // Test case 3: Graph with multiple mutually recursive groups
   let graph =
@@ -52,11 +52,11 @@ pub fn conencted_components_test() {
     |> insert_edge(5, 6)
 
   let expected = [[6], [5], [3, 4], [1, 2]]
-  connected_components(graph) |> should.equal(expected)
+  strongly_connected_components(graph) |> should.equal(expected)
 
   // Test case 4: Empty graph
   let graph = new()
   let expected = []
-  connected_components(graph)
+  strongly_connected_components(graph)
   |> should.equal(expected)
 }

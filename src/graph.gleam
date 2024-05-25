@@ -52,7 +52,8 @@ fn reverse_graph(g: Graph(a)) -> Graph(a) {
   )
 }
 
-pub fn connected_components(g: Graph(a)) -> List(List(a)) {
+pub fn strongly_connected_components(g: Graph(a)) -> List(List(a)) {
+  // Kosaraju's algorithm
   let #(_, l) =
     list.fold(g.adj, #([], []), fn(acc, i) {
       let #(v, l) = acc
@@ -86,9 +87,11 @@ fn visit(g: Graph(a), v: List(a), l: List(a), u: a) -> #(List(a), List(a)) {
   }
 }
 
-/// g should be the reversed graph
-/// a is assignments
 fn assign(g: Graph(a), a: List(#(a, a)), u: a, root: a) -> List(#(a, a)) {
+  // If u has not been assigned to a component then:
+  //   Assign u as belonging to the component whose root is root.
+  //   For each in-neighbour v of u, do Assign(v,root).
+  // Otherwise do nothing.
   case has_assignment(a, u) {
     False -> {
       let a = [#(u, root), ..a]
