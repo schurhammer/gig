@@ -47,7 +47,12 @@ pub fn cc_module(mod: TModule) {
   let c =
     list.fold(mod.functions, c, fn(c, fun) {
       // TODO do we need to add the functions args to env?
-      let #(c, e) = cc(c, env.new(), fun.body)
+      let assert Mono(TypeFun(ret, param_types)) = fun.typ
+      let n =
+        list.zip(fun.params, param_types)
+        |> list.fold(env.new(), fn(n, i) { env.put(n, i.0, i.1) })
+
+      let #(c, e) = cc(c, n, fun.body)
 
       let assert Mono(typ) = fun.typ
       let function = Function(fun.name, fun.params, e, typ)
@@ -157,17 +162,14 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
       #(c, CallClosure(typ, fun, args))
     }
     TExpAbs(typ, vars, exp) -> {
-      // TODO recursive call before or after?
-      let #(c, exp) = cc(c, n, exp)
-
+      // update the env with abstraction vars
       let assert TypeFun(ret, param_types) = typ
-      env.debug(n)
-
       let n =
         list.zip(vars, param_types)
         |> list.fold(n, fn(n, i) { env.put(n, i.0, i.1) })
 
-      env.debug(n)
+      // TODO recursive call before or after converting this?
+      let #(c, exp) = cc(c, n, exp)
 
       // we ignore any vars not in env, we assume they are globally available
       // and do not need to enter the closure

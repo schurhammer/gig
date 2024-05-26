@@ -12,13 +12,13 @@ import gleam/string
 const type_tag_seperator = "_T_"
 
 type MM {
-  MM(poly: TModule, mono: TModule)
+  MM(poly: TModule, mono: TModule, done: List(String))
 }
 
 pub fn run(poly: TModule) -> TModule {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
 
-  let m = MM(poly, TModule(poly.types, []))
+  let m = MM(poly, TModule(poly.types, []), [])
   let assert Mono(typ) = main.typ
   let #(m, name) = instantiate(m, "main", typ)
 
@@ -73,32 +73,35 @@ fn type_to_string(typ: Type) -> String {
   }
 }
 
-fn instantiate_fun(fun: TFunction, typ: Type) -> TFunction {
+fn instantiate_name(fun: TFunction, typ: Type) -> String {
   let subs = unify_poly(fun.typ, typ)
 
-  let mono_name =
-    fun.name
-    <> type_tag_seperator
-    <> subs.0
-    |> list.map(type_to_string)
-    |> string.join("_")
+  fun.name
+  <> type_tag_seperator
+  <> subs.0
+  |> list.map(type_to_string)
+  |> string.join("_")
+}
 
+fn instantiate_fun(fun: TFunction, typ: Type, mono_name: String) -> TFunction {
+  let subs = unify_poly(fun.typ, typ)
   let sub = dict.from_list(subs.1)
-
   let mono_body = core.apply_sub_texpr(sub, fun.body)
-
   TFunction(mono_name, fun.params, mono_body, Mono(typ))
 }
 
 fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
   case list.find(m.poly.functions, fn(x) { x.name == fun_name }) {
     Ok(fun) -> {
-      let inst = instantiate_fun(fun, typ)
-      case list.find(m.mono.functions, fn(x) { x.name == inst.name }) {
+      let inst_name = instantiate_name(fun, typ)
+      case list.contains(m.done, inst_name) {
         // already instantiated
-        Ok(_) -> #(m, inst.name)
+        True -> #(m, inst_name)
         // add instantiation
-        _ -> {
+        False -> {
+          let inst = instantiate_fun(fun, typ, inst_name)
+          // must add function to context before the recursive call
+          let m = MM(..m, done: [inst_name, ..m.done])
           let #(m, exp) = mm(m, inst.body)
           let inst = TFunction(inst.name, inst.params, exp, inst.typ)
           let funs = [inst, ..m.mono.functions]

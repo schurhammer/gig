@@ -308,6 +308,10 @@ pub fn w(env: Env, exp: Exp) -> Result(#(TExp, Sub), String) {
           apply_sub(sub, var_type)
         })
 
+      // TODO not sure if this is correct, but it fixes recursion
+      // the real error might be elsewhere
+      let body_texp = apply_sub_texpr(sub, body_texp)
+
       // Construct the function type
       let abs_type = TypeFun(body_texp.typ, param_types)
 
@@ -506,6 +510,8 @@ fn call_graph(
   }
 }
 
+import gleam/io
+
 pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
   let module = unshadow_module(module)
 
@@ -539,11 +545,13 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
         let fun_exp = ExpAbs(fun.params, fun.body)
 
         use #(texp1, sub1) <- result.try(w(env, fun_exp))
+        io.debug(fun.name)
+
+        io.debug(texp1)
 
         let assert TExpAbs(fun_typ, params, body) = texp1
         let fun_type_gen = gen(apply_sub_env(sub1, env), fun_typ)
         let env1 = dict.insert(env, fun.name, fun_type_gen)
-        // let env1 = apply_sub_env(sub1, env1)
         let env1 = apply_sub_env(sub1, env1)
 
         // TODO is this line needed/correct?

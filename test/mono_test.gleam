@@ -15,14 +15,24 @@ pub fn main() {
   let assert Ok(module) =
     glance.module(
       "
+      fn fact(n) {
+        case n {
+          0 | 1 -> 1
+          n -> n * fact(n - 1)
+        }
+      }
       fn id(x) {
         x
       }
+      fn apply(f, x) {
+        f(x)
+      }
       fn main() {
         let x = 1
+        let id_var = id
         let add_x = fn(y) { y + x }
-        id(1)
-        id(add_x(1))
+        id_var(add_x(2))
+        apply(fact, 3)
       }
   ",
     )

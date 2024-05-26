@@ -10,7 +10,10 @@ import gleam/string
 
 fn type_name(typ: Type) -> String {
   case typ {
-    TypeVar(_) -> panic as "type vars should be resolved"
+    TypeVar(_) -> {
+      io.debug(typ)
+      panic as "type vars should be resolved"
+    }
     TypeApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
     TypeFun(..) -> {
       // TODO what do
@@ -26,6 +29,10 @@ fn hit_target(target: String, with: String) {
     // "RETURN" -> "return " <> with <> ";\n"
     target -> target <> " = " <> with <> ";\n"
   }
+}
+
+fn ternary(cond: String, then: String, els: String) -> String {
+  "(" <> cond <> " ? " <> then <> " : " <> els <> ")"
 }
 
 fn texp(arg: Exp, target: String, id: Int) -> String {
@@ -45,28 +52,46 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
     CallClosure(typ, fun, args) -> {
       let closure = texp(fun, "", id)
       let param_types = list.map(args, fn(x) { type_name(x.typ) })
-      let cast =
+
+      let fun = closure <> ".fun"
+      let env_param = closure <> ".env"
+      let params = list.map(args, texp(_, "", id))
+
+      // the closure may or may not have an env parameter
+      // determined by if env is a null pointer
+      let cond = env_param
+
+      let exp_env =
         "("
+        <> "("
         <> type_name(typ)
         <> "(*)"
         <> "("
         <> string.join(["void*", ..param_types], ", ")
         <> ")"
         <> ")"
-      let fun = closure <> ".fun"
-      let env_param = closure <> ".env"
-      let params = list.map(args, texp(_, "", id))
-
-      let exp =
-        "("
-        <> cast
         <> fun
         <> ")"
         <> "("
         <> string.join([env_param, ..params], ", ")
         <> ")"
 
-      hit_target(target, exp)
+      let exp_no_env =
+        "("
+        <> "("
+        <> type_name(typ)
+        <> "(*)"
+        <> "("
+        <> string.join(param_types, ", ")
+        <> ")"
+        <> ")"
+        <> fun
+        <> ")"
+        <> "("
+        <> string.join(params, ", ")
+        <> ")"
+
+      hit_target(target, ternary(cond, exp_env, exp_no_env))
     }
     Let(typ, var, val, exp) ->
       type_name(val.typ)
