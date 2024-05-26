@@ -206,8 +206,5 @@ pub fn main() {
   })
   io.println_error("\n")
   let assert Ok(module) = c.w_module(dict.from_list(prelude), core)
-  let output = c.codegen_module(module)
-  io.println_error("\n\noutput:\n")
-  io.println_error(output)
   Nil
 }

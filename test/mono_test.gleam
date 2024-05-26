@@ -1,4 +1,5 @@
 import closure_conversion
+import codegen
 import core
 import gig
 import glance
@@ -45,7 +46,7 @@ pub fn main() {
   list.each(module.types, fn(typ) { pprint.debug(typ) })
 
   io.println_error("\nCODEGEN\n")
-  let output = core.codegen_module(module)
+  let output = codegen.module(module)
   io.println_error(output)
 
   Nil
