@@ -15,20 +15,13 @@ pub fn main() {
     glance.module(
       "
       fn id(x) {
-        a(1)
-        x
-      }
-      fn a(x) {
-        x
-      }
-      fn not_called(x) {
         x
       }
       fn main() {
         let x = 1
         let add_x = fn(y) { y + x }
+        id(1)
         id(add_x(1))
-        0
       }
   ",
     )
@@ -49,6 +42,7 @@ pub fn main() {
   io.println_error("\nCLOSURES\n")
   let module = closure_conversion.cc_module(module)
   list.each(module.functions, fn(fun) { pprint.debug(fun) })
+  list.each(module.types, fn(typ) { pprint.debug(typ) })
 
   io.println_error("\nCODEGEN\n")
   let output = core.codegen_module(module)

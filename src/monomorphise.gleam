@@ -18,7 +18,7 @@ type MM {
 pub fn run(poly: TModule) -> TModule {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
 
-  let m = MM(poly, TModule([]))
+  let m = MM(poly, TModule(poly.types, []))
   let assert Mono(typ) = main.typ
   let #(m, name) = instantiate(m, "main", typ)
 
@@ -102,7 +102,7 @@ fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
           let #(m, exp) = mm(m, inst.body)
           let inst = TFunction(inst.name, inst.params, exp, inst.typ)
           let funs = [inst, ..m.mono.functions]
-          let mono = TModule(funs)
+          let mono = TModule(m.mono.types, funs)
           let m = MM(..m, mono: mono)
           #(m, inst.name)
         }

@@ -14,7 +14,7 @@ pub type Module {
 }
 
 pub type TypeDef {
-  TypeDef(name: String, params: List(String), body: List(VariantDef))
+  TypeDef(name: String, params: List(String), variants: List(VariantDef))
 }
 
 pub type VariantDef {
@@ -22,7 +22,7 @@ pub type VariantDef {
 }
 
 pub type Field {
-  Field(name: String, typ: String)
+  Field(name: String, typ: Type)
 }
 
 pub type Function {
@@ -42,7 +42,7 @@ pub type TypeVar =
   Int
 
 pub type TModule {
-  TModule(functions: List(TFunction))
+  TModule(types: List(TypeDef), functions: List(TFunction))
 }
 
 pub type TFunction {
@@ -571,17 +571,17 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
     }),
   )
 
-  Ok(TModule(functions: functions))
+  Ok(TModule(types: module.types, functions: functions))
 }
 
-fn compile_type_name(typ: Type) -> String {
+fn codegen_type_name(typ: Type) -> String {
   case typ {
     TypeVar(_) -> panic as "type vars should be resolved"
     TypeApp(name, args) ->
-      string.join([name, ..list.map(args, compile_type_name)], "_")
+      string.join([name, ..list.map(args, codegen_type_name)], "_")
     TypeFun(..) -> {
       // TODO what do
-      "void*"
+      "Closure"
     }
   }
 }
@@ -600,18 +600,45 @@ fn codegen_texp(arg: TExp, target: String, id: Int) -> String {
     TExpInt(_, val) -> codegen_target(target, int.to_string(val))
 
     TExpVar(_, val) -> codegen_target(target, val)
-    TExpApp(typ, fun, args) ->
-      codegen_target(
-        target,
-        codegen_texp(fun, "", id)
-          <> "("
-          <> list.map(args, codegen_texp(_, "", id)) |> string.join(", ")
-          <> ")",
-      )
+    TExpApp(typ, fun, args) -> {
+      // codegen_target(
+      //   target,
+      //   codegen_texp(fun, "", id)
+      //     <> "("
+      //     <> list.map(args, codegen_texp(_, "", id)) |> string.join(", ")
+      //     <> ")",
+      // )
+      // TODO handle non-closures
+
+      let closure = codegen_texp(fun, "", id)
+      let param_types = list.map(args, fn(x) { codegen_type_name(x.typ) })
+      let cast =
+        "("
+        <> codegen_type_name(typ)
+        <> "(*)"
+        <> "("
+        <> string.join(["void*", ..param_types], ", ")
+        <> ")"
+        <> ")"
+      let fun = closure <> ".fun"
+      let env_param = closure <> ".env"
+      let params = list.map(args, codegen_texp(_, "", id))
+
+      let exp =
+        "("
+        <> cast
+        <> fun
+        <> ")"
+        <> "("
+        <> string.join([env_param, ..params], ", ")
+        <> ")"
+
+      codegen_target(target, exp)
+    }
 
     TExpAbs(..) -> panic as "functions should be lifted"
     TExpLet(typ, var, val, exp) ->
-      compile_type_name(val.typ)
+      codegen_type_name(val.typ)
       <> " "
       <> var
       <> ";\n"
@@ -634,28 +661,117 @@ fn codegen_function(fun: TFunction) -> String {
   let params = fun.params
   let body = fun.body
   let assert Mono(TypeFun(ret, param_types)) = fun.typ
-  compile_type_name(ret)
+  codegen_type_name(ret)
   <> " "
   <> fun.name
   <> "("
   <> list.zip(params, param_types)
   |> list.map(fn(p) {
     let #(name, typ) = p
-    compile_type_name(typ) <> " " <> name
+    codegen_type_name(typ) <> " " <> name
   })
   |> string.join(", ")
   <> ") {\n"
-  <> compile_type_name(ret)
+  <> codegen_type_name(ret)
   <> " RETURN;\n"
   <> codegen_texp(body, "RETURN", 1)
   <> "return RETURN;\n"
   <> "}"
 }
 
+fn codegen_function_forward(fun: TFunction) -> String {
+  let params = fun.params
+  let assert Mono(TypeFun(ret, param_types)) = fun.typ
+  codegen_type_name(ret)
+  <> " "
+  <> fun.name
+  <> "("
+  <> list.zip(params, param_types)
+  |> list.map(fn(p) {
+    let #(name, typ) = p
+    codegen_type_name(typ) <> " " <> name
+  })
+  |> string.join(", ")
+  <> ");"
+}
+
+fn codegen_type_def_forward(t: TypeDef) {
+  list.map(t.variants, fn(v) {
+    "typedef struct " <> v.name <> " " <> v.name <> ";"
+  })
+  |> string.join("\n")
+}
+
+fn codegen_type_def(t: TypeDef) {
+  // TODO handle union types
+  list.map(t.variants, fn(v) {
+    let fields =
+      list.map(v.fields, fn(f) {
+        codegen_type_name(f.typ) <> " " <> f.name <> ";\n"
+      })
+      |> string.join("")
+
+    let struct = "struct " <> v.name <> "{\n" <> fields <> "};"
+
+    let constructor =
+      v.name
+      <> "* "
+      <> v.name
+      <> "_NEW"
+      <> "("
+      <> v.fields
+      |> list.map(fn(p) { codegen_type_name(p.typ) <> " " <> p.name })
+      |> string.join(", ")
+      <> ") {\n"
+      <> v.name
+      <> "* RETURN = malloc(sizeof("
+      <> v.name
+      <> "));\n"
+      <> v.fields
+      |> list.map(fn(p) { "RETURN->" <> p.name <> " = " <> p.name <> ";\n" })
+      |> string.join("")
+      <> "return RETURN;\n"
+      <> "}"
+    let getters =
+      list.map(v.fields, fn(f) {
+        codegen_type_name(f.typ)
+        <> " "
+        <> v.name
+        <> "_GET_"
+        <> f.name
+        <> "("
+        <> v.name
+        <> "* data) { return data->"
+        <> f.name
+        <> "; }"
+      })
+    [struct, constructor, ..getters]
+    |> string.join("\n\n")
+  })
+  |> string.join("\n")
+}
+
 pub fn codegen_module(mod: TModule) -> String {
-  // TODO instead of just reversing we should emit forward declarations
-  let funs = list.reverse(mod.functions)
-  list.map(funs, codegen_function)
+  let funs = mod.functions
+  let types = mod.types
+
+  let type_decl =
+    list.map(types, codegen_type_def_forward)
+    |> string.join("\n\n")
+
+  let type_impl =
+    list.map(types, codegen_type_def)
+    |> string.join("\n\n")
+
+  let fun_decl =
+    list.map(funs, codegen_function_forward)
+    |> string.join("\n\n")
+
+  let fun_impl =
+    list.map(funs, codegen_function)
+    |> string.join("\n\n")
+
+  [type_decl, type_impl, fun_decl, fun_impl]
   |> string.join("\n\n")
 }
 

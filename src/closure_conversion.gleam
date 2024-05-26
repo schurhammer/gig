@@ -1,6 +1,7 @@
 import core.{
-  type TExp, type TFunction, type TModule, type Type, Mono, TExpAbs, TExpApp,
-  TExpIf, TExpInt, TExpLet, TExpVar, TFunction, TModule, TypeApp, TypeFun,
+  type TExp, type TFunction, type TModule, type Type, Field, Mono, TExpAbs,
+  TExpApp, TExpIf, TExpInt, TExpLet, TExpVar, TFunction, TModule, TypeApp,
+  TypeDef, TypeFun, VariantDef,
 }
 
 import env
@@ -20,23 +21,29 @@ type CC {
   CC(mod: TModule, uid: Int)
 }
 
+pub type Exp {
+  Int(typ: Type, val: Int)
+  Var(typ: Type, var: Int)
+  Call(typ: Type, fun: Exp, arg: List(Exp))
+  CallClosure(typ: Type, fun: Exp, arg: List(Exp))
+  Let(typ: Type, var: Int, val: Exp, exp: Exp)
+  If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
+}
+
 type Env =
   env.Env(String, Type)
 
 pub fn cc_module(mod: TModule) {
-  let c = CC(TModule([]), 1)
-
-  // let global_env =
-  //   list.fold(mod.functions, env.new(), fn(n, fun) {
-  //     let assert Mono(t) = fun.typ
-  //     env.put(n, fun.name, t)
-  //   })
+  let c = CC(TModule(types: mod.types, functions: []), 1)
 
   let c =
     list.fold(mod.functions, c, fn(c, fun) {
+      // TODO do we need to add the functions args to env?
       let #(c, e) = cc(c, env.new(), fun.body)
-      let mod =
-        TModule(functions: [TFunction(..fun, body: e), ..c.mod.functions])
+      let types = c.mod.types
+      let functions = c.mod.functions
+      let functions = [TFunction(..fun, body: e), ..functions]
+      let mod = TModule(types: types, functions: functions)
       let c = CC(..c, mod: mod)
       c
     })
@@ -81,6 +88,14 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, TExp) {
   case e {
     TExpInt(_, _) -> #(c, e)
     TExpVar(typ, var) -> {
+      // TODO when a function is accessed, convert it to closure
+      // TODO how do we know its not already a closure?
+
+      // functions that are in the global function list:
+      // - if its a direct call, translate to special direct call node
+      // - if its used as a varaible, not a direct call, translate to closure
+      // all calls that are not the special direct call:
+      // - translate to closure call
       #(c, TExpVar(typ, var))
     }
     TExpApp(typ, fun, args) -> {
@@ -95,6 +110,7 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, TExp) {
       #(c, TExpApp(typ, fun, args))
     }
     TExpAbs(typ, vars, exp) -> {
+      // TODO recursive call before or after?
       let #(c, exp) = cc(c, n, exp)
 
       let assert TypeFun(ret, param_types) = typ
@@ -118,7 +134,7 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, TExp) {
       let fun_name = "closure_C" <> id
       let env_name = "env_C" <> id
       let env_type_name = "env_type_C" <> id
-      let env_type = TypeApp(env_type_name, [])
+      let env_type = TypeApp(env_type_name <> "*", [])
 
       let fun_params = [env_name, ..vars]
 
@@ -141,11 +157,13 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, TExp) {
           )
         })
 
+      let funs = c.mod.functions
+      let types = c.mod.types
+
       // add global function to module
       let fun_type = TypeFun(fun_body.typ, [env_type, ..param_types])
       let fun = TFunction(fun_name, fun_params, fun_body, Mono(fun_type))
-      let funs = [fun, ..c.mod.functions]
-      let c = CC(TModule(funs), c.uid + 1)
+      let funs = [fun, ..funs]
 
       // create the closure
       let fun_pointer = TExpVar(typ, fun_name)
@@ -153,22 +171,24 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, TExp) {
       let new_env_fun_name = env_type_name <> "_NEW"
       let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
       let new_env_fun_type = TypeFun(env_type, env_arg_types)
-      let env_args = closure_fields |> list.map(fn(x) { TExpVar(x.1, x.0) })
+      let env_args = list.map(closure_fields, fn(x) { TExpVar(x.1, x.0) })
 
-      let env_constructor =
+      let env_constructor_call =
         TExpApp(env_type, TExpVar(new_env_fun_type, new_env_fun_name), env_args)
 
       let closure =
         TExpApp(typ, TExpVar(typ, "create_closure"), [
           fun_pointer,
-          env_constructor,
+          env_constructor_call,
         ])
 
-      // TODO
-      // create closure record type
-      // figure out how create_closure works
-      // figure out how to call closures
-      // convert functions to closures when used in a higher order way
+      let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
+      let variant = VariantDef(env_type_name, fields)
+      let typedef = TypeDef(env_type_name, [], [variant])
+
+      let types = [typedef, ..types]
+
+      let c = CC(TModule(types, funs), c.uid + 1)
 
       #(c, closure)
     }
