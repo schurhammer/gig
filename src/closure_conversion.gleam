@@ -1,12 +1,12 @@
-import core.{
-  type TExp, type TFunction, type TModule, type Type, Field, Mono, TExpAbs,
-  TExpApp, TExpIf, TExpInt, TExpLet, TExpVar, TFunction, TModule, TypeApp,
-  TypeDef, TypeFun, VariantDef,
+import typed.{
+  type TExp, type TModule, Mono, TExpAbs, TExpApp, TExpIf, TExpInt, TExpLet,
+  TExpVar, TModule,
 }
+
+import core.{type Type, Field, TypeApp, TypeDef, TypeFun, VariantDef}
 
 import env
 import gleam/int
-import gleam/io
 import gleam/list
 
 // TODO direct calls to top level functions could be added,

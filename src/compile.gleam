@@ -4,6 +4,7 @@ import codegen
 import core as c
 import glance
 import monomorphise
+import typed as t
 
 import shellout
 import simplifile
@@ -21,18 +22,18 @@ const bool = c.TypeApp("Bool", [])
 const int = c.TypeApp("Int", [])
 
 pub const prelude = [
-  #("panic", c.Poly(1, c.Mono(c.TypeFun(c.TypeVar(1), [])))),
-  #("equal", c.Poly(1, c.Mono(c.TypeFun(bool, [c.TypeVar(1), c.TypeVar(1)])))),
+  #("panic", t.Poly(1, t.Mono(c.TypeFun(c.TypeVar(1), [])))),
+  #("equal", t.Poly(1, t.Mono(c.TypeFun(bool, [c.TypeVar(1), c.TypeVar(1)])))),
   // bool
-  #("True", c.Mono(bool)), #("False", c.Mono(bool)),
-  #("and_bool", c.Mono(c.TypeFun(bool, [bool, bool]))),
-  #("or_bool", c.Mono(c.TypeFun(bool, [bool, bool]))),
+  #("True", t.Mono(bool)), #("False", t.Mono(bool)),
+  #("and_bool", t.Mono(c.TypeFun(bool, [bool, bool]))),
+  #("or_bool", t.Mono(c.TypeFun(bool, [bool, bool]))),
   // int
-  #("add_int", c.Mono(c.TypeFun(int, [int, int]))),
-  #("sub_int", c.Mono(c.TypeFun(int, [int, int]))),
-  #("mul_int", c.Mono(c.TypeFun(int, [int, int]))),
-  #("div_int", c.Mono(c.TypeFun(int, [int, int]))),
-  #("print_int", c.Mono(c.TypeFun(int, [int]))),
+  #("add_int", t.Mono(c.TypeFun(int, [int, int]))),
+  #("sub_int", t.Mono(c.TypeFun(int, [int, int]))),
+  #("mul_int", t.Mono(c.TypeFun(int, [int, int]))),
+  #("div_int", t.Mono(c.TypeFun(int, [int, int]))),
+  #("print_int", t.Mono(c.TypeFun(int, [int]))),
 ]
 
 // returns the file name of the binary
@@ -42,7 +43,7 @@ pub fn compile(gleam_file_name: String) {
   // run it through the compiler chain
   let assert Ok(module) = glance.module(input)
   let core = ast.module_to_core(module)
-  let assert Ok(typed) = c.w_module(dict.from_list(prelude), core)
+  let assert Ok(typed) = t.w_module(dict.from_list(prelude), core)
   let mono = monomorphise.run(typed)
   let cc = closure_conversion.cc_module(mono)
   let code = codegen.module(cc)

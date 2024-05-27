@@ -1,4 +1,3 @@
-import gleam/io
 import gleeunit/should
 import graph.{insert_edge, insert_node, new, strongly_connected_components}
 

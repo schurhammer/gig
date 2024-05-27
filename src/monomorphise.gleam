@@ -1,7 +1,8 @@
-import core.{
-  type Env, type Poly, type TExp, type TFunction, type TModule, type Type, Mono,
-  Poly, TExpAbs, TExpApp, TExpIf, TExpInt, TExpLet, TExpVar, TFunction, TModule,
-  TypeApp, TypeFun, TypeVar,
+import core.{type Type, TypeApp, TypeFun, TypeVar}
+
+import typed.{
+  type Poly, type TExp, type TFunction, type TModule, Mono, Poly, TExpAbs,
+  TExpApp, TExpIf, TExpInt, TExpLet, TExpVar, TFunction, TModule,
 }
 
 import gleam/dict
@@ -86,7 +87,7 @@ fn instantiate_name(fun: TFunction, typ: Type) -> String {
 fn instantiate_fun(fun: TFunction, typ: Type, mono_name: String) -> TFunction {
   let subs = unify_poly(fun.typ, typ)
   let sub = dict.from_list(subs.1)
-  let mono_body = core.apply_sub_texpr(sub, fun.body)
+  let mono_body = typed.apply_sub_texpr(sub, fun.body)
   TFunction(mono_name, fun.params, mono_body, Mono(typ))
 }
 

@@ -55,7 +55,14 @@ fn pattern_check_to_core(pattern: g.Pattern, subject: c.Exp) -> c.Exp {
       c.ExpApp(c.ExpVar("equal"), [value, subject])
     }
     g.PatternVariable(_) -> c.ExpVar("True")
-    _ -> todo
+
+    // g.PatternConstructor(_, name, _, _) -> {
+    // }
+    _ -> {
+      io.debug(pattern)
+      io.debug(subject)
+      todo
+    }
   }
 }
 
