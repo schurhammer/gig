@@ -5,7 +5,7 @@ import gleam/list
 import gleam/result
 import graph
 
-pub type ExpVar =
+pub type VarName =
   String
 
 pub type Module {
@@ -31,15 +31,15 @@ pub type Type {
 }
 
 pub type Function {
-  Function(name: ExpVar, params: List(String), body: Exp)
+  Function(name: VarName, params: List(String), body: Exp)
 }
 
 pub type Exp {
   Int(val: Int)
-  Var(var: ExpVar)
+  Var(var: VarName)
   App(fun: Exp, args: List(Exp))
-  Abs(var: List(ExpVar), exp: Exp)
-  Let(var: ExpVar, val: Exp, exp: Exp)
+  Abs(var: List(VarName), exp: Exp)
+  Let(var: VarName, val: Exp, exp: Exp)
   If(cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 

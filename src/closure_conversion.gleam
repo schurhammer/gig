@@ -1,13 +1,8 @@
-import typed.{
-  type TExp, type TModule, Mono, TExpAbs, TExpApp, TExpIf, TExpInt, TExpLet,
-  TExpVar, TModule,
-}
-
 import core.{type Type, Field, TypeApp, TypeDef, TypeFun, VariantDef}
-
 import env
 import gleam/int
 import gleam/list
+import typed as t
 
 // TODO direct calls to top level functions could be added,
 // but any higher-order usage probably need to be closure converted
@@ -41,20 +36,20 @@ pub type Exp {
   If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 
-pub fn cc_module(mod: TModule) {
+pub fn cc_module(mod: t.Module) {
   let c = CC(Module(types: mod.types, functions: []), 1)
 
   let c =
     list.fold(mod.functions, c, fn(c, fun) {
       // TODO do we need to add the functions args to env?
-      let assert Mono(TypeFun(ret, param_types)) = fun.typ
+      let assert t.Mono(TypeFun(ret, param_types)) = fun.typ
       let n =
         list.zip(fun.params, param_types)
         |> list.fold(env.new(), fn(n, i) { env.put(n, i.0, i.1) })
 
       let #(c, e) = cc(c, n, fun.body)
 
-      let assert Mono(typ) = fun.typ
+      let assert t.Mono(typ) = fun.typ
       let function = Function(fun.name, fun.params, e, typ)
 
       let mod = Module(c.mod.types, [function, ..c.mod.functions])
@@ -67,29 +62,29 @@ fn combine(a: List(a), b: List(a)) -> List(a) {
   list.fold(a, b, fn(b, a) { [a, ..b] })
 }
 
-fn fv(n: List(String), e: TExp) -> List(String) {
+fn fv(n: List(String), e: t.Exp) -> List(String) {
   case e {
-    TExpInt(_, _) -> []
-    TExpVar(typ, var) -> {
+    t.Int(_, _) -> []
+    t.Var(typ, var) -> {
       case list.contains(n, var) {
         True -> []
         False -> [var]
       }
     }
-    TExpApp(typ, fun, args) -> {
+    t.App(typ, fun, args) -> {
       let v = fv(n, fun)
       list.fold(args, v, fn(v, arg) { combine(fv(n, arg), v) })
     }
-    TExpAbs(typ, vars, exp) -> {
+    t.Abs(typ, vars, exp) -> {
       let n = combine(vars, n)
       fv(n, exp)
     }
-    TExpLet(typ, var, val, exp) -> {
+    t.Let(typ, var, val, exp) -> {
       let n = [var, ..n]
       let v = fv(n, exp)
       combine(v, fv(n, exp))
     }
-    TExpIf(typ, cond, then_e, else_e) -> {
+    t.If(typ, cond, then_e, else_e) -> {
       let v = fv(n, cond)
       let v = combine(v, fv(n, then_e))
       combine(v, fv(n, else_e))
@@ -97,11 +92,11 @@ fn fv(n: List(String), e: TExp) -> List(String) {
   }
 }
 
-fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
+fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
   case e {
-    TExpInt(typ, var) -> #(c, Int(typ, var))
+    t.Int(typ, var) -> #(c, Int(typ, var))
     // detect functions that need to be converted to closures
-    TExpVar(TypeFun(ret, params) as typ, var) -> {
+    t.Var(TypeFun(ret, params) as typ, var) -> {
       case env.has(n, var) {
         // not in local env so it must be a global function
         False -> {
@@ -117,11 +112,11 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
         }
       }
     }
-    TExpVar(typ, var) -> {
+    t.Var(typ, var) -> {
       #(c, Var(typ, var))
     }
     // detect "direct" function calls
-    TExpApp(typ, TExpVar(fun_type, fun_name) as fun, args) -> {
+    t.App(typ, t.Var(fun_type, fun_name) as fun, args) -> {
       case env.has(n, fun_name) {
         // not in local env so it must be a global function
         False -> {
@@ -149,7 +144,7 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
         }
       }
     }
-    TExpApp(typ, fun, args) -> {
+    t.App(typ, fun, args) -> {
       let #(c, fun) = cc(c, n, fun)
       let #(c, args) =
         list.fold(args, #(c, []), fn(acc, arg) {
@@ -160,7 +155,7 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
       let args = list.reverse(args)
       #(c, CallClosure(typ, fun, args))
     }
-    TExpAbs(typ, vars, exp) -> {
+    t.Abs(typ, vars, exp) -> {
       // update the env with abstraction vars
       let assert TypeFun(ret, param_types) = typ
       let n =
@@ -240,13 +235,13 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
 
       #(c, closure)
     }
-    TExpLet(typ, var, val, exp) -> {
+    t.Let(typ, var, val, exp) -> {
       let #(c, val) = cc(c, n, val)
       let n = env.put(n, var, val.typ)
       let #(c, exp) = cc(c, n, exp)
       #(c, Let(typ, var, val, exp))
     }
-    TExpIf(typ, cond, then_e, else_e) -> {
+    t.If(typ, cond, then_e, else_e) -> {
       let #(c, cond) = cc(c, n, cond)
       let #(c, then_e) = cc(c, n, then_e)
       let #(c, else_e) = cc(c, n, else_e)

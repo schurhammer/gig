@@ -6,61 +6,61 @@ import unique_integer
 
 import core.{type Type, type TypeDef, TypeApp, TypeDef, TypeFun, TypeVar} as c
 
-pub type ExpVar =
+pub type VarName =
   String
 
-pub type TypeVar =
+pub type TypeVarName =
   Int
 
 pub type Env =
-  dict.Dict(ExpVar, Poly)
+  dict.Dict(VarName, Poly)
 
 pub type Sub =
-  dict.Dict(TypeVar, Type)
+  dict.Dict(TypeVarName, Type)
 
-pub type TModule {
-  TModule(types: List(TypeDef), functions: List(TFunction))
+pub type Module {
+  Module(types: List(TypeDef), functions: List(Function))
 }
 
-pub type TFunction {
-  TFunction(name: ExpVar, params: List(String), body: TExp, typ: Poly)
+pub type Function {
+  Function(name: VarName, params: List(String), body: Exp, typ: Poly)
 }
 
-pub type TExp {
-  TExpInt(typ: Type, val: Int)
-  TExpVar(typ: Type, var: ExpVar)
-  TExpApp(typ: Type, fun: TExp, arg: List(TExp))
-  TExpAbs(typ: Type, var: List(ExpVar), exp: TExp)
-  TExpLet(typ: Type, var: ExpVar, val: TExp, exp: TExp)
-  TExpIf(typ: Type, cond: TExp, then_exp: TExp, else_exp: TExp)
+pub type Exp {
+  Int(typ: Type, val: Int)
+  Var(typ: Type, var: VarName)
+  App(typ: Type, fun: Exp, arg: List(Exp))
+  Abs(typ: Type, var: List(VarName), exp: Exp)
+  Let(typ: Type, var: VarName, val: Exp, exp: Exp)
+  If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 
 pub type Poly {
   Mono(typ: Type)
-  Poly(var: TypeVar, typ: Poly)
+  Poly(var: TypeVarName, typ: Poly)
 }
 
-pub fn apply_sub_texpr(sub: Sub, texp: TExp) -> TExp {
+pub fn apply_sub_texpr(sub: Sub, texp: Exp) -> Exp {
   case texp {
-    TExpInt(_, _) -> texp
-    TExpVar(typ, var) -> TExpVar(apply_sub(sub, typ), var)
-    TExpApp(typ, fun, arg) ->
-      TExpApp(
+    Int(_, _) -> texp
+    Var(typ, var) -> Var(apply_sub(sub, typ), var)
+    App(typ, fun, arg) ->
+      App(
         apply_sub(sub, typ),
         apply_sub_texpr(sub, fun),
         list.map(arg, apply_sub_texpr(sub, _)),
       )
-    TExpAbs(typ, var, exp) ->
-      TExpAbs(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
-    TExpLet(typ, var, val, exp) ->
-      TExpLet(
+    Abs(typ, var, exp) ->
+      Abs(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
+    Let(typ, var, val, exp) ->
+      Let(
         apply_sub(sub, typ),
         var,
         apply_sub_texpr(sub, val),
         apply_sub_texpr(sub, exp),
       )
-    TExpIf(typ, cond, then_exp, else_exp) ->
-      TExpIf(
+    If(typ, cond, then_exp, else_exp) ->
+      If(
         apply_sub(sub, typ),
         apply_sub_texpr(sub, cond),
         apply_sub_texpr(sub, then_exp),
@@ -87,15 +87,15 @@ fn inst(sub: Sub, poly: Poly) -> Type {
   }
 }
 
-pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
+pub fn w(env: Env, exp: c.Exp) -> Result(#(Exp, Sub), String) {
   case exp {
-    c.Int(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
+    c.Int(val) -> Ok(#(Int(TypeApp("Int", []), val), dict.new()))
     c.Var(var) ->
       case dict.get(env, var) {
         Ok(poly) -> {
           // Instantiate the polymorphic type to get a monomorphic type
           let typ = inst(dict.new(), poly)
-          Ok(#(TExpVar(typ, var), dict.new()))
+          Ok(#(Var(typ, var), dict.new()))
         }
         Error(_) -> Error("Unbound variable " <> var)
       }
@@ -144,7 +144,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
       let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
       let ret_type = apply_sub(sub123, ret_type)
 
-      Ok(#(TExpApp(ret_type, funtype_sub3, args_sub3), sub123))
+      Ok(#(App(ret_type, funtype_sub3, args_sub3), sub123))
     }
     c.Abs(params, body) -> {
       // Create a new type variable for each parameter
@@ -175,7 +175,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
       // Construct the function type
       let abs_type = TypeFun(body_texp.typ, param_types)
 
-      Ok(#(TExpAbs(abs_type, params, body_texp), sub))
+      Ok(#(Abs(abs_type, params, body_texp), sub))
     }
     c.Let(var, val, body) -> {
       // Infer the type of the value being bound
@@ -192,7 +192,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
       use #(texp2, sub2) <- result.try(w(env1, body))
 
       // Combine the substitutions and return the type of the let expression
-      Ok(#(TExpLet(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
+      Ok(#(Let(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
     }
     c.If(cond, then_exp, else_exp) -> {
       // Infer the type of the condition, then, and else branch
@@ -225,7 +225,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
               compose_sub(sub_else, compose_sub(sub_then, sub_cond)),
             )
 
-          Ok(#(TExpIf(if_type, texp_cond, texp_then, texp_else), sub))
+          Ok(#(If(if_type, texp_cond, texp_then, texp_else), sub))
         }
         _ -> Error("Condition expression must be of type Bool")
       }
@@ -233,7 +233,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
   }
 }
 
-pub fn w_module(env: Env, module: c.Module) -> Result(TModule, String) {
+pub fn w_module(env: Env, module: c.Module) -> Result(Module, String) {
   let module = c.unshadow_module(module)
 
   let funs = module.functions
@@ -267,7 +267,7 @@ pub fn w_module(env: Env, module: c.Module) -> Result(TModule, String) {
 
         use #(texp1, sub1) <- result.try(w(env, fun_exp))
 
-        let assert TExpAbs(fun_typ, params, body) = texp1
+        let assert Abs(fun_typ, params, body) = texp1
         let fun_type_gen = gen(apply_sub_env(sub1, env), fun_typ)
         let env1 = dict.insert(env, fun.name, fun_type_gen)
         let env1 = apply_sub_env(sub1, env1)
@@ -279,13 +279,13 @@ pub fn w_module(env: Env, module: c.Module) -> Result(TModule, String) {
 
         let l =
           list.map(l, fn(x) {
-            let TFunction(name, vars, body, typ) = x
+            let Function(name, vars, body, typ) = x
             let body = apply_sub_texpr(sub1, body)
-            TFunction(name, vars, body, typ)
+            Function(name, vars, body, typ)
           })
 
         Ok(#(
-          [TFunction(fun.name, params, body, fun_type_gen), ..l],
+          [Function(fun.name, params, body, fun_type_gen), ..l],
           env1,
           combined_sub,
         ))
@@ -293,10 +293,10 @@ pub fn w_module(env: Env, module: c.Module) -> Result(TModule, String) {
     }),
   )
 
-  Ok(TModule(types: module.types, functions: functions))
+  Ok(Module(types: module.types, functions: functions))
 }
 
-fn ftv(typ: Type) -> List(TypeVar) {
+fn ftv(typ: Type) -> List(TypeVarName) {
   case typ {
     TypeVar(a) -> [a]
     TypeApp(_, args) -> list.flat_map(args, ftv)
@@ -304,7 +304,7 @@ fn ftv(typ: Type) -> List(TypeVar) {
   }
 }
 
-fn ftv_poly(typ: Poly) -> List(TypeVar) {
+fn ftv_poly(typ: Poly) -> List(TypeVarName) {
   case typ {
     Mono(typ) -> ftv(typ)
     Poly(var, typ) ->
@@ -313,17 +313,17 @@ fn ftv_poly(typ: Poly) -> List(TypeVar) {
   }
 }
 
-fn ftv_env(env: Env) -> List(TypeVar) {
+fn ftv_env(env: Env) -> List(TypeVarName) {
   dict.fold(env, [], fn(acc, _, val) { list.append(acc, ftv_poly(val)) })
 }
 
-fn ftv_typing(env: Env, typ: Poly) -> List(TypeVar) {
+fn ftv_typing(env: Env, typ: Poly) -> List(TypeVarName) {
   let env_vars = ftv_env(env)
   ftv_poly(typ)
   |> list.filter(fn(x) { !list.contains(env_vars, x) })
 }
 
-fn new_type_var() -> TypeVar {
+fn new_type_var() -> TypeVarName {
   unique_integer.mono_positive()
 }
 
@@ -357,7 +357,7 @@ fn unify_many(types1: List(Type), types2: List(Type)) -> Result(Sub, String) {
   }
 }
 
-fn unify_var(var: TypeVar, typ: Type) -> Result(Sub, String) {
+fn unify_var(var: TypeVarName, typ: Type) -> Result(Sub, String) {
   case typ {
     TypeVar(var2) if var == var2 -> Ok(dict.new())
     _ ->
@@ -368,7 +368,7 @@ fn unify_var(var: TypeVar, typ: Type) -> Result(Sub, String) {
   }
 }
 
-fn occurs(var: TypeVar, typ: Type) -> Bool {
+fn occurs(var: TypeVarName, typ: Type) -> Bool {
   list.contains(ftv(typ), var)
 }
 

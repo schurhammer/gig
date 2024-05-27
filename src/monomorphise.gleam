@@ -1,9 +1,6 @@
 import core.{type Type, TypeApp, TypeFun, TypeVar}
 
-import typed.{
-  type Poly, type TExp, type TFunction, type TModule, Mono, Poly, TExpAbs,
-  TExpApp, TExpIf, TExpInt, TExpLet, TExpVar, TFunction, TModule,
-}
+import typed as t
 
 import gleam/dict
 import gleam/io
@@ -13,14 +10,14 @@ import gleam/string
 const type_tag_seperator = "_T_"
 
 type MM {
-  MM(poly: TModule, mono: TModule, done: List(String))
+  MM(poly: t.Module, mono: t.Module, done: List(String))
 }
 
-pub fn run(poly: TModule) -> TModule {
+pub fn run(poly: t.Module) -> t.Module {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
 
-  let m = MM(poly, TModule(poly.types, []), [])
-  let assert Mono(typ) = main.typ
+  let m = MM(poly, t.Module(poly.types, []), [])
+  let assert t.Mono(typ) = main.typ
   let #(m, name) = instantiate(m, "main", typ)
 
   m.mono
@@ -47,10 +44,10 @@ fn unify_type(poly: Type, mono: Type) -> List(#(Int, Type)) {
   }
 }
 
-fn unify_poly(poly: Poly, mono: Type) -> #(List(Type), List(#(Int, Type))) {
+fn unify_poly(poly: t.Poly, mono: Type) -> #(List(Type), List(#(Int, Type))) {
   case poly {
-    Mono(x) -> #([], unify_type(x, mono))
-    Poly(v, x) -> {
+    t.Mono(x) -> #([], unify_type(x, mono))
+    t.Poly(v, x) -> {
       let #(l, m) = unify_poly(x, mono)
       let t = case list.find(m, fn(x) { x.0 == v }) {
         Ok(x) -> x.1
@@ -74,7 +71,7 @@ fn type_to_string(typ: Type) -> String {
   }
 }
 
-fn instantiate_name(fun: TFunction, typ: Type) -> String {
+fn instantiate_name(fun: t.Function, typ: Type) -> String {
   let subs = unify_poly(fun.typ, typ)
 
   fun.name
@@ -84,11 +81,11 @@ fn instantiate_name(fun: TFunction, typ: Type) -> String {
   |> string.join("_")
 }
 
-fn instantiate_fun(fun: TFunction, typ: Type, mono_name: String) -> TFunction {
+fn instantiate_fun(fun: t.Function, typ: Type, mono_name: String) -> t.Function {
   let subs = unify_poly(fun.typ, typ)
   let sub = dict.from_list(subs.1)
-  let mono_body = typed.apply_sub_texpr(sub, fun.body)
-  TFunction(mono_name, fun.params, mono_body, Mono(typ))
+  let mono_body = t.apply_sub_texpr(sub, fun.body)
+  t.Function(mono_name, fun.params, mono_body, t.Mono(typ))
 }
 
 fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
@@ -104,9 +101,9 @@ fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
           // must add function to context before the recursive call
           let m = MM(..m, done: [inst_name, ..m.done])
           let #(m, exp) = mm(m, inst.body)
-          let inst = TFunction(inst.name, inst.params, exp, inst.typ)
+          let inst = t.Function(inst.name, inst.params, exp, inst.typ)
           let funs = [inst, ..m.mono.functions]
-          let mono = TModule(m.mono.types, funs)
+          let mono = t.Module(m.mono.types, funs)
           let m = MM(..m, mono: mono)
           #(m, inst.name)
         }
@@ -116,14 +113,14 @@ fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
   }
 }
 
-fn mm(m: MM, e: TExp) -> #(MM, TExp) {
+fn mm(m: MM, e: t.Exp) -> #(MM, t.Exp) {
   case e {
-    TExpInt(_, _) -> #(m, e)
-    TExpVar(typ, var) -> {
+    t.Int(_, _) -> #(m, e)
+    t.Var(typ, var) -> {
       let #(m, name) = instantiate(m, var, typ)
-      #(m, TExpVar(typ, name))
+      #(m, t.Var(typ, name))
     }
-    TExpApp(typ, fun, args) -> {
+    t.App(typ, fun, args) -> {
       let #(m, fun) = mm(m, fun)
       let #(m, args) =
         list.fold(args, #(m, []), fn(acc, arg) {
@@ -132,22 +129,22 @@ fn mm(m: MM, e: TExp) -> #(MM, TExp) {
           #(m, [arg, ..args])
         })
       let args = list.reverse(args)
-      #(m, TExpApp(typ, fun, args))
+      #(m, t.App(typ, fun, args))
     }
-    TExpAbs(typ, vars, exp) -> {
+    t.Abs(typ, vars, exp) -> {
       let #(m, exp) = mm(m, exp)
-      #(m, TExpAbs(typ, vars, exp))
+      #(m, t.Abs(typ, vars, exp))
     }
-    TExpLet(typ, var, val, exp) -> {
+    t.Let(typ, var, val, exp) -> {
       let #(m, val) = mm(m, val)
       let #(m, exp) = mm(m, exp)
-      #(m, TExpLet(typ, var, val, exp))
+      #(m, t.Let(typ, var, val, exp))
     }
-    TExpIf(typ, cond, then_e, else_e) -> {
+    t.If(typ, cond, then_e, else_e) -> {
       let #(m, cond) = mm(m, cond)
       let #(m, then_e) = mm(m, then_e)
       let #(m, else_e) = mm(m, else_e)
-      #(m, TExpIf(typ, cond, then_e, else_e))
+      #(m, t.If(typ, cond, then_e, else_e))
     }
   }
 }
