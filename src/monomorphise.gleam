@@ -120,7 +120,6 @@ fn mm(m: MM, e: TExp) -> #(MM, TExp) {
     TExpInt(_, _) -> #(m, e)
     TExpVar(typ, var) -> {
       let #(m, name) = instantiate(m, var, typ)
-      io.debug(name)
       #(m, TExpVar(typ, name))
     }
     TExpApp(typ, fun, args) -> {

@@ -2,6 +2,7 @@
 # You typically do not need to edit this file
 
 packages = [
+  { name = "filepath", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "filepath", source = "hex", outer_checksum = "EFB6FF65C98B2A16378ABC3EE2B14124168C0CE5201553DE652E2644DCFDB594" },
   { name = "glam", version = "2.0.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "glam", source = "hex", outer_checksum = "66EC3BCD632E51EED029678F8DF419659C1E57B1A93D874C5131FE220DFAD2B2" },
   { name = "glance", version = "0.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "glexer"], otp_app = "glance", source = "hex", outer_checksum = "8F3314D27773B7C3B9FB58D8C02C634290422CE531988C0394FA0DF8676B964D" },
   { name = "gleam_stdlib", version = "0.37.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "5398BD6C2ABA17338F676F42F404B9B7BABE1C8DC7380031ACB05BBE1BCF3742" },
@@ -9,6 +10,7 @@ packages = [
   { name = "glexer", version = "1.0.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "glexer", source = "hex", outer_checksum = "BD477AD657C2B637FEF75F2405FAEFFA533F277A74EF1A5E17B55B1178C228FB" },
   { name = "pprint", version = "1.0.3", build_tools = ["gleam"], requirements = ["glam", "gleam_stdlib"], otp_app = "pprint", source = "hex", outer_checksum = "76BBB92E23D12D954BD452686543F29EDE8EBEBB7FC0ACCBCA66EEF276EC3A06" },
   { name = "shellout", version = "1.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "shellout", source = "hex", outer_checksum = "E2FCD18957F0E9F67E1F497FC9FF57393392F8A9BAEAEA4779541DE7A68DD7E0" },
+  { name = "simplifile", version = "1.7.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "1D5DFA3A2F9319EC85825F6ED88B8E449F381B0D55A62F5E61424E748E7DDEB0" },
 ]
 
 [requirements]
@@ -17,3 +19,4 @@ gleam_stdlib = { version = ">= 0.34.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 pprint = { version = ">= 1.0.3 and < 2.0.0" }
 shellout = { version = ">= 1.6.0 and < 2.0.0" }
+simplifile = { version = ">= 1.7.0 and < 2.0.0"}

@@ -4,14 +4,12 @@ import closure_conversion.{
 }
 import core.{type Type, type TypeDef, TypeApp, TypeDef, TypeFun, TypeVar}
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/string
 
 fn type_name(typ: Type) -> String {
   case typ {
     TypeVar(_) -> {
-      io.debug(typ)
       panic as "type vars should be resolved"
     }
     TypeApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
@@ -224,5 +222,6 @@ pub fn module(mod: Module) -> String {
     |> string.join("\n\n")
 
   [type_decl, type_impl, fun_decl, fun_impl]
+  |> list.filter(fn(x) { !string.is_empty(x) })
   |> string.join("\n\n")
 }

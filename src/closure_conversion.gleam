@@ -118,7 +118,6 @@ fn cc(c: CC, n: Env, e: TExp) -> #(CC, Exp) {
       }
     }
     TExpVar(typ, var) -> {
-      io.debug(#("var", var, typ))
       #(c, Var(typ, var))
     }
     // detect "direct" function calls

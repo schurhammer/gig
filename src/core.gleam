@@ -545,9 +545,6 @@ pub fn w_module(env: Env, module: Module) -> Result(TModule, String) {
         let fun_exp = ExpAbs(fun.params, fun.body)
 
         use #(texp1, sub1) <- result.try(w(env, fun_exp))
-        io.debug(fun.name)
-
-        io.debug(texp1)
 
         let assert TExpAbs(fun_typ, params, body) = texp1
         let fun_type_gen = gen(apply_sub_env(sub1, env), fun_typ)
