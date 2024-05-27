@@ -35,12 +35,12 @@ pub type Function {
 }
 
 pub type Exp {
-  ExpInt(val: Int)
-  ExpVar(var: ExpVar)
-  ExpApp(fun: Exp, args: List(Exp))
-  ExpAbs(var: List(ExpVar), exp: Exp)
-  ExpLet(var: ExpVar, val: Exp, exp: Exp)
-  ExpIf(cond: Exp, then_exp: Exp, else_exp: Exp)
+  Int(val: Int)
+  Var(var: ExpVar)
+  App(fun: Exp, args: List(Exp))
+  Abs(var: List(ExpVar), exp: Exp)
+  Let(var: ExpVar, val: Exp, exp: Exp)
+  If(cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 
 pub type TypeVar =
@@ -48,34 +48,34 @@ pub type TypeVar =
 
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {
   case in {
-    ExpInt(_) -> in
-    ExpVar(var) ->
+    Int(_) -> in
+    Var(var) ->
       case var == replace {
-        True -> ExpVar(with)
+        True -> Var(with)
         False -> in
       }
-    ExpApp(fun, args) -> {
+    App(fun, args) -> {
       let fun = rename_var(replace, with, fun)
       let args = list.map(args, rename_var(replace, with, _))
-      ExpApp(fun, args)
+      App(fun, args)
     }
-    ExpAbs(vars, exp) ->
+    Abs(vars, exp) ->
       case list.contains(vars, replace) {
         True -> in
-        False -> ExpAbs(vars, rename_var(replace, with, exp))
+        False -> Abs(vars, rename_var(replace, with, exp))
       }
-    ExpLet(var, val, exp) ->
+    Let(var, val, exp) ->
       case var == replace {
-        True -> ExpLet(var, rename_var(replace, with, val), exp)
+        True -> Let(var, rename_var(replace, with, val), exp)
         False ->
-          ExpLet(
+          Let(
             var,
             rename_var(replace, with, val),
             rename_var(replace, with, exp),
           )
       }
-    ExpIf(cond, then_exp, else_exp) ->
-      ExpIf(
+    If(cond, then_exp, else_exp) ->
+      If(
         rename_var(replace, with, cond),
         rename_var(replace, with, then_exp),
         rename_var(replace, with, else_exp),
@@ -85,14 +85,14 @@ fn rename_var(replace: String, with: String, in: Exp) -> Exp {
 
 fn unshadow(taken: List(String), i: Int, exp: Exp) {
   case exp {
-    ExpInt(_) -> exp
-    ExpVar(_) -> exp
-    ExpApp(fun, args) -> {
+    Int(_) -> exp
+    Var(_) -> exp
+    App(fun, args) -> {
       let fun = unshadow(taken, i, fun)
       let args = list.map(args, unshadow(taken, i, _))
-      ExpApp(fun, args)
+      App(fun, args)
     }
-    ExpAbs(vars, exp) -> {
+    Abs(vars, exp) -> {
       let #(taken, i, vars, exp) =
         list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
           let #(taken, i, vars, exp) = acc
@@ -117,9 +117,9 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
         })
       let exp = unshadow(taken, i, exp)
       let vars = list.reverse(vars)
-      ExpAbs(vars, exp)
+      Abs(vars, exp)
     }
-    ExpLet(var, val, exp) ->
+    Let(var, val, exp) ->
       case list.contains(taken, var) {
         True -> {
           let val = unshadow(taken, i, val)
@@ -129,20 +129,20 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
           let var = new_var
           let taken = [var, ..taken]
           let exp = unshadow(taken, i, exp)
-          ExpLet(var, val, exp)
+          Let(var, val, exp)
         }
         False -> {
           let val = unshadow(taken, i, val)
           let taken = [var, ..taken]
           let exp = unshadow(taken, i, exp)
-          ExpLet(var, val, exp)
+          Let(var, val, exp)
         }
       }
-    ExpIf(cond, then_exp, else_exp) -> {
+    If(cond, then_exp, else_exp) -> {
       let cond = unshadow(taken, i, cond)
       let then_exp = unshadow(taken, i, then_exp)
       let else_exp = unshadow(taken, i, else_exp)
-      ExpIf(cond, then_exp, else_exp)
+      If(cond, then_exp, else_exp)
     }
   }
 }
@@ -163,18 +163,18 @@ pub fn call_graph(
   e: Exp,
 ) -> graph.Graph(String) {
   case e {
-    ExpInt(_) -> g
-    ExpVar(to) -> graph.insert_edge(g, from, to)
-    ExpApp(fun, args) -> {
+    Int(_) -> g
+    Var(to) -> graph.insert_edge(g, from, to)
+    App(fun, args) -> {
       let g = call_graph(g, from, fun)
       list.fold(args, g, fn(g, arg) { call_graph(g, from, arg) })
     }
-    ExpAbs(_, exp) -> call_graph(g, from, exp)
-    ExpLet(_, val, exp) -> {
+    Abs(_, exp) -> call_graph(g, from, exp)
+    Let(_, val, exp) -> {
       let g = call_graph(g, from, val)
       call_graph(g, from, exp)
     }
-    ExpIf(cond, then_e, else_e) -> {
+    If(cond, then_e, else_e) -> {
       let g = call_graph(g, from, cond)
       let g = call_graph(g, from, then_e)
       call_graph(g, from, else_e)
@@ -202,7 +202,7 @@ fn function_to_core(def: g.Definition(g.Function)) {
   Function(fun.name, params, body)
 }
 
-const panic_exp = ExpApp(ExpVar("panic"), [])
+const panic_exp = App(Var("panic"), [])
 
 fn block_to_core(block: List(g.Statement)) -> Exp {
   case block {
@@ -219,7 +219,7 @@ fn block_to_core(block: List(g.Statement)) -> Exp {
         g.Use(..) -> todo
         g.Assignment(pattern: p, value: e, ..) ->
           pattern_bind_to_core(p, expression_to_core(e), block_to_core(xs))
-        g.Expression(e) -> ExpLet("_", expression_to_core(e), block_to_core(xs))
+        g.Expression(e) -> Let("_", expression_to_core(e), block_to_core(xs))
       }
   }
 }
@@ -228,9 +228,9 @@ fn pattern_check_to_core(pattern: g.Pattern, subject: Exp) -> Exp {
   case pattern {
     g.PatternInt(value) -> {
       let value = int_to_core(value)
-      ExpApp(ExpVar("equal"), [value, subject])
+      App(Var("equal"), [value, subject])
     }
-    g.PatternVariable(_) -> ExpVar("True")
+    g.PatternVariable(_) -> Var("True")
 
     // g.PatternConstructor(_, name, _, _) -> {
     // }
@@ -245,51 +245,51 @@ fn pattern_check_to_core(pattern: g.Pattern, subject: Exp) -> Exp {
 fn pattern_bind_to_core(pattern: g.Pattern, subject: Exp, exp: Exp) -> Exp {
   case pattern {
     g.PatternInt(_) -> exp
-    g.PatternVariable(x) -> ExpLet(x, subject, exp)
+    g.PatternVariable(x) -> Let(x, subject, exp)
     _ -> todo
   }
 }
 
 fn int_to_core(value: String) {
   let assert Ok(n) = int.parse(value)
-  ExpInt(n)
+  Int(n)
 }
 
 fn expression_to_core(e: g.Expression) -> Exp {
   case e {
     g.Int(n) -> int_to_core(n)
-    g.Variable(s) -> ExpVar(s)
+    g.Variable(s) -> Var(s)
     g.BinaryOperator(name, left, right) ->
       case name {
         g.Eq ->
-          ExpApp(ExpVar("equal"), [
+          App(Var("equal"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.AddInt ->
-          ExpApp(ExpVar("add_int"), [
+          App(Var("add_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.SubInt ->
-          ExpApp(ExpVar("sub_int"), [
+          App(Var("sub_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.MultInt ->
-          ExpApp(ExpVar("mul_int"), [
+          App(Var("mul_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.DivInt ->
-          ExpApp(ExpVar("div_int"), [
+          App(Var("div_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         _ -> todo
       }
     g.Call(function, arguments) ->
-      ExpApp(
+      App(
         expression_to_core(function),
         list.map(arguments, fn(x) { expression_to_core(x.item) }),
       )
@@ -306,21 +306,21 @@ fn expression_to_core(e: g.Expression) -> Exp {
           let #(patterns, body) = clause
           let cond =
             list.index_map(patterns, fn(pattern, i) {
-              let subject = ExpVar("S" <> int.to_string(i))
+              let subject = Var("S" <> int.to_string(i))
               pattern_check_to_core(pattern, subject)
             })
-            |> list.reduce(fn(a, b) { ExpApp(ExpVar("and_bool"), [a, b]) })
-            |> result.unwrap(ExpVar("False"))
+            |> list.reduce(fn(a, b) { App(Var("and_bool"), [a, b]) })
+            |> result.unwrap(Var("False"))
           let then_exp =
             list.index_fold(patterns, expression_to_core(body), fn(exp, pat, i) {
-              let subject = ExpVar("S" <> int.to_string(i))
+              let subject = Var("S" <> int.to_string(i))
               pattern_bind_to_core(pat, subject, exp)
             })
 
-          ExpIf(cond, then_exp, else_exp)
+          If(cond, then_exp, else_exp)
         })
       list.index_fold(subjects, exp, fn(exp, sub, i) {
-        ExpLet("S" <> int.to_string(i), expression_to_core(sub), exp)
+        Let("S" <> int.to_string(i), expression_to_core(sub), exp)
       })
     }
     g.Fn(args, ret, body) -> {
@@ -333,7 +333,7 @@ fn expression_to_core(e: g.Expression) -> Exp {
           }
         })
       let body = block_to_core(body)
-      ExpAbs(params, body)
+      Abs(params, body)
     }
     _ -> {
       io.println_error("Not Implemented:")

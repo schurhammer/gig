@@ -89,8 +89,8 @@ fn inst(sub: Sub, poly: Poly) -> Type {
 
 pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
   case exp {
-    c.ExpInt(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
-    c.ExpVar(var) ->
+    c.Int(val) -> Ok(#(TExpInt(TypeApp("Int", []), val), dict.new()))
+    c.Var(var) ->
       case dict.get(env, var) {
         Ok(poly) -> {
           // Instantiate the polymorphic type to get a monomorphic type
@@ -99,7 +99,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
         }
         Error(_) -> Error("Unbound variable " <> var)
       }
-    c.ExpApp(fun, args) -> {
+    c.App(fun, args) -> {
       // Generate a type variable for the return value
       let ret_type = TypeVar(new_type_var())
 
@@ -146,7 +146,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
 
       Ok(#(TExpApp(ret_type, funtype_sub3, args_sub3), sub123))
     }
-    c.ExpAbs(params, body) -> {
+    c.Abs(params, body) -> {
       // Create a new type variable for each parameter
       let param_types =
         list.map(params, fn(x) { #(x, TypeVar(new_type_var())) })
@@ -177,7 +177,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
 
       Ok(#(TExpAbs(abs_type, params, body_texp), sub))
     }
-    c.ExpLet(var, val, body) -> {
+    c.Let(var, val, body) -> {
       // Infer the type of the value being bound
       use #(texp1, sub1) <- result.try(w(env, val))
 
@@ -194,7 +194,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(TExp, Sub), String) {
       // Combine the substitutions and return the type of the let expression
       Ok(#(TExpLet(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
     }
-    c.ExpIf(cond, then_exp, else_exp) -> {
+    c.If(cond, then_exp, else_exp) -> {
       // Infer the type of the condition, then, and else branch
       use #(texp_cond, sub_cond) <- result.try(w(env, cond))
       let env = apply_sub_env(sub_cond, env)
@@ -263,7 +263,7 @@ pub fn w_module(env: Env, module: c.Module) -> Result(TModule, String) {
 
         let #(l, env, sub) = acc
 
-        let fun_exp = c.ExpAbs(fun.params, fun.body)
+        let fun_exp = c.Abs(fun.params, fun.body)
 
         use #(texp1, sub1) <- result.try(w(env, fun_exp))
 
