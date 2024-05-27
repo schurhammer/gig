@@ -1,4 +1,3 @@
-import ast
 import closure_conversion
 import codegen
 import core as c
@@ -42,7 +41,7 @@ pub fn compile(gleam_file_name: String) {
 
   // run it through the compiler chain
   let assert Ok(module) = glance.module(input)
-  let core = ast.module_to_core(module)
+  let core = c.module_to_core(module)
   let assert Ok(typed) = t.w_module(dict.from_list(prelude), core)
   let mono = monomorphise.run(typed)
   let cc = closure_conversion.cc_module(mono)
