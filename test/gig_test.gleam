@@ -3,8 +3,6 @@ import core.{
   Mono, Poly, TypeApp, TypeFun, TypeVar, normalize_vars_poly,
   normalize_vars_type, pretty_print_type,
 }
-import gig
-import glance
 import gleam/dict
 import gleam/io
 import gleam/list

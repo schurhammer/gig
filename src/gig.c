@@ -11,9 +11,8 @@
 
 int panic() { exit(1); }
 
-int print_int(int number) {
+void print_int(int number) {
   printf("%d\n", number);
-  return number;
 }
 
 bool equal(int x, int y) { return x == y; }
@@ -50,4 +49,4 @@ Closure create_closure(void *fun, void *env) {
 
 /// main
 
-int main() { print_int(main_T_()); }
+int main() { print_int(main_T_()); return 0; }
