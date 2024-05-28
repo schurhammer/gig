@@ -120,7 +120,7 @@ fn mm(m: MM, e: t.Exp) -> #(MM, t.Exp) {
       let #(m, name) = instantiate(m, var, typ)
       #(m, t.Var(typ, name))
     }
-    t.App(typ, fun, args) -> {
+    t.Call(typ, fun, args) -> {
       let #(m, fun) = mm(m, fun)
       let #(m, args) =
         list.fold(args, #(m, []), fn(acc, arg) {
@@ -129,11 +129,11 @@ fn mm(m: MM, e: t.Exp) -> #(MM, t.Exp) {
           #(m, [arg, ..args])
         })
       let args = list.reverse(args)
-      #(m, t.App(typ, fun, args))
+      #(m, t.Call(typ, fun, args))
     }
-    t.Abs(typ, vars, exp) -> {
+    t.Fn(typ, vars, exp) -> {
       let #(m, exp) = mm(m, exp)
-      #(m, t.Abs(typ, vars, exp))
+      #(m, t.Fn(typ, vars, exp))
     }
     t.Let(typ, var, val, exp) -> {
       let #(m, val) = mm(m, val)

@@ -2,21 +2,25 @@ import glance as g
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option.{Some}
 import gleam/result
 import graph
 
 pub type VarName =
   String
 
+pub type TypeVarName =
+  Int
+
 pub type Module {
-  Module(types: List(TypeDef), functions: List(Function))
+  Module(types: List(CustomType), functions: List(Function))
 }
 
-pub type TypeDef {
-  TypeDef(name: String, params: List(String), variants: List(VariantDef))
+pub type CustomType {
+  TypeDef(name: String, params: List(String), variants: List(Variant))
 }
 
-pub type VariantDef {
+pub type Variant {
   VariantDef(name: String, fields: List(Field))
 }
 
@@ -25,7 +29,7 @@ pub type Field {
 }
 
 pub type Type {
-  TypeVar(var: TypeVar)
+  TypeVar(var: TypeVarName)
   TypeApp(typ: String, args: List(Type))
   TypeFun(ret: Type, args: List(Type))
 }
@@ -37,14 +41,13 @@ pub type Function {
 pub type Exp {
   Int(val: Int)
   Var(var: VarName)
-  App(fun: Exp, args: List(Exp))
-  Abs(var: List(VarName), exp: Exp)
+  Call(fun: Exp, args: List(Exp))
+  Fn(var: List(VarName), exp: Exp)
   Let(var: VarName, val: Exp, exp: Exp)
   If(cond: Exp, then_exp: Exp, else_exp: Exp)
+  RecordAccess(subject: Exp, field: String)
+  CheckTag(subject: Exp, tag: String)
 }
-
-pub type TypeVar =
-  Int
 
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {
   case in {
@@ -54,15 +57,15 @@ fn rename_var(replace: String, with: String, in: Exp) -> Exp {
         True -> Var(with)
         False -> in
       }
-    App(fun, args) -> {
+    Call(fun, args) -> {
       let fun = rename_var(replace, with, fun)
       let args = list.map(args, rename_var(replace, with, _))
-      App(fun, args)
+      Call(fun, args)
     }
-    Abs(vars, exp) ->
+    Fn(vars, exp) ->
       case list.contains(vars, replace) {
         True -> in
-        False -> Abs(vars, rename_var(replace, with, exp))
+        False -> Fn(vars, rename_var(replace, with, exp))
       }
     Let(var, val, exp) ->
       case var == replace {
@@ -80,6 +83,9 @@ fn rename_var(replace: String, with: String, in: Exp) -> Exp {
         rename_var(replace, with, then_exp),
         rename_var(replace, with, else_exp),
       )
+    RecordAccess(subject, field) ->
+      RecordAccess(rename_var(replace, with, subject), field)
+    CheckTag(subject, tag) -> CheckTag(rename_var(replace, with, subject), tag)
   }
 }
 
@@ -87,12 +93,12 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
   case exp {
     Int(_) -> exp
     Var(_) -> exp
-    App(fun, args) -> {
+    Call(fun, args) -> {
       let fun = unshadow(taken, i, fun)
       let args = list.map(args, unshadow(taken, i, _))
-      App(fun, args)
+      Call(fun, args)
     }
-    Abs(vars, exp) -> {
+    Fn(vars, exp) -> {
       let #(taken, i, vars, exp) =
         list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
           let #(taken, i, vars, exp) = acc
@@ -117,7 +123,7 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
         })
       let exp = unshadow(taken, i, exp)
       let vars = list.reverse(vars)
-      Abs(vars, exp)
+      Fn(vars, exp)
     }
     Let(var, val, exp) ->
       case list.contains(taken, var) {
@@ -144,6 +150,9 @@ fn unshadow(taken: List(String), i: Int, exp: Exp) {
       let else_exp = unshadow(taken, i, else_exp)
       If(cond, then_exp, else_exp)
     }
+    RecordAccess(subject, field) ->
+      RecordAccess(unshadow(taken, i, subject), field)
+    CheckTag(subject, tag) -> CheckTag(unshadow(taken, i, subject), tag)
   }
 }
 
@@ -165,11 +174,11 @@ pub fn call_graph(
   case e {
     Int(_) -> g
     Var(to) -> graph.insert_edge(g, from, to)
-    App(fun, args) -> {
+    Call(fun, args) -> {
       let g = call_graph(g, from, fun)
       list.fold(args, g, fn(g, arg) { call_graph(g, from, arg) })
     }
-    Abs(_, exp) -> call_graph(g, from, exp)
+    Fn(_, exp) -> call_graph(g, from, exp)
     Let(_, val, exp) -> {
       let g = call_graph(g, from, val)
       call_graph(g, from, exp)
@@ -179,12 +188,46 @@ pub fn call_graph(
       let g = call_graph(g, from, then_e)
       call_graph(g, from, else_e)
     }
+    RecordAccess(subject, field) -> call_graph(g, from, subject)
+    CheckTag(subject, tag) -> call_graph(g, from, subject)
   }
 }
 
 pub fn module_to_core(mod: g.Module) {
-  let funs = list.map(mod.functions, fn(fun) { function_to_core(fun) })
-  Module(types: [], functions: funs)
+  let types = []
+  //list.map(mod.custom_types, custom_type_to_core)
+  let funs = list.map(mod.functions, function_to_core)
+  Module(types: types, functions: funs)
+}
+
+// fn custom_type_to_core(def: g.Definition(g.CustomType)) -> CustomType {
+//   let typ = def.definition
+//   let variants = list.map(typ.variants, variant_to_core)
+//   TypeDef(typ.name, [], variants)
+// }
+
+// fn variant_to_core(var: g.Variant) -> Variant {
+//   let fields = list.map(var.fields, field_to_core)
+//   Variant(var.name, fields)
+// }
+
+// fn field_to_core(field: g.Field(g.Type)) -> Field {
+//   let assert Some(name) = field.label
+//   let typ = field.item.Field(name)
+//   Field(name, typ)
+// }
+
+fn type_to_core(t: g.Type) -> Type {
+  case t {
+    g.NamedType(name, _, params) -> {
+      let params = list.index_map(params, fn(x, i) { TypeVar(i) })
+      TypeApp(name, params)
+    }
+    _ -> {
+      io.debug(t)
+      todo
+    }
+  }
 }
 
 fn function_to_core(def: g.Definition(g.Function)) {
@@ -202,7 +245,7 @@ fn function_to_core(def: g.Definition(g.Function)) {
   Function(fun.name, params, body)
 }
 
-const panic_exp = App(Var("panic"), [])
+const panic_exp = Call(Var("panic"), [])
 
 fn block_to_core(block: List(g.Statement)) -> Exp {
   case block {
@@ -228,12 +271,13 @@ fn pattern_check_to_core(pattern: g.Pattern, subject: Exp) -> Exp {
   case pattern {
     g.PatternInt(value) -> {
       let value = int_to_core(value)
-      App(Var("equal"), [value, subject])
+      Call(Var("equal"), [value, subject])
     }
     g.PatternVariable(_) -> Var("True")
 
-    // g.PatternConstructor(_, name, _, _) -> {
-    // }
+    g.PatternConstructor(_, constructor, arguments, _) -> {
+      todo
+    }
     _ -> {
       io.debug(pattern)
       io.debug(subject)
@@ -262,34 +306,34 @@ fn expression_to_core(e: g.Expression) -> Exp {
     g.BinaryOperator(name, left, right) ->
       case name {
         g.Eq ->
-          App(Var("equal"), [
+          Call(Var("equal"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.AddInt ->
-          App(Var("add_int"), [
+          Call(Var("add_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.SubInt ->
-          App(Var("sub_int"), [
+          Call(Var("sub_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.MultInt ->
-          App(Var("mul_int"), [
+          Call(Var("mul_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         g.DivInt ->
-          App(Var("div_int"), [
+          Call(Var("div_int"), [
             expression_to_core(left),
             expression_to_core(right),
           ])
         _ -> todo
       }
     g.Call(function, arguments) ->
-      App(
+      Call(
         expression_to_core(function),
         list.map(arguments, fn(x) { expression_to_core(x.item) }),
       )
@@ -309,7 +353,7 @@ fn expression_to_core(e: g.Expression) -> Exp {
               let subject = Var("S" <> int.to_string(i))
               pattern_check_to_core(pattern, subject)
             })
-            |> list.reduce(fn(a, b) { App(Var("and_bool"), [a, b]) })
+            |> list.reduce(fn(a, b) { Call(Var("and_bool"), [a, b]) })
             |> result.unwrap(Var("False"))
           let then_exp =
             list.index_fold(patterns, expression_to_core(body), fn(exp, pat, i) {
@@ -333,7 +377,7 @@ fn expression_to_core(e: g.Expression) -> Exp {
           }
         })
       let body = block_to_core(body)
-      Abs(params, body)
+      Fn(params, body)
     }
     _ -> {
       io.println_error("Not Implemented:")

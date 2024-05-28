@@ -2,7 +2,7 @@ import closure_conversion.{
   type Exp, type Function, type Module, Call, CallClosure, Function, If, Int,
   Let, Module, Var,
 }
-import core.{type Type, type TypeDef, TypeApp, TypeDef, TypeFun, TypeVar}
+import core.{type CustomType, type Type, TypeApp, TypeDef, TypeFun, TypeVar}
 import gleam/int
 import gleam/list
 import gleam/string
@@ -147,14 +147,14 @@ fn function_forward(fun: Function) -> String {
   <> ");"
 }
 
-fn type_def_forward(t: TypeDef) {
+fn type_def_forward(t: CustomType) {
   list.map(t.variants, fn(v) {
     "typedef struct " <> v.name <> " " <> v.name <> ";"
   })
   |> string.join("\n")
 }
 
-fn type_def(t: TypeDef) {
+fn type_def(t: CustomType) {
   // TODO handle union types
   list.map(t.variants, fn(v) {
     let fields =

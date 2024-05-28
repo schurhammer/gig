@@ -20,7 +20,7 @@ type CC {
 }
 
 pub type Module {
-  Module(types: List(core.TypeDef), functions: List(Function))
+  Module(types: List(core.CustomType), functions: List(Function))
 }
 
 pub type Function {
@@ -41,7 +41,6 @@ pub fn cc_module(mod: t.Module) {
 
   let c =
     list.fold(mod.functions, c, fn(c, fun) {
-      // TODO do we need to add the functions args to env?
       let assert t.Mono(TypeFun(ret, param_types)) = fun.typ
       let n =
         list.zip(fun.params, param_types)
@@ -71,11 +70,11 @@ fn fv(n: List(String), e: t.Exp) -> List(String) {
         False -> [var]
       }
     }
-    t.App(typ, fun, args) -> {
+    t.Call(typ, fun, args) -> {
       let v = fv(n, fun)
       list.fold(args, v, fn(v, arg) { combine(fv(n, arg), v) })
     }
-    t.Abs(typ, vars, exp) -> {
+    t.Fn(typ, vars, exp) -> {
       let n = combine(vars, n)
       fv(n, exp)
     }
@@ -116,7 +115,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
       #(c, Var(typ, var))
     }
     // detect "direct" function calls
-    t.App(typ, t.Var(fun_type, fun_name) as fun, args) -> {
+    t.Call(typ, t.Var(fun_type, fun_name) as fun, args) -> {
       case env.has(n, fun_name) {
         // not in local env so it must be a global function
         False -> {
@@ -144,7 +143,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
         }
       }
     }
-    t.App(typ, fun, args) -> {
+    t.Call(typ, fun, args) -> {
       let #(c, fun) = cc(c, n, fun)
       let #(c, args) =
         list.fold(args, #(c, []), fn(acc, arg) {
@@ -155,7 +154,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
       let args = list.reverse(args)
       #(c, CallClosure(typ, fun, args))
     }
-    t.Abs(typ, vars, exp) -> {
+    t.Fn(typ, vars, exp) -> {
       // update the env with abstraction vars
       let assert TypeFun(ret, param_types) = typ
       let n =

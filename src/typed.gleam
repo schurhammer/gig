@@ -4,7 +4,7 @@ import gleam/result
 import graph
 import unique_integer
 
-import core.{type Type, type TypeDef, TypeApp, TypeDef, TypeFun, TypeVar} as c
+import core.{type CustomType, type Type, TypeApp, TypeDef, TypeFun, TypeVar} as c
 
 pub type VarName =
   String
@@ -19,7 +19,7 @@ pub type Sub =
   dict.Dict(TypeVarName, Type)
 
 pub type Module {
-  Module(types: List(TypeDef), functions: List(Function))
+  Module(types: List(CustomType), functions: List(Function))
 }
 
 pub type Function {
@@ -29,8 +29,8 @@ pub type Function {
 pub type Exp {
   Int(typ: Type, val: Int)
   Var(typ: Type, var: VarName)
-  App(typ: Type, fun: Exp, arg: List(Exp))
-  Abs(typ: Type, var: List(VarName), exp: Exp)
+  Call(typ: Type, fun: Exp, arg: List(Exp))
+  Fn(typ: Type, var: List(VarName), exp: Exp)
   Let(typ: Type, var: VarName, val: Exp, exp: Exp)
   If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
 }
@@ -44,14 +44,13 @@ pub fn apply_sub_texpr(sub: Sub, texp: Exp) -> Exp {
   case texp {
     Int(_, _) -> texp
     Var(typ, var) -> Var(apply_sub(sub, typ), var)
-    App(typ, fun, arg) ->
-      App(
+    Call(typ, fun, arg) ->
+      Call(
         apply_sub(sub, typ),
         apply_sub_texpr(sub, fun),
         list.map(arg, apply_sub_texpr(sub, _)),
       )
-    Abs(typ, var, exp) ->
-      Abs(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
+    Fn(typ, var, exp) -> Fn(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
     Let(typ, var, val, exp) ->
       Let(
         apply_sub(sub, typ),
@@ -99,7 +98,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(Exp, Sub), String) {
         }
         Error(_) -> Error("Unbound variable " <> var)
       }
-    c.App(fun, args) -> {
+    c.Call(fun, args) -> {
       // Generate a type variable for the return value
       let ret_type = TypeVar(new_type_var())
 
@@ -144,9 +143,9 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(Exp, Sub), String) {
       let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
       let ret_type = apply_sub(sub123, ret_type)
 
-      Ok(#(App(ret_type, funtype_sub3, args_sub3), sub123))
+      Ok(#(Call(ret_type, funtype_sub3, args_sub3), sub123))
     }
-    c.Abs(params, body) -> {
+    c.Fn(params, body) -> {
       // Create a new type variable for each parameter
       let param_types =
         list.map(params, fn(x) { #(x, TypeVar(new_type_var())) })
@@ -175,7 +174,7 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(Exp, Sub), String) {
       // Construct the function type
       let abs_type = TypeFun(body_texp.typ, param_types)
 
-      Ok(#(Abs(abs_type, params, body_texp), sub))
+      Ok(#(Fn(abs_type, params, body_texp), sub))
     }
     c.Let(var, val, body) -> {
       // Infer the type of the value being bound
@@ -230,6 +229,12 @@ pub fn w(env: Env, exp: c.Exp) -> Result(#(Exp, Sub), String) {
         _ -> Error("Condition expression must be of type Bool")
       }
     }
+    c.RecordAccess(subject, field) -> {
+      todo
+    }
+    c.CheckTag(subject, tag) -> {
+      todo
+    }
   }
 }
 
@@ -263,11 +268,11 @@ pub fn w_module(env: Env, module: c.Module) -> Result(Module, String) {
 
         let #(l, env, sub) = acc
 
-        let fun_exp = c.Abs(fun.params, fun.body)
+        let fun_exp = c.Fn(fun.params, fun.body)
 
         use #(texp1, sub1) <- result.try(w(env, fun_exp))
 
-        let assert Abs(fun_typ, params, body) = texp1
+        let assert Fn(fun_typ, params, body) = texp1
         let fun_type_gen = gen(apply_sub_env(sub1, env), fun_typ)
         let env1 = dict.insert(env, fun.name, fun_type_gen)
         let env1 = apply_sub_env(sub1, env1)
