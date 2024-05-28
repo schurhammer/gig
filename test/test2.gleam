@@ -2,11 +2,17 @@ import glance
 import typed2
 
 const input = "
+  fn main() {
+    id(1)
+  }
   fn id(x) {
     x
   }
-  fn main() {
-    id(1)
+  fn inc(n) {
+    n + 1
+  }
+  fn fact(n) {
+    n * fact(n - 1)
   }
 "
 
