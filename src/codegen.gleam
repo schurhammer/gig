@@ -2,18 +2,16 @@ import closure_conversion.{
   type Exp, type Function, type Module, Call, CallClosure, Function, If, Int,
   Let, Module, Var,
 }
-import core.{type CustomType, type Type, TypeApp, TypeDef, TypeFun, TypeVar}
 import gleam/int
 import gleam/list
 import gleam/string
+import monomorphise.{type CustomType, type Mono, MonoApp, MonoFun, TypeDef} as mono
 
-fn type_name(typ: Type) -> String {
+// TODO standardise type name functions
+fn type_name(typ: Mono) -> String {
   case typ {
-    TypeVar(_) -> {
-      panic as "type vars should be resolved"
-    }
-    TypeApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
-    TypeFun(..) -> {
+    MonoApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
+    MonoFun(..) -> {
       // TODO what do
       "Closure"
     }
@@ -35,7 +33,7 @@ fn ternary(cond: String, then: String, els: String) -> String {
 
 fn texp(arg: Exp, target: String, id: Int) -> String {
   case arg {
-    Int(_, val) -> hit_target(target, int.to_string(val))
+    Int(_, val) -> hit_target(target, val)
 
     Var(_, val) -> hit_target(target, val)
     Call(typ, fun, args) -> {
@@ -112,7 +110,7 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
 fn function(fun: Function) -> String {
   let params = fun.params
   let body = fun.body
-  let assert TypeFun(ret, param_types) = fun.typ
+  let assert MonoFun(ret, param_types) = fun.typ
   type_name(ret)
   <> " "
   <> fun.name
@@ -133,7 +131,7 @@ fn function(fun: Function) -> String {
 
 fn function_forward(fun: Function) -> String {
   let params = fun.params
-  let assert TypeFun(ret, param_types) = fun.typ
+  let assert MonoFun(ret, param_types) = fun.typ
   type_name(ret)
   <> " "
   <> fun.name

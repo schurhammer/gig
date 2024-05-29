@@ -16,33 +16,13 @@ pub fn read_file(file_name: String) -> String {
   content
 }
 
-const bool = c.TypeApp("Bool", [])
-
-const int = c.TypeApp("Int", [])
-
-pub const prelude = [
-  #("panic", t.Poly(1, t.Mono(c.TypeFun(c.TypeVar(1), [])))),
-  #("equal", t.Poly(1, t.Mono(c.TypeFun(bool, [c.TypeVar(1), c.TypeVar(1)])))),
-  // bool
-  #("True", t.Mono(bool)), #("False", t.Mono(bool)),
-  #("and_bool", t.Mono(c.TypeFun(bool, [bool, bool]))),
-  #("or_bool", t.Mono(c.TypeFun(bool, [bool, bool]))),
-  // int
-  #("add_int", t.Mono(c.TypeFun(int, [int, int]))),
-  #("sub_int", t.Mono(c.TypeFun(int, [int, int]))),
-  #("mul_int", t.Mono(c.TypeFun(int, [int, int]))),
-  #("div_int", t.Mono(c.TypeFun(int, [int, int]))),
-  #("print_int", t.Mono(c.TypeFun(int, [int]))),
-]
-
 // returns the file name of the binary
 pub fn compile(gleam_file_name: String) {
   let input = read_file(gleam_file_name)
 
   // run it through the compiler chain
   let assert Ok(module) = glance.module(input)
-  let core = c.module_to_core(module)
-  let assert Ok(typed) = t.w_module(dict.from_list(prelude), core)
+  let typed = t.infer_module(module)
   let mono = monomorphise.run(typed)
   let cc = closure_conversion.cc_module(mono)
   let code = codegen.module(cc)

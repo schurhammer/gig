@@ -1,55 +1,50 @@
-import core.{type Type, Field, TypeApp, TypeDef, TypeFun, VariantDef}
 import env
 import gleam/int
 import gleam/list
-import typed as t
-
-// TODO direct calls to top level functions could be added,
-// but any higher-order usage probably need to be closure converted
-// otherwise it could introduce problematic polymorphism
-// especially in functions that return higher order functions
+import monomorphise.{
+  type CustomType, type Mono, Field, MonoApp, MonoFun, TypeDef, VariantDef,
+} as mono
 
 // assumptions:
 // 1. renaming has been done such that there is no shadowing
 
 type Env =
-  env.Env(String, Type)
+  env.Env(String, Mono)
 
 type CC {
   CC(mod: Module, uid: Int)
 }
 
 pub type Module {
-  Module(types: List(core.CustomType), functions: List(Function))
+  Module(types: List(CustomType), functions: List(Function))
 }
 
 pub type Function {
-  Function(name: String, params: List(String), body: Exp, typ: core.Type)
+  Function(name: String, params: List(String), body: Exp, typ: Mono)
 }
 
 pub type Exp {
-  Int(typ: Type, val: Int)
-  Var(typ: Type, var: String)
-  Call(typ: Type, fun: Exp, arg: List(Exp))
-  CallClosure(typ: Type, fun: Exp, arg: List(Exp))
-  Let(typ: Type, var: String, val: Exp, exp: Exp)
-  If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
+  Int(typ: Mono, val: String)
+  Var(typ: Mono, var: String)
+  Call(typ: Mono, fun: Exp, arg: List(Exp))
+  CallClosure(typ: Mono, fun: Exp, arg: List(Exp))
+  Let(typ: Mono, var: String, val: Exp, exp: Exp)
+  If(typ: Mono, cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 
-pub fn cc_module(mod: t.Module) {
+pub fn cc_module(mod: mono.Module) {
   let c = CC(Module(types: mod.types, functions: []), 1)
 
   let c =
     list.fold(mod.functions, c, fn(c, fun) {
-      let assert t.Mono(TypeFun(ret, param_types)) = fun.typ
+      let assert MonoFun(ret, param_types) = fun.typ
       let n =
         list.zip(fun.params, param_types)
         |> list.fold(env.new(), fn(n, i) { env.put(n, i.0, i.1) })
 
       let #(c, e) = cc(c, n, fun.body)
 
-      let assert t.Mono(typ) = fun.typ
-      let function = Function(fun.name, fun.params, e, typ)
+      let function = Function(fun.name, fun.params, e, fun.typ)
 
       let mod = Module(c.mod.types, [function, ..c.mod.functions])
       CC(..c, mod: mod)
@@ -61,29 +56,29 @@ fn combine(a: List(a), b: List(a)) -> List(a) {
   list.fold(a, b, fn(b, a) { [a, ..b] })
 }
 
-fn fv(n: List(String), e: t.Exp) -> List(String) {
+fn fv(n: List(String), e: mono.Exp) -> List(String) {
   case e {
-    t.Int(_, _) -> []
-    t.Var(typ, var) -> {
+    mono.Int(_, _) -> []
+    mono.Var(typ, var) -> {
       case list.contains(n, var) {
         True -> []
         False -> [var]
       }
     }
-    t.Call(typ, fun, args) -> {
+    mono.Call(typ, fun, args) -> {
       let v = fv(n, fun)
       list.fold(args, v, fn(v, arg) { combine(fv(n, arg), v) })
     }
-    t.Fn(typ, vars, exp) -> {
+    mono.Fn(typ, vars, exp) -> {
       let n = combine(vars, n)
       fv(n, exp)
     }
-    t.Let(typ, var, val, exp) -> {
+    mono.Let(typ, var, val, exp) -> {
       let n = [var, ..n]
       let v = fv(n, exp)
       combine(v, fv(n, exp))
     }
-    t.If(typ, cond, then_e, else_e) -> {
+    mono.If(typ, cond, then_e, else_e) -> {
       let v = fv(n, cond)
       let v = combine(v, fv(n, then_e))
       combine(v, fv(n, else_e))
@@ -91,16 +86,16 @@ fn fv(n: List(String), e: t.Exp) -> List(String) {
   }
 }
 
-fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
+fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
   case e {
-    t.Int(typ, var) -> #(c, Int(typ, var))
+    mono.Int(typ, var) -> #(c, Int(typ, var))
     // detect functions that need to be converted to closures
-    t.Var(TypeFun(ret, params) as typ, var) -> {
+    mono.Var(MonoFun(ret, params) as typ, var) -> {
       case env.has(n, var) {
         // not in local env so it must be a global function
         False -> {
-          // TODO convert!!
-          let null_env = Int(TypeApp("Int", []), 0)
+          // TODO convert!! ??
+          let null_env = Int(MonoApp("Int", []), "0")
           let val =
             Call(typ, Var(typ, "create_closure"), [Var(typ, var), null_env])
           #(c, val)
@@ -111,11 +106,11 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
         }
       }
     }
-    t.Var(typ, var) -> {
+    mono.Var(typ, var) -> {
       #(c, Var(typ, var))
     }
     // detect "direct" function calls
-    t.Call(typ, t.Var(fun_type, fun_name) as fun, args) -> {
+    mono.Call(typ, mono.Var(fun_type, fun_name) as fun, args) -> {
       case env.has(n, fun_name) {
         // not in local env so it must be a global function
         False -> {
@@ -143,7 +138,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
         }
       }
     }
-    t.Call(typ, fun, args) -> {
+    mono.Call(typ, fun, args) -> {
       let #(c, fun) = cc(c, n, fun)
       let #(c, args) =
         list.fold(args, #(c, []), fn(acc, arg) {
@@ -154,9 +149,9 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
       let args = list.reverse(args)
       #(c, CallClosure(typ, fun, args))
     }
-    t.Fn(typ, vars, exp) -> {
+    mono.Fn(typ, vars, exp) -> {
       // update the env with abstraction vars
-      let assert TypeFun(ret, param_types) = typ
+      let assert MonoFun(ret, param_types) = typ
       let n =
         list.zip(vars, param_types)
         |> list.fold(n, fn(n, i) { env.put(n, i.0, i.1) })
@@ -176,7 +171,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
       let fun_name = "closure_C" <> id
       let env_name = "env_C" <> id
       let env_type_name = "env_type_C" <> id
-      let env_type = TypeApp(env_type_name <> "*", [])
+      let env_type = MonoApp(env_type_name <> "*", [])
 
       let fun_params = [env_name, ..vars]
 
@@ -188,7 +183,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
 
           // function from env -> field
           let extract_fun_name = env_type_name <> "_GET_" <> name
-          let extract_fun_type = TypeFun(typ, [env_type])
+          let extract_fun_type = MonoFun(typ, [env_type])
           let extract_fun = Var(extract_fun_type, extract_fun_name)
 
           Let(
@@ -203,7 +198,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
       let types = c.mod.types
 
       // add cloure function to module
-      let fun_type = TypeFun(fun_body.typ, [env_type, ..param_types])
+      let fun_type = MonoFun(fun_body.typ, [env_type, ..param_types])
       let fun = Function(fun_name, fun_params, fun_body, fun_type)
       let funs = [fun, ..funs]
 
@@ -212,7 +207,7 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
 
       let new_env_fun_name = env_type_name <> "_NEW"
       let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
-      let new_env_fun_type = TypeFun(env_type, env_arg_types)
+      let new_env_fun_type = MonoFun(env_type, env_arg_types)
       let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
 
       let env_constructor_call =
@@ -234,13 +229,13 @@ fn cc(c: CC, n: Env, e: t.Exp) -> #(CC, Exp) {
 
       #(c, closure)
     }
-    t.Let(typ, var, val, exp) -> {
+    mono.Let(typ, var, val, exp) -> {
       let #(c, val) = cc(c, n, val)
       let n = env.put(n, var, val.typ)
       let #(c, exp) = cc(c, n, exp)
       #(c, Let(typ, var, val, exp))
     }
-    t.If(typ, cond, then_e, else_e) -> {
+    mono.If(typ, cond, then_e, else_e) -> {
       let #(c, cond) = cc(c, n, cond)
       let #(c, then_e) = cc(c, n, then_e)
       let #(c, else_e) = cc(c, n, else_e)

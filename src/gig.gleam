@@ -1,7 +1,7 @@
-import compile
+import compiler
 import shellout
 
 pub fn main() {
   let assert [file_name] = shellout.arguments()
-  compile.compile(file_name)
+  compiler.compile(file_name)
 }

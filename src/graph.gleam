@@ -25,6 +25,7 @@ pub fn insert_edge(g: Graph(a), from: a, to: a) -> Graph(a) {
           False -> x
         }
       })
+    // TODO panic here?
     Error(_) -> g.adj
   }
   Graph(adj)

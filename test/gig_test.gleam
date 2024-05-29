@@ -1,4 +1,4 @@
-import compile
+import compiler
 import shellout
 import simplifile
 
@@ -24,7 +24,7 @@ fn run_sample(file) {
   io.print_error("Running ")
   io.println_error(file)
 
-  let binary = compile.compile(file)
+  let binary = compiler.compile(file)
 
   // parse the expected output out of the file's doc comment
   let assert Ok(content) = simplifile.read(file)

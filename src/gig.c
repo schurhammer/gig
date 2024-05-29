@@ -25,6 +25,10 @@ int mul_int(int x, int y) { return x * y; }
 
 int div_int(int x, int y) { return x / y; }
 
+bool and_bool(bool x, bool y) { return x && y; }
+
+bool or_bool(bool x, bool y) { return x && y; }
+
 typedef struct Closure Closure;
 
 struct Closure {
@@ -49,4 +53,4 @@ Closure create_closure(void *fun, void *env) {
 
 /// main
 
-int main() { print_int(main_T_()); return 0; }
+int main() { print_int(G_main()); return 0; }

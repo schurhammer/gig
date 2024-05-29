@@ -1,22 +1,20 @@
-import gleam/dict
-import gleam/list
-import gleam/result
+import call_graph
+import env.{type Env}
 import graph
-import unique_integer
 
-import core.{type CustomType, type Type, TypeApp, TypeDef, TypeFun, TypeVar} as c
+import glance as g
+
+import gleam/int
+import gleam/io
+import gleam/list
+import gleam/option.{None}
 
 pub type VarName =
   String
 
-pub type TypeVarName =
-  Int
-
-pub type Env =
-  dict.Dict(VarName, Poly)
-
-pub type Sub =
-  dict.Dict(TypeVarName, Type)
+pub type TypeVarRef {
+  TypeVarRef(id: Int)
+}
 
 pub type Module {
   Module(types: List(CustomType), functions: List(Function))
@@ -26,382 +24,694 @@ pub type Function {
   Function(name: VarName, params: List(String), body: Exp, typ: Poly)
 }
 
+pub type CustomType {
+  TypeDef(name: String, params: List(String), variants: List(Variant))
+}
+
+pub type Variant {
+  VariantDef(name: String, fields: List(Field))
+}
+
+pub type Field {
+  Field(name: String, typ: Type)
+}
+
 pub type Exp {
-  Int(typ: Type, val: Int)
+  Int(typ: Type, val: String)
   Var(typ: Type, var: VarName)
-  Call(typ: Type, fun: Exp, arg: List(Exp))
+  Call(typ: Type, fun: Exp, args: List(Exp))
   Fn(typ: Type, var: List(VarName), exp: Exp)
   Let(typ: Type, var: VarName, val: Exp, exp: Exp)
   If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
 }
 
 pub type Poly {
-  Mono(typ: Type)
-  Poly(var: TypeVarName, typ: Poly)
+  Poly(vars: List(Int), typ: Type)
 }
 
-pub fn apply_sub_texpr(sub: Sub, texp: Exp) -> Exp {
-  case texp {
-    Int(_, _) -> texp
-    Var(typ, var) -> Var(apply_sub(sub, typ), var)
-    Call(typ, fun, arg) ->
-      Call(
-        apply_sub(sub, typ),
-        apply_sub_texpr(sub, fun),
-        list.map(arg, apply_sub_texpr(sub, _)),
-      )
-    Fn(typ, var, exp) -> Fn(apply_sub(sub, typ), var, apply_sub_texpr(sub, exp))
-    Let(typ, var, val, exp) ->
-      Let(
-        apply_sub(sub, typ),
-        var,
-        apply_sub_texpr(sub, val),
-        apply_sub_texpr(sub, exp),
-      )
-    If(typ, cond, then_exp, else_exp) ->
-      If(
-        apply_sub(sub, typ),
-        apply_sub_texpr(sub, cond),
-        apply_sub_texpr(sub, then_exp),
-        apply_sub_texpr(sub, else_exp),
-      )
-  }
+pub type TypeVar {
+  Bound(Type)
+  Unbound(id: Int, level: Int)
 }
 
-pub fn gen(env: Env, typ: Type) -> Poly {
-  let vars =
-    ftv_typing(env, Mono(typ))
-    |> list.unique()
-  list.fold(vars, Mono(typ), fn(acc, var) { Poly(var, acc) })
+pub type TypeEnv =
+  Env(VarName, CustomType)
+
+pub type ValueEnv =
+  Env(VarName, Poly)
+
+pub type TypeVarEnv =
+  Env(TypeVarRef, TypeVar)
+
+pub type Context {
+  Context(
+    type_env: TypeEnv,
+    type_vars: TypeVarEnv,
+    functions: List(Function),
+    uid: Int,
+    // TODO I think we technically only need two levels
+    // "top level" or "local level"
+    // since we only generalize top level functions (citation needed)
+    level: Int,
+  )
 }
 
-fn inst(sub: Sub, poly: Poly) -> Type {
-  case poly {
-    Mono(typ) -> apply_sub(sub, typ)
-    Poly(var, poly) -> {
-      let new_var = new_type_var()
-      let sub = dict.insert(sub, var, TypeVar(new_var))
-      inst(sub, poly)
-    }
-  }
+pub type Type {
+  TypeVar(var: TypeVarRef)
+  TypeApp(typ: String, args: List(Type))
+  TypeFun(ret: Type, args: List(Type))
 }
 
-pub fn w(env: Env, exp: c.Exp) -> Result(#(Exp, Sub), String) {
-  case exp {
-    c.Int(val) -> Ok(#(Int(TypeApp("Int", []), val), dict.new()))
-    c.Var(var) ->
-      case dict.get(env, var) {
-        Ok(poly) -> {
-          // Instantiate the polymorphic type to get a monomorphic type
-          let typ = inst(dict.new(), poly)
-          Ok(#(Var(typ, var), dict.new()))
-        }
-        Error(_) -> Error("Unbound variable " <> var)
-      }
-    c.Call(fun, args) -> {
-      // Generate a type variable for the return value
-      let ret_type = TypeVar(new_type_var())
+const int = TypeApp("Int", [])
 
-      // Infer the type of the function being applied
-      use #(funexp, sub1) <- result.try(w(env, fun))
+const bool = TypeApp("Bool", [])
 
-      // Infer the type of each argument
-      use #(args_sub2, sub2) <- result.try(
-        list.try_fold(args, #([], sub1), fn(acc, arg) {
-          let #(l, sub1) = acc
+const bool_binop = TypeFun(bool, [bool, bool])
 
-          // Create a new environment with applied substitutions for recursive call
-          let env1 = apply_sub_env(sub1, env)
-          use #(texp2, sub2) <- result.try(w(env1, arg))
+const int_binop = TypeFun(int, [int, int])
 
-          // Apply the new substitutions to the previously inferred expressions
-          let l = list.map(l, apply_sub_texpr(sub2, _))
+const panic_ast = g.Call(g.Variable("panic"), [])
 
-          // Add the new expression and compose the substitutions
-          Ok(#([texp2, ..l], compose_sub(sub2, sub1)))
-        }),
-      )
-
-      // Apply the new substitutions to the function expression
-      let funexp_sub2 = apply_sub_texpr(sub2, funexp)
-
-      // Reverse the argument list to its original order
-      let args_sub2 = list.reverse(args_sub2)
-
-      // Create a function type from the argument types
-      let arg_types_sub2 = list.map(args_sub2, fn(x) { x.typ })
-      let args_funtype_sub2 = TypeFun(ret_type, arg_types_sub2)
-
-      // Unify the inferred function type with the created function type
-      use sub3 <- result.try(unify(funexp_sub2.typ, args_funtype_sub2))
-
-      // Apply the latest substitutions to the function type and arguments
-      let funtype_sub3 = apply_sub_texpr(sub3, funexp_sub2)
-      let args_sub3 = list.map(args_sub2, apply_sub_texpr(sub3, _))
-
-      // Apply all substitutions to the return type
-      let sub123 = compose_sub(sub3, compose_sub(sub2, sub1))
-      let ret_type = apply_sub(sub123, ret_type)
-
-      Ok(#(Call(ret_type, funtype_sub3, args_sub3), sub123))
-    }
-    c.Fn(params, body) -> {
-      // Create a new type variable for each parameter
-      let param_types =
-        list.map(params, fn(x) { #(x, TypeVar(new_type_var())) })
-
-      // Insert parameter types into the environment
-      let body_env =
-        list.fold(param_types, env, fn(env, item) {
-          let #(var, var_type) = item
-          dict.insert(env, var, Mono(var_type))
-        })
-
-      // Infer the type of the body in the new environment
-      use #(body_texp, sub) <- result.try(w(body_env, body))
-
-      // Update parameter types with substitutions from the body
-      let param_types =
-        list.map(param_types, fn(item) {
-          let #(_, var_type) = item
-          apply_sub(sub, var_type)
-        })
-
-      // TODO not sure if this is correct, but it fixes recursion
-      // the real error might be elsewhere
-      let body_texp = apply_sub_texpr(sub, body_texp)
-
-      // Construct the function type
-      let abs_type = TypeFun(body_texp.typ, param_types)
-
-      Ok(#(Fn(abs_type, params, body_texp), sub))
-    }
-    c.Let(var, val, body) -> {
-      // Infer the type of the value being bound
-      use #(texp1, sub1) <- result.try(w(env, val))
-
-      // Gleam does not generalize types here
-      // let type1 = gen(apply_sub_env(sub1, env), texp1.typ)
-      let type1 = Mono(texp1.typ)
-
-      let env1 = dict.insert(env, var, type1)
-      let env1 = apply_sub_env(sub1, env1)
-
-      // Infer the type of the body within the updated environment
-      use #(texp2, sub2) <- result.try(w(env1, body))
-
-      // Combine the substitutions and return the type of the let expression
-      Ok(#(Let(texp2.typ, var, texp1, texp2), compose_sub(sub2, sub1)))
-    }
-    c.If(cond, then_exp, else_exp) -> {
-      // Infer the type of the condition, then, and else branch
-      use #(texp_cond, sub_cond) <- result.try(w(env, cond))
-      let env = apply_sub_env(sub_cond, env)
-
-      use #(texp_then, sub_then) <- result.try(w(env, then_exp))
-      let env = apply_sub_env(sub_then, env)
-      let texp_cond = apply_sub_texpr(sub_then, texp_cond)
-
-      use #(texp_else, sub_else) <- result.try(w(env, else_exp))
-      let texp_cond = apply_sub_texpr(sub_else, texp_cond)
-      let texp_then = apply_sub_texpr(sub_else, texp_then)
-
-      // Ensure the condition is of type Bool
-      case texp_cond.typ {
-        TypeApp("Bool", []) -> {
-          // Unify the types of the then and else branches
-          use sub <- result.try(unify(texp_then.typ, texp_else.typ))
-
-          // Apply the final substitutions to the if expression
-          let if_type = apply_sub(sub, texp_then.typ)
-          let texp_cond = apply_sub_texpr(sub, texp_cond)
-          let texp_then = apply_sub_texpr(sub, texp_then)
-          let texp_else = apply_sub_texpr(sub, texp_else)
-
-          let sub =
-            compose_sub(
-              sub,
-              compose_sub(sub_else, compose_sub(sub_then, sub_cond)),
-            )
-
-          Ok(#(If(if_type, texp_cond, texp_then, texp_else), sub))
-        }
-        _ -> Error("Condition expression must be of type Bool")
-      }
-    }
-    c.RecordAccess(subject, field) -> {
-      todo
-    }
-    c.CheckTag(subject, tag) -> {
-      todo
-    }
-  }
+fn get_id(a: Type) -> Int {
+  let assert TypeVar(a) = a
+  a.id
 }
 
-pub fn w_module(env: Env, module: c.Module) -> Result(Module, String) {
-  let module = c.unshadow_module(module)
+fn prelude(c: Context) -> #(Context, ValueEnv) {
+  let n = env.new()
 
-  let funs = module.functions
+  let #(c, a) = new_type_var_ref(c)
+  let n = env.put(n, "panic", Poly([get_id(a)], TypeFun(a, [])))
+  let n = env.put(n, "equal", Poly([get_id(a)], TypeFun(bool, [a, a])))
 
-  // Create an initial environment with type variables for each binding
-  let fun_vars = list.map(module.functions, fn(x) { #(new_type_var(), x) })
+  let n = env.put(n, "add_int", Poly([], int_binop))
+  let n = env.put(n, "sub_int", Poly([], int_binop))
+  let n = env.put(n, "mul_int", Poly([], int_binop))
+  let n = env.put(n, "div_int", Poly([], int_binop))
 
-  let initial_env =
-    list.fold(fun_vars, env, fn(env, x) {
-      let #(var, fun) = x
-      dict.insert(env, fun.name, Poly(var, Mono(TypeVar(var))))
-    })
+  let n = env.put(n, "and_bool", Poly([], bool_binop))
 
-  // Find mutually recursive functions and order of functions
-  let groups =
-    list.fold(funs, graph.new(), fn(g, fun) { graph.insert_node(g, fun.name) })
-    |> list.fold(funs, _, fn(g, fun) { c.call_graph(g, fun.name, fun.body) })
+  #(c, n)
+}
+
+pub fn infer_module(mod: g.Module) {
+  let c =
+    Context(
+      type_env: env.new(),
+      type_vars: env.new(),
+      functions: [],
+      uid: 0,
+      level: 0,
+    )
+
+  let #(c, n) = prelude(c)
+
+  let rec_groups =
+    call_graph.create(mod)
     |> graph.strongly_connected_components()
 
-  let fun_by_name =
-    dict.from_list(list.map(fun_vars, fn(x) { #({ x.1 }.name, x) }))
+  // TODO call graph order + mutual recursion
+  let #(c, n) =
+    list.fold(rec_groups, #(c, n), fn(acc, group) {
+      let #(c, n) = acc
 
-  use #(functions, env, sub) <- result.try(
-    list.try_fold(groups, #([], initial_env, dict.new()), fn(acc, group) {
-      list.try_fold(group, acc, fn(acc, name) {
-        let assert Ok(#(var, fun)) = dict.get(fun_by_name, name)
+      // enter let level
+      let c = enter_level(c)
 
-        let #(l, env, sub) = acc
+      // put the functions into env with placeholder types
+      let #(c, n) =
+        list.fold(group, #(c, n), fn(acc, name) {
+          let #(c, n) = acc
+          let #(c, t) = new_type_var_ref(c)
+          let n = env.put(n, name, Poly([], t))
+          #(c, n)
+        })
 
-        let fun_exp = c.Fn(fun.params, fun.body)
+      // infer each function
+      let #(c, n, group) =
+        list.fold(group, #(c, n, []), fn(acc, fun_name) {
+          let #(c, n, group) = acc
 
-        use #(texp1, sub1) <- result.try(w(env, fun_exp))
+          // find the function definition by name
+          let assert Ok(definition) =
+            list.find(mod.functions, fn(x) {
+              let fun = x.definition
+              fun.name == fun_name
+            })
 
-        let assert Fn(fun_typ, params, body) = texp1
-        let fun_type_gen = gen(apply_sub_env(sub1, env), fun_typ)
-        let env1 = dict.insert(env, fun.name, fun_type_gen)
-        let env1 = apply_sub_env(sub1, env1)
+          // infer the function
+          let #(c, fun) = infer_function(c, n, definition)
 
-        // TODO is this line needed/correct?
-        let sub1 = dict.insert(sub1, var, fun_typ)
+          #(c, n, [fun, ..group])
+        })
 
-        let combined_sub = compose_sub(sub1, sub)
+      // exit let level
+      let c = exit_level(c)
 
-        let l =
-          list.map(l, fn(x) {
-            let Function(name, vars, body, typ) = x
-            let body = apply_sub_texpr(sub1, body)
-            Function(name, vars, body, typ)
-          })
+      // generalize functions
+      let #(n, group) =
+        list.fold(group, #(n, []), fn(acc, fun) {
+          let #(n, group) = acc
+          let #(name, params, body, typ) = fun
+          let gen = generalise(c, typ)
+          let fun = Function(name, params, body, gen)
+          let n = env.put(n, name, gen)
+          #(n, [fun, ..group])
+        })
 
-        Ok(#(
-          [Function(fun.name, params, body, fun_type_gen), ..l],
-          env1,
-          combined_sub,
-        ))
-      })
-    }),
-  )
+      let c = Context(..c, functions: list.append(group, c.functions))
 
-  Ok(Module(types: module.types, functions: functions))
+      #(c, n)
+    })
+  c
 }
 
-fn ftv(typ: Type) -> List(TypeVarName) {
-  case typ {
-    TypeVar(a) -> [a]
-    TypeApp(_, args) -> list.flat_map(args, ftv)
-    TypeFun(ret, args) -> list.flatten([ftv(ret), ..list.map(args, ftv)])
+pub fn get_type_var(c: Context, var: TypeVarRef) {
+  let assert Ok(x) = env.get(c.type_vars, var)
+  x
+}
+
+fn set_type_var(c: Context, var: TypeVarRef, bind: TypeVar) {
+  Context(..c, type_vars: env.put(c.type_vars, var, bind))
+}
+
+fn new_type_var_ref(c: Context) -> #(Context, Type) {
+  let ref = TypeVarRef(c.uid)
+  let type_vars = env.put(c.type_vars, ref, Unbound(c.uid, c.level))
+  #(Context(..c, type_vars: type_vars, uid: c.uid + 1), TypeVar(ref))
+}
+
+fn infer_function(
+  c: Context,
+  n: ValueEnv,
+  def: g.Definition(g.Function),
+) -> #(Context, #(String, List(String), Exp, Type)) {
+  let fun = def.definition
+
+  // get list of param names
+  let params =
+    list.map(fun.parameters, fn(param) {
+      case param.name {
+        g.Named(s) -> s
+        g.Discarded(s) -> s
+      }
+    })
+
+  // create type vars for parameters
+  let #(c, n, param_types) =
+    list.fold(params, #(c, n, []), fn(acc, param) {
+      let #(c, n, param_types) = acc
+      let #(c, typ) = new_type_var_ref(c)
+      let n = env.put(n, param, Poly([], typ))
+      #(c, n, [typ, ..param_types])
+    })
+  let param_types = list.reverse(param_types)
+
+  // infer body
+  let #(c, body) = infer_body(c, n, fun.body)
+
+  // compute function type
+  let typ = TypeFun(body.typ, param_types)
+  let assert Ok(Poly([], typ0)) = env.get(n, fun.name)
+  let c = unify(c, typ, typ0)
+
+  #(c, #(fun.name, params, body, typ))
+}
+
+fn enter_level(c: Context) -> Context {
+  Context(..c, level: c.level + 1)
+}
+
+fn exit_level(c: Context) -> Context {
+  Context(..c, level: c.level - 1)
+}
+
+fn infer_body(
+  c: Context,
+  n: ValueEnv,
+  body: List(g.Statement),
+) -> #(Context, Exp) {
+  case body {
+    [] -> panic as "empty body"
+    [x] ->
+      case x {
+        // TODO do we need to enter_level for these?
+        g.Use(..) -> todo as "use statement"
+        g.Assignment(value: value, ..) -> infer_expression(c, n, value)
+        g.Expression(value) -> infer_expression(c, n, value)
+      }
+    [x, ..xs] ->
+      case x {
+        g.Use(..) -> todo as "use statement"
+        g.Assignment(value: value, pattern: pattern, ..) -> {
+          let c = enter_level(c)
+          let #(c, value) = infer_expression(c, n, value)
+          let c = exit_level(c)
+          let n = env.put(n, "S0", Poly([], value.typ))
+          let #(c, value) = infer_expression(c, n, g.Variable("S0"))
+          let #(c, bindings) = infer_bind_pattern(c, n, pattern, value)
+
+          // add bindings to environment
+          let n =
+            list.fold(bindings, n, fn(n, binding) {
+              let #(name, value) = binding
+              env.put(n, name, Poly([], value.typ))
+            })
+
+          // infer the rest of the body
+          let #(c, body) = infer_body(c, n, xs)
+
+          // generate let bindings followed by rest of body
+          let body =
+            list.fold(bindings, body, fn(body, binding) {
+              let #(name, value) = binding
+              Let(body.typ, name, value, body)
+            })
+
+          #(c, body)
+        }
+        g.Expression(value) -> {
+          let c = enter_level(c)
+          let #(c, value) = infer_expression(c, n, value)
+          let c = exit_level(c)
+          let #(c, in) = infer_body(c, n, xs)
+          #(c, Let(in.typ, "_", value, in))
+        }
+      }
   }
 }
 
-fn ftv_poly(typ: Poly) -> List(TypeVarName) {
-  case typ {
-    Mono(typ) -> ftv(typ)
-    Poly(var, typ) ->
-      ftv_poly(typ)
-      |> list.filter(fn(x) { x != var })
-  }
-}
-
-fn ftv_env(env: Env) -> List(TypeVarName) {
-  dict.fold(env, [], fn(acc, _, val) { list.append(acc, ftv_poly(val)) })
-}
-
-fn ftv_typing(env: Env, typ: Poly) -> List(TypeVarName) {
-  let env_vars = ftv_env(env)
-  ftv_poly(typ)
-  |> list.filter(fn(x) { !list.contains(env_vars, x) })
-}
-
-fn new_type_var() -> TypeVarName {
-  unique_integer.mono_positive()
-}
-
-fn unify(t1: Type, t2: Type) -> Result(Sub, String) {
-  case t1, t2 {
-    TypeVar(var1), TypeVar(var2) if var1 == var2 -> Ok(dict.new())
-    TypeVar(var), typ -> unify_var(var, typ)
-    typ, TypeVar(var) -> unify_var(var, typ)
-    TypeApp(typ1, args1), TypeApp(typ2, args2) if typ1 == typ2 ->
-      unify_many(args1, args2)
-    TypeFun(typ1, args1), TypeFun(typ2, args2) ->
-      unify_many([typ1, ..args1], [typ2, ..args2])
-    _, _ -> {
-      Error("Types do not unify")
+fn infer_bind_pattern(
+  c: Context,
+  n: ValueEnv,
+  pattern: g.Pattern,
+  subject: Exp,
+) -> #(Context, List(#(String, Exp))) {
+  // TODO enter_level here? or do we not need to because gleam doesn't do let-poly
+  // I think its done in infer_body already
+  case pattern {
+    g.PatternInt(_) -> #(c, [])
+    g.PatternVariable(x) -> {
+      // let n = env.put(n, x, Poly([], subject.typ))
+      // let #(c, body) = infer_body(c, n, body)
+      // Let(body.typ, x, subject, body)
+      #(c, [#(x, subject)])
+    }
+    _ -> {
+      io.debug(pattern)
+      todo as "not implemented"
     }
   }
 }
 
-fn unify_many(types1: List(Type), types2: List(Type)) -> Result(Sub, String) {
-  case types1, types2 {
-    [head1, ..tail1], [head2, ..tail2] ->
-      result.try(unify(head1, head2), fn(sub1) {
-        let tail1 = list.map(tail1, fn(t) { apply_sub(sub1, t) })
-        let tail2 = list.map(tail2, fn(t) { apply_sub(sub1, t) })
-        result.try(unify_many(tail1, tail2), fn(sub2) {
-          Ok(compose_sub(sub2, sub1))
+fn infer_check_pattern(
+  c: Context,
+  n: ValueEnv,
+  pattern: g.Pattern,
+  subject: g.Expression,
+) -> #(Context, Exp) {
+  case pattern {
+    g.PatternInt(value) -> {
+      let args = [g.Field(None, g.Int(value)), g.Field(None, subject)]
+      infer_expression(c, n, g.Call(g.Variable("equal"), args))
+    }
+    g.PatternVariable(_) -> #(c, Var(bool, "True"))
+    // g.PatternConstructor(_, constructor, arguments, _) -> {
+    //   todo
+    // }
+    _ -> {
+      io.debug(pattern)
+      io.debug(subject)
+      todo
+    }
+  }
+}
+
+fn infer_expression(
+  c: Context,
+  n: ValueEnv,
+  exp: g.Expression,
+) -> #(Context, Exp) {
+  case exp {
+    g.Int(s) -> #(c, Int(int, s))
+    g.Variable(s) -> {
+      // instantiate the poly type into a mono type
+      let poly = case env.get(n, s) {
+        Ok(poly) -> poly
+        Error(_) -> {
+          io.debug(s)
+          panic as "variable not in env"
+        }
+      }
+      let #(c, typ) = instantiate(c, poly)
+      #(c, Var(typ, s))
+    }
+    g.Call(fun, args) -> {
+      // infer the type of the function
+      let #(c, fun) = infer_expression(c, n, fun)
+
+      // infer type of each arg
+      let #(c, args) =
+        list.fold(args, #(c, []), fn(acc, arg) {
+          let #(c, l) = acc
+          let #(c, arg) = infer_expression(c, n, arg.item)
+          #(c, [arg, ..l])
         })
+      let args = list.reverse(args)
+
+      // new var for the return type
+      let #(c, ret) = new_type_var_ref(c)
+      let arg_types = list.map(args, fn(x) { x.typ })
+
+      // unify the actual function type with the types of args
+      let c = unify(c, fun.typ, TypeFun(ret, arg_types))
+
+      #(c, Call(ret, fun, args))
+    }
+    g.Fn(params, _, body) -> {
+      // get list of param names
+      let params =
+        list.map(params, fn(param) {
+          case param.name {
+            g.Named(s) -> s
+            g.Discarded(s) -> s
+          }
+        })
+
+      // create type vars for parameters
+      let #(c, n, param_types) =
+        list.fold(params, #(c, n, []), fn(acc, param) {
+          let #(c, n, param_types) = acc
+          let #(c, typ) = new_type_var_ref(c)
+          let n = env.put(n, param, Poly([], typ))
+          #(c, n, [typ, ..param_types])
+        })
+      let param_types = list.reverse(param_types)
+
+      // infer body
+      let #(c, body) = infer_body(c, n, body)
+
+      // compute function type
+      let typ = TypeFun(body.typ, param_types)
+
+      #(c, Fn(typ, params, body))
+    }
+    g.BinaryOperator(name, left, right) -> {
+      let name = case name {
+        g.AddInt -> "add_int"
+        g.SubInt -> "sub_int"
+        g.MultInt -> "mul_int"
+        g.DivInt -> "div_int"
+        _ -> {
+          io.debug(name)
+          todo as "not implemented"
+        }
+      }
+      let args = [g.Field(None, left), g.Field(None, right)]
+      let fun = g.Call(g.Variable(name), args)
+      infer_expression(c, n, fun)
+    }
+    g.Case(subjects, clauses) -> {
+      // unwrap alternative case patterns into multiple clauses
+      // we do this because they bind variables differently
+      let clauses =
+        list.flat_map(clauses, fn(clause: g.Clause) {
+          list.map(clause.patterns, fn(patterns) { #(patterns, clause.body) })
+        })
+
+      // need to reverse to make the last one the innermost after the fold
+      let clauses = list.reverse(clauses)
+
+      // the innermost branch will panic due to unmatched value
+      let #(c, panic_exp) = infer_expression(c, n, panic_ast)
+
+      // create let binding for subjects
+      let #(c, n, subjects) =
+        list.index_fold(subjects, #(c, n, []), fn(acc, subject, i) {
+          let #(c, n, l) = acc
+          let c = enter_level(c)
+          let #(c, value) = infer_expression(c, n, subject)
+          let c = exit_level(c)
+          let subject_name = "S" <> int.to_string(i)
+          let n = env.put(n, subject_name, Poly([], value.typ))
+          #(c, n, [#(subject_name, value), ..l])
+        })
+
+      // process each clause in order
+      let #(c, e) =
+        list.fold(clauses, #(c, panic_exp), fn(acc, clause) {
+          // grab the and_bool function
+          let and_bool = g.Variable("and_bool")
+          let #(c, and_bool) = infer_expression(c, n, and_bool)
+
+          let #(c, else_exp) = acc
+          let #(patterns, body) = clause
+
+          // check each subject
+          // TODO is defaulting to true ok?
+          let #(c, cond_exp) =
+            list.index_fold(
+              patterns,
+              #(c, Var(bool, "True")),
+              fn(acc, pattern, i) {
+                let #(c, last_e) = acc
+
+                // get the subject
+                let subject = g.Variable("S" <> int.to_string(i))
+                // let #(c, subject) = infer_expression(c, n, subject)
+
+                // check that the subject matches the pattern
+                let #(c, e) = infer_check_pattern(c, n, pattern, subject)
+
+                // TODO do we need to check that e is Bool?
+                #(c, Call(bool, and_bool, [e, last_e]))
+              },
+            )
+
+          // find bindings for all subjects
+          let #(c, bindings) =
+            list.index_fold(patterns, #(c, []), fn(acc, pattern, i) {
+              let #(c, l) = acc
+              let subject = g.Variable("S" <> int.to_string(i))
+              let #(c, subject) = infer_expression(c, n, subject)
+              let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
+              // TODO use efficient combine function instead of append?
+              #(c, list.append(bindings, l))
+            })
+
+          // apply binding to env
+          let n =
+            list.fold(bindings, n, fn(n, binding) {
+              let #(name, val) = binding
+              env.put(n, name, Poly([], val.typ))
+            })
+
+          // infer the body
+          let #(c, body) = infer_expression(c, n, body)
+
+          // add let expressions to define the bindings
+          let then_exp =
+            list.fold(bindings, body, fn(body, binding) {
+              let #(name, value) = binding
+              Let(body.typ, name, value, body)
+            })
+
+          // unify to make sure the types match up
+          let c = unify(c, cond_exp.typ, bool)
+          let c = unify(c, then_exp.typ, else_exp.typ)
+
+          // create an if expression
+          #(c, If(then_exp.typ, cond_exp, then_exp, else_exp))
+        })
+
+      // add let expressions to define the subjects
+      let e = list.fold(subjects, e, fn(e, s) { Let(e.typ, s.0, s.1, e) })
+
+      #(c, e)
+    }
+    exp -> {
+      io.debug(exp)
+      todo as "not implemented"
+    }
+  }
+}
+
+fn is_bound(c: Context, a: Type) -> Bool {
+  case a {
+    TypeVar(ref) ->
+      case get_type_var(c, ref) {
+        Bound(a) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+fn occurs(c: Context, id: Int, level: Int, in: Type) -> #(Context, Bool) {
+  case in {
+    TypeVar(ref) ->
+      case get_type_var(c, ref) {
+        Bound(t) -> occurs(c, id, level, t)
+        Unbound(i, l) -> {
+          let min = int.min(l, level)
+          let c = set_type_var(c, ref, Unbound(i, min))
+          #(c, id == i)
+        }
+      }
+    TypeApp(_, args) ->
+      list.fold(args, #(c, False), fn(acc, arg) {
+        let #(c, b) = acc
+        let #(c, b1) = occurs(c, id, level, arg)
+        #(c, b || b1)
       })
-    [], [] -> Ok(dict.new())
-    _, _ -> Error("Type argument lists do not match")
+    TypeFun(fun, args) ->
+      list.fold([fun, ..args], #(c, False), fn(acc, arg) {
+        let #(c, b) = acc
+        let #(c, b1) = occurs(c, id, level, arg)
+        #(c, b || b1)
+      })
   }
 }
 
-fn unify_var(var: TypeVarName, typ: Type) -> Result(Sub, String) {
-  case typ {
-    TypeVar(var2) if var == var2 -> Ok(dict.new())
-    _ ->
-      case occurs(var, typ) {
-        True -> Error("Occurs check failed")
-        False -> Ok(dict.insert(dict.new(), var, typ))
+fn unify(c: Context, a: Type, b: Type) -> Context {
+  // TODO not sure if this is_bound check are necessary
+  let a_bound = is_bound(c, a)
+  let b_bound = is_bound(c, b)
+  case a, b, a_bound, b_bound {
+    TypeVar(ref), b, True, _ -> {
+      let assert Bound(a) = get_type_var(c, ref)
+      unify(c, a, b)
+    }
+    a, TypeVar(ref), _, True -> {
+      let assert Bound(b) = get_type_var(c, ref)
+      unify(c, a, b)
+    }
+    TypeVar(ref), b, _, _ ->
+      case a == b {
+        True -> c
+        False -> {
+          let assert Unbound(aid, alevel) = get_type_var(c, ref)
+          let #(c, occurs) = occurs(c, aid, alevel, b)
+          case occurs {
+            True -> {
+              io.debug(a)
+              io.debug(b)
+              panic as "recursive type"
+            }
+            False -> {
+              set_type_var(c, ref, Bound(b))
+            }
+          }
+        }
       }
-  }
-}
-
-fn occurs(var: TypeVarName, typ: Type) -> Bool {
-  list.contains(ftv(typ), var)
-}
-
-fn apply_sub(sub: Sub, typ: Type) -> Type {
-  case typ {
-    TypeVar(v) ->
-      case dict.get(sub, v) {
-        Ok(r) -> r
-        _ -> typ
+    a, TypeVar(ref), _, _ ->
+      case a == b {
+        True -> c
+        False -> {
+          let assert Unbound(bid, blevel) = get_type_var(c, ref)
+          let #(c, occurs) = occurs(c, bid, blevel, a)
+          case occurs {
+            True -> {
+              io.debug(a)
+              io.debug(b)
+              panic as "recursive type"
+            }
+            False -> {
+              set_type_var(c, ref, Bound(a))
+            }
+          }
+        }
       }
-    TypeApp(name, args) -> TypeApp(name, list.map(args, apply_sub(sub, _)))
-    TypeFun(ret, args) ->
-      TypeFun(apply_sub(sub, ret), list.map(args, apply_sub(sub, _)))
+    TypeApp(aname, _), TypeApp(bname, _), _, _ if aname != bname -> {
+      io.debug(a)
+      io.debug(b)
+      panic as "failed to unify types"
+    }
+    TypeApp(_, aargs), TypeApp(_, bargs), _, _ -> {
+      case list.strict_zip(aargs, bargs) {
+        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
+        Error(_) -> {
+          io.debug(a)
+          io.debug(b)
+          panic as "incorrect number of type arguments"
+        }
+      }
+    }
+    TypeFun(aret, aargs), TypeFun(bret, bargs), _, _ -> {
+      let c = unify(c, aret, bret)
+      case list.strict_zip(aargs, bargs) {
+        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
+        Error(_) -> {
+          io.debug(a)
+          io.debug(b)
+          panic as "incorrect number of function arguments"
+        }
+      }
+    }
+    _, _, _, _ -> {
+      io.debug(a)
+      io.debug(b)
+      panic as "failed to unify types"
+    }
   }
 }
 
-fn apply_sub_poly(sub: Sub, typ: Poly) -> Poly {
+fn instantiate(c: Context, poly: Poly) -> #(Context, Type) {
+  do_instantiate(c, env.new(), poly)
+}
+
+fn do_instantiate(c: Context, n: Env(Int, Type), poly: Poly) -> #(Context, Type) {
+  let #(c, n) =
+    list.fold(poly.vars, #(c, n), fn(acc, var) {
+      let #(c, n) = acc
+      let #(c, new_var) = new_type_var_ref(c)
+      let n = env.put(n, var, new_var)
+      #(c, n)
+    })
+  #(c, do_instantiate_type(c, n, poly.typ))
+}
+
+fn do_instantiate_type(c: Context, n: Env(Int, Type), typ: Type) -> Type {
   case typ {
-    Mono(t) -> Mono(apply_sub(sub, t))
-    Poly(a, t) -> Poly(a, apply_sub_poly(dict.delete(sub, a), t))
+    TypeVar(ref) ->
+      case get_type_var(c, ref) {
+        Bound(x) -> do_instantiate_type(c, n, x)
+        Unbound(x, l) ->
+          case env.get(n, x) {
+            Ok(r) -> r
+            Error(_) -> typ
+          }
+      }
+    TypeApp(name, args) ->
+      TypeApp(name, list.map(args, do_instantiate_type(c, n, _)))
+    TypeFun(fun, args) ->
+      TypeFun(
+        do_instantiate_type(c, n, fun),
+        list.map(args, do_instantiate_type(c, n, _)),
+      )
   }
 }
 
-fn apply_sub_env(sub: Sub, env: Env) -> Env {
-  dict.map_values(env, fn(_, v) { apply_sub_poly(sub, v) })
+fn generalise(c: Context, t: Type) -> Poly {
+  let tvs =
+    list.unique(find_tvs(c, t))
+    |> list.sort(int.compare)
+  Poly(tvs, t)
 }
 
-fn compose_sub(sub1: Sub, sub2: Sub) -> Sub {
-  let sub2_applied = dict.map_values(sub2, fn(_, typ) { apply_sub(sub1, typ) })
-  dict.fold(sub1, sub2_applied, fn(acc, var, typ) { dict.insert(acc, var, typ) })
+fn find_tvs(c: Context, t: Type) -> List(Int) {
+  case t {
+    TypeVar(ref) ->
+      case get_type_var(c, ref) {
+        Bound(x) -> find_tvs(c, x)
+        Unbound(x, l) -> {
+          case l > c.level {
+            True -> [x]
+            False -> []
+          }
+        }
+      }
+    TypeApp(_, args) -> list.flat_map(args, find_tvs(c, _))
+    TypeFun(fun, args) -> list.flat_map([fun, ..args], find_tvs(c, _))
+  }
 }

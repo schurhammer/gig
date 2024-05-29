@@ -1,150 +1,221 @@
-import core.{type Type, TypeApp, TypeFun, TypeVar}
-
 import typed as t
 
-import gleam/dict
 import gleam/io
 import gleam/list
 import gleam/string
 
-const type_tag_seperator = "_T_"
+type VarName =
+  String
 
-type MM {
-  MM(poly: t.Module, mono: t.Module, done: List(String))
+type Context {
+  Context(poly: t.Context, mono: Module, done: List(String))
 }
 
-pub fn run(poly: t.Module) -> t.Module {
+pub type Module {
+  Module(types: List(CustomType), functions: List(Function))
+}
+
+pub type Function {
+  Function(name: VarName, params: List(String), body: Exp, typ: Mono)
+}
+
+pub type CustomType {
+  TypeDef(name: String, params: List(String), variants: List(Variant))
+}
+
+pub type Variant {
+  VariantDef(name: String, fields: List(Field))
+}
+
+pub type Field {
+  Field(name: String, typ: Mono)
+}
+
+pub type Exp {
+  Int(typ: Mono, val: String)
+  Var(typ: Mono, var: VarName)
+  Call(typ: Mono, fun: Exp, args: List(Exp))
+  Fn(typ: Mono, var: List(VarName), exp: Exp)
+  Let(typ: Mono, var: VarName, val: Exp, exp: Exp)
+  If(typ: Mono, cond: Exp, then_exp: Exp, else_exp: Exp)
+}
+
+pub type Mono {
+  MonoApp(typ: String, args: List(Mono))
+  MonoFun(ret: Mono, args: List(Mono))
+}
+
+pub fn run(poly: t.Context) {
+  let mod = Module([], [])
+  let c = Context(poly, mod, [])
+
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
+  let #(c, _) = instantiate(c, main, sub_type(c, [], main.typ.typ))
 
-  let m = MM(poly, t.Module(poly.types, []), [])
-  let assert t.Mono(typ) = main.typ
-  let #(m, name) = instantiate(m, "main", typ)
+  list.each(c.mono.functions, fn(f) { io.debug(#(f.name, f.typ)) })
 
-  m.mono
+  c.mono
 }
 
-fn unify_type(poly: Type, mono: Type) -> List(#(Int, Type)) {
-  case poly, mono {
-    TypeVar(av), _ -> [#(av, mono)]
-    TypeApp(_, aa), TypeApp(_, ba) ->
-      list.zip(aa, ba)
-      |> list.flat_map(fn(x) { unify_type(x.0, x.1) })
-    TypeFun(ar, aa), TypeFun(br, ba) ->
-      list.append(
-        unify_type(ar, br),
-        list.zip(aa, ba)
-          |> list.flat_map(fn(x) { unify_type(x.0, x.1) }),
-      )
-
-    _, _ -> {
-      io.debug(poly)
-      io.debug(mono)
-      panic
-    }
-  }
-}
-
-fn unify_poly(poly: t.Poly, mono: Type) -> #(List(Type), List(#(Int, Type))) {
-  case poly {
-    t.Mono(x) -> #([], unify_type(x, mono))
-    t.Poly(v, x) -> {
-      let #(l, m) = unify_poly(x, mono)
-      let t = case list.find(m, fn(x) { x.0 == v }) {
-        Ok(x) -> x.1
-        _ -> panic
-      }
-      #([t, ..l], m)
-    }
-  }
-}
-
-fn type_to_string(typ: Type) -> String {
+fn sub_type(c: Context, sub: List(#(Int, Mono)), typ: t.Type) -> Mono {
   case typ {
-    TypeVar(var) -> "VAR"
-    TypeApp(t, args) ->
-      t <> "_" <> list.map(args, type_to_string) |> string.join("_")
-    TypeFun(ret, args) ->
-      "fn_"
-      <> type_to_string(ret)
-      <> "_"
-      <> list.map(args, type_to_string) |> string.join("_")
+    t.TypeVar(ref) ->
+      case t.get_type_var(c.poly, ref) {
+        t.Bound(x) -> sub_type(c, sub, x)
+        t.Unbound(x, _level) ->
+          case list.find(sub, fn(sub) { sub.0 == x }) {
+            Ok(sub) -> sub.1
+            // TODO id(id) causes the problem because theres nothing
+            // binding what type of id the returned function uses
+            // maybe we just fill in with Nil instead of panic
+            Error(_) -> panic as "unbound type variable"
+          }
+      }
+    t.TypeApp(name, args) -> MonoApp(name, list.map(args, sub_type(c, sub, _)))
+    t.TypeFun(ret, args) ->
+      MonoFun(sub_type(c, sub, ret), list.map(args, sub_type(c, sub, _)))
   }
 }
 
-fn instantiate_name(fun: t.Function, typ: Type) -> String {
-  let subs = unify_poly(fun.typ, typ)
-
-  fun.name
-  <> type_tag_seperator
-  <> subs.0
-  |> list.map(type_to_string)
-  |> string.join("_")
+pub fn type_name(mono: Mono) -> String {
+  case mono {
+    MonoApp(name, []) -> "_" <> name
+    MonoApp(name, args) ->
+      "_"
+      <> name
+      <> args
+      |> list.map(type_name)
+      |> string.concat()
+    MonoFun(ret, []) -> "_fn" <> type_name(ret)
+    MonoFun(ret, args) ->
+      "_fn"
+      <> args
+      |> list.map(type_name)
+      |> string.concat()
+      <> "_"
+      <> type_name(ret)
+  }
 }
 
-fn instantiate_fun(fun: t.Function, typ: Type, mono_name: String) -> t.Function {
-  let subs = unify_poly(fun.typ, typ)
-  let sub = dict.from_list(subs.1)
-  let mono_body = t.apply_sub_texpr(sub, fun.body)
-  t.Function(mono_name, fun.params, mono_body, t.Mono(typ))
+fn mono_function_name(fun: t.Function, sub: List(#(Int, Mono))) -> String {
+  "G_"
+  <> fun.name
+  <> list.map(sub, fn(s) { type_name(s.1) })
+  |> string.concat()
 }
 
-fn instantiate(m: MM, fun_name: String, typ: Type) -> #(MM, String) {
-  case list.find(m.poly.functions, fn(x) { x.name == fun_name }) {
-    Ok(fun) -> {
-      let inst_name = instantiate_name(fun, typ)
-      case list.contains(m.done, inst_name) {
-        // already instantiated
-        True -> #(m, inst_name)
-        // add instantiation
-        False -> {
-          let inst = instantiate_fun(fun, typ, inst_name)
-          // must add function to context before the recursive call
-          let m = MM(..m, done: [inst_name, ..m.done])
-          let #(m, exp) = mm(m, inst.body)
-          let inst = t.Function(inst.name, inst.params, exp, inst.typ)
-          let funs = [inst, ..m.mono.functions]
-          let mono = t.Module(m.mono.types, funs)
-          let m = MM(..m, mono: mono)
-          #(m, inst.name)
+// instantiation algo
+// start from main (assert it is monomorphic / fill in gaps with Nil)
+// walk the body until you find a (top level) function call
+// while walking convert everything to monomorphic types
+// instantiate that function based on the monomorphic local type
+// - match the function type with the monomorphic type
+// - use the match to replace polymorphic type variables
+
+fn instantiate(c: Context, fun: t.Function, typ: Mono) -> #(Context, String) {
+  // unify types to find a substitution
+  let sub = unify_poly(c, fun.typ, typ)
+
+  // get the name of the instantiated function
+  let mono_name = mono_function_name(fun, sub)
+
+  // check if already instantiated
+  case list.contains(c.done, mono_name) {
+    True -> #(c, mono_name)
+    False -> {
+      // mark as done before doing recursive call
+      let c = Context(..c, done: [mono_name, ..c.done])
+      let #(c, mono_body) = typed_to_mono_exp(c, sub, fun.body)
+
+      // add the monomorphised function
+      let fun = Function(mono_name, fun.params, mono_body, typ)
+      let functions = [fun, ..c.mono.functions]
+      let c = Context(..c, mono: Module(..c.mono, functions: functions))
+
+      #(c, mono_name)
+    }
+  }
+}
+
+fn typed_to_mono_exp(
+  c: Context,
+  sub: List(#(Int, Mono)),
+  e: t.Exp,
+) -> #(Context, Exp) {
+  case e {
+    t.Int(typ, v) -> #(c, Int(sub_type(c, sub, typ), v))
+    t.Var(typ, var) -> {
+      // TODO need to unshadow first or keep track of a local env
+      case list.find(c.poly.functions, fn(x) { x.name == var }) {
+        Ok(fun) -> {
+          let typ = sub_type(c, sub, typ)
+          let #(c, mono_name) = instantiate(c, fun, typ)
+          #(c, Var(typ, mono_name))
+        }
+        Error(_) -> {
+          let typ = sub_type(c, sub, typ)
+          #(c, Var(typ, var))
         }
       }
     }
-    Error(_) -> #(m, fun_name)
-  }
-}
-
-fn mm(m: MM, e: t.Exp) -> #(MM, t.Exp) {
-  case e {
-    t.Int(_, _) -> #(m, e)
-    t.Var(typ, var) -> {
-      let #(m, name) = instantiate(m, var, typ)
-      #(m, t.Var(typ, name))
-    }
     t.Call(typ, fun, args) -> {
-      let #(m, fun) = mm(m, fun)
+      let #(m, fun) = typed_to_mono_exp(c, sub, fun)
       let #(m, args) =
         list.fold(args, #(m, []), fn(acc, arg) {
           let #(m, args) = acc
-          let #(m, arg) = mm(m, arg)
+          let #(m, arg) = typed_to_mono_exp(m, sub, arg)
           #(m, [arg, ..args])
         })
       let args = list.reverse(args)
-      #(m, t.Call(typ, fun, args))
+      let typ = sub_type(c, sub, typ)
+      #(m, Call(typ, fun, args))
     }
     t.Fn(typ, vars, exp) -> {
-      let #(m, exp) = mm(m, exp)
-      #(m, t.Fn(typ, vars, exp))
+      let #(m, exp) = typed_to_mono_exp(c, sub, exp)
+      let typ = sub_type(c, sub, typ)
+      #(m, Fn(typ, vars, exp))
     }
     t.Let(typ, var, val, exp) -> {
-      let #(m, val) = mm(m, val)
-      let #(m, exp) = mm(m, exp)
-      #(m, t.Let(typ, var, val, exp))
+      let #(m, val) = typed_to_mono_exp(c, sub, val)
+      let #(m, exp) = typed_to_mono_exp(m, sub, exp)
+      let typ = sub_type(c, sub, typ)
+      #(m, Let(typ, var, val, exp))
     }
     t.If(typ, cond, then_e, else_e) -> {
-      let #(m, cond) = mm(m, cond)
-      let #(m, then_e) = mm(m, then_e)
-      let #(m, else_e) = mm(m, else_e)
-      #(m, t.If(typ, cond, then_e, else_e))
+      let #(m, cond) = typed_to_mono_exp(c, sub, cond)
+      let #(m, then_e) = typed_to_mono_exp(m, sub, then_e)
+      let #(m, else_e) = typed_to_mono_exp(m, sub, else_e)
+      let typ = sub_type(c, sub, typ)
+      #(m, If(typ, cond, then_e, else_e))
+    }
+  }
+}
+
+fn unify_poly(c: Context, poly: t.Poly, mono: Mono) -> List(#(Int, Mono)) {
+  // TODO do something with poly.vars?
+  unify_type(c, poly.typ, mono)
+}
+
+fn unify_type(c: Context, poly: t.Type, mono: Mono) -> List(#(Int, Mono)) {
+  case poly, mono {
+    t.TypeVar(ref), _ ->
+      case t.get_type_var(c.poly, ref) {
+        t.Bound(x) -> unify_type(c, x, mono)
+        t.Unbound(x, _) -> [#(x, mono)]
+      }
+    t.TypeApp(a, aa), MonoApp(b, ba) if a == b ->
+      list.zip(aa, ba)
+      |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) })
+    t.TypeFun(ar, aa), MonoFun(br, ba) ->
+      list.append(
+        unify_type(c, ar, br),
+        list.zip(aa, ba)
+          |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) }),
+      )
+    _, _ -> {
+      io.debug(poly)
+      io.debug(mono)
+      panic as "could not unify types"
     }
   }
 }
