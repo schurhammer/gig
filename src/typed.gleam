@@ -16,10 +16,6 @@ pub type TypeVarRef {
   TypeVarRef(id: Int)
 }
 
-pub type Module {
-  Module(types: List(CustomType), functions: List(Function))
-}
-
 pub type Function {
   Function(name: VarName, params: List(String), body: Exp, typ: Poly)
 }
@@ -69,7 +65,6 @@ pub type Context {
     type_vars: TypeVarEnv,
     functions: List(Function),
     type_uid: Int,
-    temp_uid: Int,
     // TODO I think we technically only need two levels
     // "top level" or "local level"
     // since we only generalize top level functions (citation needed)
@@ -122,7 +117,6 @@ pub fn infer_module(mod: g.Module) {
       type_vars: env.new(),
       functions: [],
       type_uid: 0,
-      temp_uid: 0,
       level: 0,
     )
 
@@ -132,7 +126,6 @@ pub fn infer_module(mod: g.Module) {
     call_graph.create(mod)
     |> graph.strongly_connected_components()
 
-  // TODO call graph order + mutual recursion
   let #(c, n) =
     list.fold(rec_groups, #(c, n), fn(acc, group) {
       let #(c, n) = acc
@@ -185,7 +178,8 @@ pub fn infer_module(mod: g.Module) {
 
       #(c, n)
     })
-  c
+
+  unshadow_context(c)
 }
 
 pub fn get_type_var(c: Context, var: TypeVarRef) {
@@ -240,11 +234,6 @@ fn infer_function(
   #(c, #(fun.name, params, body, typ))
 }
 
-fn new_subject_name(c: Context) -> #(Context, String) {
-  let name = "S" <> int.to_string(c.temp_uid)
-  #(Context(..c, temp_uid: c.temp_uid + 1), name)
-}
-
 fn enter_level(c: Context) -> Context {
   Context(..c, level: c.level + 1)
 }
@@ -275,7 +264,7 @@ fn infer_body(
           let #(c, value) = infer_expression(c, n, value)
           let c = exit_level(c)
 
-          let #(c, subject_name) = new_subject_name(c)
+          let subject_name = "S"
           let n = env.put(n, subject_name, Poly([], value.typ))
           let #(c, subject) = infer_expression(c, n, g.Variable(subject_name))
           let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
@@ -725,5 +714,117 @@ fn find_tvs(c: Context, t: Type) -> List(Int) {
       }
     TypeApp(_, args) -> list.flat_map(args, find_tvs(c, _))
     TypeFun(fun, args) -> list.flat_map([fun, ..args], find_tvs(c, _))
+  }
+}
+
+fn unshadow(taken: List(String), i: Int, e: Exp) {
+  case e {
+    Int(_, _) -> e
+    Var(_, _) -> e
+    Call(typ, fun, args) -> {
+      let fun = unshadow(taken, i, fun)
+      let args = list.map(args, unshadow(taken, i, _))
+      Call(typ, fun, args)
+    }
+    Fn(typ, vars, exp) -> {
+      let #(taken, i, vars, exp) =
+        list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
+          let #(taken, i, vars, exp) = acc
+          case list.contains(taken, var) {
+            True -> {
+              let new_var = var <> "_V" <> int.to_string(i)
+              let i = i + 1
+              let exp = rename_var(var, new_var, exp)
+              let var = new_var
+              let taken = [var, ..taken]
+              let exp = unshadow(taken, i, exp)
+              let vars = [var, ..vars]
+              #(taken, i, vars, exp)
+            }
+            False -> {
+              let taken = [var, ..taken]
+              let exp = unshadow(taken, i, exp)
+              let vars = [var, ..vars]
+              #(taken, i, vars, exp)
+            }
+          }
+        })
+      let exp = unshadow(taken, i, exp)
+      let vars = list.reverse(vars)
+      Fn(typ, vars, exp)
+    }
+    Let(typ, var, val, exp) ->
+      case list.contains(taken, var) {
+        True -> {
+          let val = unshadow(taken, i, val)
+          let new_var = var <> "_V" <> int.to_string(i)
+          let i = i + 1
+          let exp = rename_var(var, new_var, exp)
+          let var = new_var
+          let taken = [var, ..taken]
+          let exp = unshadow(taken, i, exp)
+          Let(typ, var, val, exp)
+        }
+        False -> {
+          let val = unshadow(taken, i, val)
+          let taken = [var, ..taken]
+          let exp = unshadow(taken, i, exp)
+          Let(typ, var, val, exp)
+        }
+      }
+    If(typ, cond, then_exp, else_exp) -> {
+      let cond = unshadow(taken, i, cond)
+      let then_exp = unshadow(taken, i, then_exp)
+      let else_exp = unshadow(taken, i, else_exp)
+      If(typ, cond, then_exp, else_exp)
+    }
+  }
+}
+
+fn unshadow_context(c: Context) -> Context {
+  let fun_names = list.map(c.functions, fn(fun) { fun.name })
+  let functions =
+    list.map(c.functions, fn(fun) {
+      Function(fun.name, fun.params, unshadow(fun_names, 1, fun.body), fun.typ)
+    })
+  Context(..c, functions: functions)
+}
+
+fn rename_var(replace: String, with: String, in: Exp) -> Exp {
+  case in {
+    Int(_, _) -> in
+    Var(typ, var) ->
+      case var == replace {
+        True -> Var(typ, with)
+        False -> in
+      }
+    Call(typ, fun, args) -> {
+      let fun = rename_var(replace, with, fun)
+      let args = list.map(args, rename_var(replace, with, _))
+      Call(typ, fun, args)
+    }
+    Fn(typ, vars, exp) ->
+      case list.contains(vars, replace) {
+        True -> in
+        False -> Fn(typ, vars, rename_var(replace, with, exp))
+      }
+    Let(typ, var, val, exp) ->
+      case var == replace {
+        True -> Let(typ, var, rename_var(replace, with, val), exp)
+        False ->
+          Let(
+            typ,
+            var,
+            rename_var(replace, with, val),
+            rename_var(replace, with, exp),
+          )
+      }
+    If(typ, cond, then_exp, else_exp) ->
+      If(
+        typ,
+        rename_var(replace, with, cond),
+        rename_var(replace, with, then_exp),
+        rename_var(replace, with, else_exp),
+      )
   }
 }
