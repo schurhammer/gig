@@ -68,7 +68,8 @@ pub type Context {
     type_env: TypeEnv,
     type_vars: TypeVarEnv,
     functions: List(Function),
-    uid: Int,
+    type_uid: Int,
+    temp_uid: Int,
     // TODO I think we technically only need two levels
     // "top level" or "local level"
     // since we only generalize top level functions (citation needed)
@@ -120,7 +121,8 @@ pub fn infer_module(mod: g.Module) {
       type_env: env.new(),
       type_vars: env.new(),
       functions: [],
-      uid: 0,
+      type_uid: 0,
+      temp_uid: 0,
       level: 0,
     )
 
@@ -196,9 +198,9 @@ fn set_type_var(c: Context, var: TypeVarRef, bind: TypeVar) {
 }
 
 fn new_type_var_ref(c: Context) -> #(Context, Type) {
-  let ref = TypeVarRef(c.uid)
-  let type_vars = env.put(c.type_vars, ref, Unbound(c.uid, c.level))
-  #(Context(..c, type_vars: type_vars, uid: c.uid + 1), TypeVar(ref))
+  let ref = TypeVarRef(c.type_uid)
+  let type_vars = env.put(c.type_vars, ref, Unbound(c.type_uid, c.level))
+  #(Context(..c, type_vars: type_vars, type_uid: c.type_uid + 1), TypeVar(ref))
 }
 
 fn infer_function(
@@ -238,6 +240,11 @@ fn infer_function(
   #(c, #(fun.name, params, body, typ))
 }
 
+fn new_subject_name(c: Context) -> #(Context, String) {
+  let name = "S" <> int.to_string(c.temp_uid)
+  #(Context(..c, temp_uid: c.temp_uid + 1), name)
+}
+
 fn enter_level(c: Context) -> Context {
   Context(..c, level: c.level + 1)
 }
@@ -267,9 +274,11 @@ fn infer_body(
           let c = enter_level(c)
           let #(c, value) = infer_expression(c, n, value)
           let c = exit_level(c)
-          let n = env.put(n, "S0", Poly([], value.typ))
-          let #(c, value) = infer_expression(c, n, g.Variable("S0"))
-          let #(c, bindings) = infer_bind_pattern(c, n, pattern, value)
+
+          let #(c, subject_name) = new_subject_name(c)
+          let n = env.put(n, subject_name, Poly([], value.typ))
+          let #(c, subject) = infer_expression(c, n, g.Variable(subject_name))
+          let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
 
           // add bindings to environment
           let n =
@@ -287,6 +296,9 @@ fn infer_body(
               let #(name, value) = binding
               Let(body.typ, name, value, body)
             })
+
+          // add binding for the subject
+          let body = Let(body.typ, subject_name, value, body)
 
           #(c, body)
         }

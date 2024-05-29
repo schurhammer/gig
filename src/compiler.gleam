@@ -1,6 +1,5 @@
 import closure_conversion
 import codegen
-import core as c
 import glance
 import monomorphise
 import typed as t

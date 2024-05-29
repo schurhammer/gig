@@ -52,7 +52,7 @@ pub fn run(poly: t.Context) {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
   let #(c, _) = instantiate(c, main, sub_type(c, [], main.typ.typ))
 
-  list.each(c.mono.functions, fn(f) { io.debug(#(f.name, f.typ)) })
+  // list.each(c.mono.functions, fn(f) { io.debug(#(f.name, f.typ)) })
 
   c.mono
 }
@@ -192,8 +192,18 @@ fn typed_to_mono_exp(
 }
 
 fn unify_poly(c: Context, poly: t.Poly, mono: Mono) -> List(#(Int, Mono)) {
-  // TODO do something with poly.vars?
-  unify_type(c, poly.typ, mono)
+  let sub = unify_type(c, poly.typ, mono)
+  list.map(poly.vars, fn(x) {
+    case list.find(sub, fn(s) { s.0 == x }) {
+      Ok(s) -> #(x, s.1)
+      Error(Nil) -> {
+        io.debug(poly)
+        io.debug(mono)
+        io.debug(sub)
+        panic as "could not unify poly type"
+      }
+    }
+  })
 }
 
 fn unify_type(c: Context, poly: t.Type, mono: Mono) -> List(#(Int, Mono)) {
