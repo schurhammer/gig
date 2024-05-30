@@ -80,7 +80,10 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
       let g = walk_expression(g, n, r, fun)
       list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e.item) })
     }
-    g.BinaryOperator(..) -> g
+    g.BinaryOperator(_, left, right) -> {
+      let g = walk_expression(g, n, r, left)
+      walk_expression(g, n, r, right)
+    }
     g.Case(subjects, clauses) -> {
       let g = list.fold(subjects, g, fn(g, e) { walk_expression(g, n, r, e) })
 

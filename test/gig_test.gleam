@@ -16,7 +16,7 @@ pub fn all_samples_tests() {
     files
     |> list.filter(fn(file) { string.ends_with(file, ".gleam") })
     |> list.map(fn(file) { sample_test(file) })
-  describe("Samples", tests)
+  describe("samples", tests)
 }
 
 fn sample_test(file) {
