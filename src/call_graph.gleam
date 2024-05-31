@@ -56,10 +56,14 @@ fn walk_body(g: Graph, n: Env, r: String, body: List(g.Statement)) -> Graph {
   }
 }
 
+// returns a list of the names of variables that are bound
 fn pattern_bindings(pattern: g.Pattern) -> List(String) {
   case pattern {
     g.PatternInt(_) -> []
+    g.PatternDiscard(_) -> []
     g.PatternVariable(x) -> [x]
+    g.PatternConstructor(_mod, _cons, args, _spread) ->
+      list.flat_map(args, fn(x) { pattern_bindings(x.item) })
     _ -> {
       io.debug(pattern)
       todo

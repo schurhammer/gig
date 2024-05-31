@@ -54,8 +54,9 @@ pub fn run(poly: t.Context) {
   let mod = Module([], [])
   let c = Context(poly, mod, [])
 
-  let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
-  let #(c, _) = instantiate(c, main, sub_type(c, [], main.typ.typ))
+  let name = "main"
+  let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == name })
+  let #(c, _) = instantiate_function(c, name, sub_type(c, [], main.typ.typ))
 
   // TODO instantiate types
 
@@ -112,78 +113,131 @@ pub fn type_name(mono: Mono) -> String {
 // - match the function type with the monomorphic type
 // - use the match to replace polymorphic type variables
 
-fn instantiate(c: Context, fun: t.Function, typ: Mono) -> #(Context, String) {
+fn get_type_string(sub: List(#(Int, Mono))) {
+  list.map(sub, fn(s) { type_name(s.1) })
+  |> string.concat()
+}
+
+fn instantiate_function(
+  c: Context,
+  name: String,
+  typ: Mono,
+) -> #(Context, String) {
+  let assert Ok(fun) = list.find(c.poly.functions, fn(x) { x.name == name })
+
   let sub = unify_poly(c, fun.typ, typ)
 
-  let type_string =
-    list.map(sub, fn(s) { type_name(s.1) })
-    |> string.concat()
+  let type_string = get_type_string(sub)
 
-  case fun {
-    t.Function(name, poly, params, body) -> {
-      // unify types to find a substitution
+  // unify types to find a substitution
 
-      // get the name of the instantiated function
-      let mono_name = "F_" <> name <> type_string
+  // get the name of the instantiated function
+  let mono_name = "F_" <> fun.name <> type_string
 
-      // check if already instantiated
-      case list.contains(c.done, mono_name) {
-        True -> #(c, mono_name)
-        False -> {
-          // mark as done
-          let c = Context(..c, done: [mono_name, ..c.done])
+  // check if already instantiated
+  case list.contains(c.done, mono_name) {
+    True -> #(c, mono_name)
+    False -> {
+      // mark as done
+      let c = Context(..c, done: [mono_name, ..c.done])
 
-          // instantiate function
-          let #(c, mono_body) = typed_to_mono_exp(c, sub, body)
-          let fun = Function(mono_name, params, mono_body, typ)
+      // instantiate function
+      let #(c, mono_body) = typed_to_mono_exp(c, sub, fun.body)
+      let fun = Function(mono_name, fun.params, mono_body, typ)
 
-          // add to module
-          let funs = [fun, ..c.mono.functions]
-          let c = Context(..c, mono: Module(..c.mono, functions: funs))
+      // add to module
+      let funs = [fun, ..c.mono.functions]
+      let c = Context(..c, mono: Module(..c.mono, functions: funs))
 
-          #(c, mono_name)
-        }
-      }
-    }
-    t.Constructor(name, poly, variant, custom) -> {
-      // unify types to find a substitution
-      let sub = unify_poly(c, poly, typ)
-
-      // get the name of the instantiated type
-      let variant_mono_name = name <> type_string
-      let custom_mono_name = custom.name <> type_string
-
-      // check if custom type is already instantiated
-      case list.contains(c.done, custom_mono_name) {
-        True -> #(c, variant_mono_name)
-        False -> {
-          // mark as done
-          let c = Context(..c, done: [custom_mono_name, ..c.done])
-
-          // instantiate type
-          let variants =
-            list.map(custom.variants, fn(v) {
-              let variant_mono_name = v.name <> type_string
-              let fields =
-                list.map(v.fields, fn(f) {
-                  Field(f.name, sub_type(c, sub, f.typ))
-                })
-              Variant(variant_mono_name, fields)
-            })
-          let custom = CustomType(custom_mono_name, custom.params, variants)
-
-          // add to module
-          let types = [custom, ..c.mono.types]
-          let c = Context(..c, mono: Module(..c.mono, types: types))
-
-          #(c, variant_mono_name)
-        }
-      }
-    }
-    t.Getter(name, typ, variant, field, custom) -> {
-      #(c, variant.name <> type_string <> "_" <> field.name)
+      #(c, mono_name)
     }
   }
+}
+
+fn instantiate_custom_type(
+  c: Context,
+  sub: List(#(Int, Mono)),
+  custom: t.CustomType,
+) {
+  let type_string = get_type_string(sub)
+  let custom_mono_name = custom.name <> type_string
+
+  // check if custom type is already instantiated
+  case list.contains(c.done, custom_mono_name) {
+    True -> c
+    False -> {
+      // mark as done
+      let c = Context(..c, done: [custom_mono_name, ..c.done])
+
+      // instantiate type
+      let variants =
+        list.map(custom.variants, fn(v) {
+          let variant_mono_name = v.name <> type_string
+          let fields =
+            list.map(v.fields, fn(f) { Field(f.name, sub_type(c, sub, f.typ)) })
+          Variant(variant_mono_name, fields)
+        })
+      let custom = CustomType(custom_mono_name, custom.params, variants)
+
+      // add to module
+      let types = [custom, ..c.mono.types]
+      let c = Context(..c, mono: Module(..c.mono, types: types))
+
+      c
+    }
+  }
+}
+
+fn instantiate_constructor(
+  c: Context,
+  poly: t.Poly,
+  variant: t.Variant,
+  custom: t.CustomType,
+  typ: Mono,
+) {
+  let sub = unify_poly(c, poly, typ)
+
+  let c = instantiate_custom_type(c, sub, custom)
+
+  let type_string = get_type_string(sub)
+  let mono_name = variant.name <> type_string
+
+  #(c, mono_name)
+}
+
+fn instantiate_instanceof(
+  c: Context,
+  poly: t.Poly,
+  variant: t.Variant,
+  custom: t.CustomType,
+  typ: Mono,
+) {
+  let sub = unify_poly(c, poly, typ)
+
+  let c = instantiate_custom_type(c, sub, custom)
+
+  let type_string = get_type_string(sub)
+  let mono_name = variant.name <> type_string <> "_instanceof"
+
+  #(c, mono_name)
+}
+
+fn instantiate_getter(
+  c: Context,
+  poly: t.Poly,
+  field: t.Field,
+  variant: t.Variant,
+  custom: t.CustomType,
+  typ: Mono,
+) {
+  let sub = unify_poly(c, poly, typ)
+
+  let c = instantiate_custom_type(c, sub, custom)
+
+  let type_string = get_type_string(sub)
+  let mono_name = variant.name <> type_string <> "_" <> field.name
+
+  #(c, mono_name)
 }
 
 fn typed_to_mono_exp(
@@ -193,16 +247,40 @@ fn typed_to_mono_exp(
 ) -> #(Context, Exp) {
   case e {
     t.Int(typ, v) -> #(c, Int(sub_type(c, sub, typ), v))
-    t.Var(typ, var) -> {
-      case list.find(c.poly.functions, fn(x) { x.name == var }) {
-        Ok(fun) -> {
+    t.Var(typ, name, kind) -> {
+      case kind {
+        t.LocalVar -> {
+          // TODO not sure if this sub type is really doing much, double check
           let typ = sub_type(c, sub, typ)
-          let #(c, mono_name) = instantiate(c, fun, typ)
+          #(c, Var(typ, name))
+        }
+        t.BuiltInVar -> {
+          // TODO instantiate
+          let typ = sub_type(c, sub, typ)
+          #(c, Var(typ, name))
+        }
+        t.FunctionVar -> {
+          let typ = sub_type(c, sub, typ)
+          let #(c, mono_name) = instantiate_function(c, name, typ)
           #(c, Var(typ, mono_name))
         }
-        Error(_) -> {
+        t.ConstructorVar(poly, variant, custom) -> {
           let typ = sub_type(c, sub, typ)
-          #(c, Var(typ, var))
+          let #(c, mono_name) =
+            instantiate_constructor(c, poly, variant, custom, typ)
+          #(c, Var(typ, mono_name))
+        }
+        t.InstanceOfVar(poly, variant, custom) -> {
+          let typ = sub_type(c, sub, typ)
+          let #(c, mono_name) =
+            instantiate_instanceof(c, poly, variant, custom, typ)
+          #(c, Var(typ, mono_name))
+        }
+        t.GetterVar(poly, field, variant, custom) -> {
+          let typ = sub_type(c, sub, typ)
+          let #(c, mono_name) =
+            instantiate_getter(c, poly, field, variant, custom, typ)
+          #(c, Var(typ, mono_name))
         }
       }
     }

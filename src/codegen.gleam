@@ -23,12 +23,19 @@ fn do_type_name(typ: Mono) -> String {
   }
 }
 
+import gleam/io
+
 fn hit_target(target: String, with: String) {
-  case target {
-    "" -> with
-    // TODO not sure if this is always valid
-    // "RETURN" -> "return " <> with <> ";\n"
-    target -> target <> " = " <> with <> ";\n"
+  case with {
+    // TODO find a better solution for panic
+    "panic()" -> "panic();\n"
+    _ ->
+      case target {
+        "" -> with
+        // TODO not sure if this is always valid
+        // "RETURN" -> "return " <> with <> ";\n"
+        target -> target <> " = " <> with <> ";\n"
+      }
   }
 }
 
@@ -153,14 +160,28 @@ fn function_forward(fun: Function) -> String {
 fn custom_type_forward(t: CustomType) {
   let variants =
     list.map(t.variants, fn(v) {
-      "typedef struct " <> v.name <> "* T_" <> v.name <> ";\n"
+      "typedef struct " <> v.name <> "* S_" <> v.name <> ";\n"
     })
     |> string.concat
   let union = case t.variants {
     // only a single variant
-    [v] -> "typedef T_" <> v.name <> " T_" <> t.name <> ";"
+    [v] -> "typedef S_" <> v.name <> " T_" <> t.name <> ";"
     // either 0 or many variants
-    _ -> todo
+    variants -> {
+      let union_name = "U_" <> t.name
+      let union =
+        "struct "
+        <> union_name
+        <> " {\nint tag;\n"
+        <> "union {\n"
+        <> list.map(variants, fn(v) { "S_" <> v.name <> " " <> v.name <> ";\n" })
+        |> string.concat()
+        <> "}\n"
+        <> "data;\n"
+        <> "};\n"
+      let typedef = "typedef struct " <> union_name <> " T_" <> t.name <> ";"
+      union <> typedef
+    }
   }
   variants <> union
 }
@@ -168,16 +189,23 @@ fn custom_type_forward(t: CustomType) {
 fn custom_type(t: CustomType) {
   // TODO align naming conventions with rest of code
   // TODO handle union types
-  list.map(t.variants, fn(v) {
+  let is_record = case t.variants {
+    [_] -> True
+    _ -> False
+  }
+  list.index_map(t.variants, fn(v, i) {
+    let tag = int.to_string(i)
     let fields =
       list.map(v.fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
       |> string.join("")
-
     let struct = "struct " <> v.name <> "{\n" <> fields <> "};"
-
+    let constructor_target = case is_record {
+      True -> "RETURN"
+      False -> "RETURN.data." <> v.name
+    }
     let constructor =
       "T_"
-      <> v.name
+      <> t.name
       <> " "
       <> v.name
       <> "("
@@ -186,15 +214,38 @@ fn custom_type(t: CustomType) {
       |> string.join(", ")
       <> ") {\n"
       <> "T_"
-      <> v.name
-      <> " RETURN = malloc(sizeof("
-      <> v.name
-      <> "));\n"
+      <> t.name
+      <> " RETURN;\n"
+      <> case is_record {
+        True -> ""
+        False -> "RETURN.tag = " <> tag <> ";\n"
+      }
+      <> case v.fields {
+        [] -> constructor_target <> " = " <> "(void*) 1;\n"
+        _ ->
+          constructor_target <> " = " <> "malloc(sizeof(" <> v.name <> "));\n"
+      }
       <> v.fields
-      |> list.map(fn(p) { "RETURN->" <> p.name <> " = " <> p.name <> ";\n" })
+      |> list.map(fn(p) {
+        constructor_target <> "->" <> p.name <> " = " <> p.name <> ";\n"
+      })
       |> string.join("")
       <> "return RETURN;\n"
       <> "}"
+    let instanceof =
+      "T_Bool"
+      <> " "
+      <> v.name
+      <> "_instanceof"
+      <> "("
+      <> "T_"
+      <> t.name
+      <> " data) { return "
+      <> case is_record {
+        True -> "True"
+        False -> "data.tag == " <> tag
+      }
+      <> "; }"
     let getters =
       list.map(v.fields, fn(f) {
         type_name(f.typ)
@@ -204,12 +255,16 @@ fn custom_type(t: CustomType) {
         <> f.name
         <> "("
         <> "T_"
-        <> v.name
-        <> " data) { return data->"
+        <> t.name
+        <> " data) { return "
+        <> case is_record {
+          True -> "data->"
+          False -> "data.data." <> v.name <> "->"
+        }
         <> f.name
         <> "; }"
       })
-    [struct, constructor, ..getters]
+    [struct, constructor, instanceof, ..getters]
     |> string.join("\n\n")
   })
   |> string.join("\n")
