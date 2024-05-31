@@ -6,8 +6,8 @@
 
 #define True true
 #define False false
-#define Int int
-#define Bool bool
+#define T_Int int
+#define T_Bool bool
 
 int panic() { exit(1); }
 
@@ -29,15 +29,15 @@ bool and_bool(bool x, bool y) { return x && y; }
 
 bool or_bool(bool x, bool y) { return x && y; }
 
-typedef struct Closure Closure;
+typedef struct Closure T_Closure;
 
 struct Closure {
   void *fun;
   void *env;
 };
 
-Closure create_closure(void *fun, void *env) {
-  Closure RETURN;
+T_Closure create_closure(void *fun, void *env) {
+  T_Closure RETURN;
   RETURN.fun = fun;
   RETURN.env = env;
   return RETURN;
@@ -53,4 +53,4 @@ Closure create_closure(void *fun, void *env) {
 
 /// main
 
-int main() { print_int(G_main()); return 0; }
+int main() { print_int(F_main()); return 0; }

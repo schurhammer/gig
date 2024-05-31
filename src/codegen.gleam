@@ -1,16 +1,21 @@
 import closure_conversion.{
-  type Exp, type Function, type Module, Call, CallClosure, Function, If, Int,
-  Let, Module, Var,
+  type Exp, type Function, type Module, Call, CallClosure, If, Int, Let, Module,
+  Var,
 }
 import gleam/int
 import gleam/list
 import gleam/string
-import monomorphise.{type CustomType, type Mono, MonoApp, MonoFun, TypeDef} as mono
+import monomorphise.{type CustomType, type Mono, CustomType, MonoApp, MonoFun} as mono
 
 // TODO standardise type name functions
 fn type_name(typ: Mono) -> String {
+  "T_" <> do_type_name(typ)
+}
+
+fn do_type_name(typ: Mono) -> String {
   case typ {
-    MonoApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
+    MonoApp(name, args) ->
+      string.join([name, ..list.map(args, do_type_name)], "_")
     MonoFun(..) -> {
       // TODO what do
       "Closure"
@@ -145,14 +150,23 @@ fn function_forward(fun: Function) -> String {
   <> ");"
 }
 
-fn type_def_forward(t: CustomType) {
-  list.map(t.variants, fn(v) {
-    "typedef struct " <> v.name <> " " <> v.name <> ";"
-  })
-  |> string.join("\n")
+fn custom_type_forward(t: CustomType) {
+  let variants =
+    list.map(t.variants, fn(v) {
+      "typedef struct " <> v.name <> "* T_" <> v.name <> ";\n"
+    })
+    |> string.concat
+  let union = case t.variants {
+    // only a single variant
+    [v] -> "typedef T_" <> v.name <> " T_" <> t.name <> ";"
+    // either 0 or many variants
+    _ -> todo
+  }
+  variants <> union
 }
 
-fn type_def(t: CustomType) {
+fn custom_type(t: CustomType) {
+  // TODO align naming conventions with rest of code
   // TODO handle union types
   list.map(t.variants, fn(v) {
     let fields =
@@ -162,17 +176,18 @@ fn type_def(t: CustomType) {
     let struct = "struct " <> v.name <> "{\n" <> fields <> "};"
 
     let constructor =
-      v.name
-      <> "* "
+      "T_"
       <> v.name
-      <> "_NEW"
+      <> " "
+      <> v.name
       <> "("
       <> v.fields
       |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
       |> string.join(", ")
       <> ") {\n"
+      <> "T_"
       <> v.name
-      <> "* RETURN = malloc(sizeof("
+      <> " RETURN = malloc(sizeof("
       <> v.name
       <> "));\n"
       <> v.fields
@@ -185,11 +200,12 @@ fn type_def(t: CustomType) {
         type_name(f.typ)
         <> " "
         <> v.name
-        <> "_GET_"
+        <> "_"
         <> f.name
         <> "("
+        <> "T_"
         <> v.name
-        <> "* data) { return data->"
+        <> " data) { return data->"
         <> f.name
         <> "; }"
       })
@@ -204,11 +220,11 @@ pub fn module(mod: Module) -> String {
   let types = mod.types
 
   let type_decl =
-    list.map(types, type_def_forward)
+    list.map(types, custom_type_forward)
     |> string.join("\n\n")
 
   let type_impl =
-    list.map(types, type_def)
+    list.map(types, custom_type)
     |> string.join("\n\n")
 
   let fun_decl =

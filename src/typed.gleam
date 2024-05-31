@@ -7,7 +7,7 @@ import glance as g
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 
 pub type VarName =
   String
@@ -17,20 +17,38 @@ pub type TypeVarRef {
 }
 
 pub type Function {
-  Function(name: VarName, params: List(String), body: Exp, typ: Poly)
+  Function(name: VarName, typ: Poly, params: List(String), body: Exp)
+  Constructor(name: VarName, typ: Poly, variant: Variant, custom: CustomType)
+  Getter(
+    name: VarName,
+    typ: Poly,
+    variant: Variant,
+    field: Field,
+    custom: CustomType,
+  )
 }
 
 pub type CustomType {
-  TypeDef(name: String, params: List(String), variants: List(Variant))
+  CustomType(
+    name: String,
+    params: List(String),
+    variants: List(Variant),
+    typ: Poly,
+  )
 }
 
 pub type Variant {
-  VariantDef(name: String, fields: List(Field))
+  Variant(name: String, fields: List(Field))
 }
 
 pub type Field {
   Field(name: String, typ: Type)
 }
+
+// TODO What if instead of
+// Var(n)
+// we had something like
+// Var(Type(n) | Fun(n) | Local(n))
 
 pub type Exp {
   Int(typ: Type, val: String)
@@ -43,6 +61,12 @@ pub type Exp {
 
 pub type Poly {
   Poly(vars: List(Int), typ: Type)
+}
+
+pub type Type {
+  TypeVar(var: TypeVarRef)
+  TypeApp(typ: String, args: List(Type))
+  TypeFun(ret: Type, args: List(Type))
 }
 
 pub type TypeVar {
@@ -61,8 +85,8 @@ pub type TypeVarEnv =
 
 pub type Context {
   Context(
-    type_env: TypeEnv,
     type_vars: TypeVarEnv,
+    types: List(CustomType),
     functions: List(Function),
     type_uid: Int,
     // TODO I think we technically only need two levels
@@ -70,12 +94,6 @@ pub type Context {
     // since we only generalize top level functions (citation needed)
     level: Int,
   )
-}
-
-pub type Type {
-  TypeVar(var: TypeVarRef)
-  TypeApp(typ: String, args: List(Type))
-  TypeFun(ret: Type, args: List(Type))
 }
 
 const int = TypeApp("Int", [])
@@ -113,14 +131,61 @@ fn prelude(c: Context) -> #(Context, ValueEnv) {
 pub fn infer_module(mod: g.Module) {
   let c =
     Context(
-      type_env: env.new(),
       type_vars: env.new(),
+      types: [],
       functions: [],
       type_uid: 0,
       level: 0,
     )
 
   let #(c, n) = prelude(c)
+
+  // types
+  let #(c, n) =
+    list.fold(mod.custom_types, #(c, n), fn(acc, def) {
+      let #(c, n) = acc
+      let #(c, custom) = infer_custom_type(c, def.definition)
+
+      io.debug(custom)
+
+      let #(c, n) =
+        list.fold(custom.variants, #(c, n), fn(acc, v) {
+          let #(c, n) = acc
+
+          // register constructor function
+          let vars = custom.typ.vars
+          let custom_typ = custom.typ.typ
+          let args = list.map(v.fields, fn(f) { f.typ })
+          let typ = Poly(vars, TypeFun(custom_typ, args))
+
+          // put constructor into env and module definition
+          let n = env.put(n, v.name, typ)
+          let funs = [Constructor(v.name, typ, v, custom), ..c.functions]
+          let c = Context(..c, functions: funs)
+
+          // register getters for each field
+          let #(c, n) =
+            list.fold(v.fields, #(c, n), fn(acc, f) {
+              let #(c, n) = acc
+              let getter_name = v.name <> "_" <> f.name
+              let typ = Poly(vars, TypeFun(f.typ, [custom_typ]))
+
+              // put getter into env and module definition
+              let n = env.put(n, getter_name, typ)
+              let funs = [Getter(getter_name, typ, v, f, custom), ..c.functions]
+              let c = Context(..c, functions: funs)
+              #(c, n)
+            })
+
+          #(c, n)
+        })
+
+      let c = Context(..c, types: [custom, ..c.types])
+      env.debug(n)
+      #(c, n)
+    })
+
+  // functions
 
   let rec_groups =
     call_graph.create(mod)
@@ -148,14 +213,14 @@ pub fn infer_module(mod: g.Module) {
           let #(c, n, group) = acc
 
           // find the function definition by name
-          let assert Ok(definition) =
+          let assert Ok(def) =
             list.find(mod.functions, fn(x) {
               let fun = x.definition
               fun.name == fun_name
             })
 
           // infer the function
-          let #(c, fun) = infer_function(c, n, definition)
+          let #(c, fun) = infer_function(c, n, def.definition)
 
           #(c, n, [fun, ..group])
         })
@@ -167,9 +232,10 @@ pub fn infer_module(mod: g.Module) {
       let #(n, group) =
         list.fold(group, #(n, []), fn(acc, fun) {
           let #(n, group) = acc
+          // TODO refactor to remove the 4 tuple for Function
           let #(name, params, body, typ) = fun
           let gen = generalise(c, typ)
-          let fun = Function(name, params, body, gen)
+          let fun = Function(name, gen, params, body)
           let n = env.put(n, name, gen)
           #(n, [fun, ..group])
         })
@@ -197,13 +263,83 @@ fn new_type_var_ref(c: Context) -> #(Context, Type) {
   #(Context(..c, type_vars: type_vars, type_uid: c.type_uid + 1), TypeVar(ref))
 }
 
+fn infer_custom_type(c: Context, ct: g.CustomType) {
+  // create a type variable for each parameter
+  // these will be used when a field references a type parameter
+  let #(c, param_types) =
+    list.fold(ct.parameters, #(c, []), fn(acc, p) {
+      // TODO I think we technically don't need to create refs here, we can just use 1,2,3
+      let #(c, l) = acc
+      let #(c, t) = new_type_var_ref(c)
+      let assert TypeVar(var) = t
+      #(c, [#(p, t, var.id), ..l])
+    })
+  let param_types = list.reverse(param_types)
+
+  // create an env for param types
+  let param_env =
+    list.fold(param_types, env.new(), fn(n, p) { env.put(n, p.0, p.1) })
+
+  // process each variant
+  let #(c, variants) =
+    list.fold(ct.variants, #(c, []), fn(acc, variant) {
+      let #(c, l) = acc
+      let #(c, v) = infer_variant(c, param_env, variant)
+      #(c, [v, ..l])
+    })
+  let variants = list.reverse(variants)
+
+  // create a poly type
+  let type_args = list.map(param_types, fn(x) { x.1 })
+  let type_params = list.map(param_types, fn(x) { x.2 })
+  let typ = Poly(type_params, TypeApp(ct.name, type_args))
+
+  #(c, CustomType(ct.name, ct.parameters, variants, typ))
+}
+
+fn infer_variant(c: Context, n: Env(String, Type), variant: g.Variant) {
+  let #(c, fields) =
+    list.index_fold(variant.fields, #(c, []), fn(acc, field, i) {
+      let #(c, l) = acc
+      let #(c, t) = infer_type(c, n, field.item)
+      let name = case field.label {
+        Some(x) -> x
+        None -> "field" <> int.to_string(i)
+      }
+      #(c, [Field(name, t), ..l])
+    })
+  let fields = list.reverse(fields)
+
+  #(c, Variant(variant.name, fields))
+}
+
+fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) {
+  case typ {
+    g.NamedType(name, module, params) -> {
+      let #(c, params) =
+        list.fold(params, #(c, []), fn(acc, p) {
+          let #(c, l) = acc
+          let #(c, p) = infer_type(c, n, p)
+          #(c, [p, ..l])
+        })
+      let params = list.reverse(params)
+      #(c, TypeApp(name, params))
+    }
+    g.TupleType(elements) -> todo
+    g.FunctionType(parameters, return) -> todo
+    g.VariableType(name) -> {
+      let assert Ok(t) = env.get(n, name)
+      #(c, t)
+    }
+    g.HoleType(name) -> todo
+  }
+}
+
 fn infer_function(
   c: Context,
   n: ValueEnv,
-  def: g.Definition(g.Function),
+  fun: g.Function,
 ) -> #(Context, #(String, List(String), Exp, Type)) {
-  let fun = def.definition
-
   // get list of param names
   let params =
     list.map(fun.parameters, fn(param) {
@@ -353,6 +489,7 @@ fn infer_expression(
   n: ValueEnv,
   exp: g.Expression,
 ) -> #(Context, Exp) {
+  io.debug(exp)
   case exp {
     g.Int(s) -> #(c, Int(int, s))
     g.Variable(s) -> {
@@ -529,6 +666,28 @@ fn infer_expression(
       let e = list.fold(subjects, e, fn(e, s) { Let(e.typ, s.0, s.1, e) })
 
       #(c, e)
+    }
+    g.FieldAccess(value, field) -> {
+      // TODO probably need to do more work to resolve this type properly
+      let #(c, exp) = infer_expression(c, n, value)
+      let assert TypeApp(type_name, _) = exp.typ
+
+      // accessor only works with exactly one variant
+      let assert Ok(custom) = list.find(c.types, fn(x) { x.name == type_name })
+      let assert [variant] = custom.variants
+
+      let getter_name = variant.name <> "_" <> field
+
+      // TODO we're compiling 'value' twice, try to fix that (maybe with a temp variable?)
+      let #(c, exp) =
+        infer_expression(
+          c,
+          n,
+          g.Call(g.Variable(getter_name), [g.Field(None, value)]),
+        )
+
+      io.debug(exp)
+      #(c, exp)
     }
     exp -> {
       io.debug(exp)
@@ -782,10 +941,15 @@ fn unshadow(taken: List(String), i: Int, e: Exp) {
 }
 
 fn unshadow_context(c: Context) -> Context {
-  let fun_names = list.map(c.functions, fn(fun) { fun.name })
+  let globals = list.map(c.functions, fn(fun) { fun.name })
   let functions =
     list.map(c.functions, fn(fun) {
-      Function(fun.name, fun.params, unshadow(fun_names, 1, fun.body), fun.typ)
+      case fun {
+        Function(name, typ, params, body) ->
+          Function(name, typ, params, unshadow(globals, 1, body))
+        Constructor(..) -> fun
+        Getter(..) -> fun
+      }
     })
   Context(..c, functions: functions)
 }

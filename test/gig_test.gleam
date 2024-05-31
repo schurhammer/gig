@@ -12,6 +12,12 @@ pub fn main() {
 
 pub fn all_samples_tests() {
   let assert Ok(files) = simplifile.get_files("./test/samples")
+
+  // remove old binaries so they don't interfere
+  files
+  |> list.filter(fn(file) { !string.ends_with(file, ".gleam") })
+  |> list.map(fn(file) { simplifile.delete(file) })
+
   let tests =
     files
     |> list.filter(fn(file) { string.ends_with(file, ".gleam") })

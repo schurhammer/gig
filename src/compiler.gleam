@@ -7,7 +7,7 @@ import typed as t
 import shellout
 import simplifile
 
-import gleam/dict
+import gleam/io
 import gleam/string
 
 pub fn read_file(file_name: String) -> String {
@@ -27,7 +27,7 @@ pub fn compile(gleam_file_name: String) {
   let code = codegen.module(cc)
 
   // insert the generated code into the template
-  let template = read_file("./src/gig.c")
+  let template = read_file("./src/template.c")
   let output = string.replace(template, "///CODEGEN_CONTENT///", code)
 
   // output the c file
@@ -37,7 +37,12 @@ pub fn compile(gleam_file_name: String) {
   let assert Ok(_) = shellout.command("bash", ["-c", cmd], ".", [])
 
   // compile the c file
-  let assert Ok(_) = shellout.command("gcc", ["-o", file_name, c_file], ".", [])
+  let result = shellout.command("gcc", ["-o", file_name, c_file], ".", [])
+
+  case result {
+    Ok(_) -> Nil
+    Error(message) -> io.println_error(message.1)
+  }
 
   file_name
 }

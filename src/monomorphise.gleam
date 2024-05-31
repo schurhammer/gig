@@ -3,6 +3,7 @@ import typed as t
 import gleam/io
 import gleam/list
 import gleam/string
+import pprint as pp
 
 type VarName =
   String
@@ -15,16 +16,20 @@ pub type Module {
   Module(types: List(CustomType), functions: List(Function))
 }
 
+pub type Constructor {
+  Constructor(name: VarName, variant: Variant)
+}
+
 pub type Function {
   Function(name: VarName, params: List(String), body: Exp, typ: Mono)
 }
 
 pub type CustomType {
-  TypeDef(name: String, params: List(String), variants: List(Variant))
+  CustomType(name: String, params: List(String), variants: List(Variant))
 }
 
 pub type Variant {
-  VariantDef(name: String, fields: List(Field))
+  Variant(name: String, fields: List(Field))
 }
 
 pub type Field {
@@ -52,8 +57,10 @@ pub fn run(poly: t.Context) {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == "main" })
   let #(c, _) = instantiate(c, main, sub_type(c, [], main.typ.typ))
 
-  // list.each(c.mono.functions, fn(f) { io.debug(#(f.name, f.typ)) })
+  // TODO instantiate types
 
+  list.each(c.mono.functions, fn(f) { io.debug(#(f.name, f.typ, f.body)) })
+  list.each(c.mono.types, fn(f) { io.debug(f) })
   c.mono
 }
 
@@ -97,13 +104,6 @@ pub fn type_name(mono: Mono) -> String {
   }
 }
 
-fn mono_function_name(fun: t.Function, sub: List(#(Int, Mono))) -> String {
-  "G_"
-  <> fun.name
-  <> list.map(sub, fn(s) { type_name(s.1) })
-  |> string.concat()
-}
-
 // instantiation algo
 // start from main (assert it is monomorphic / fill in gaps with Nil)
 // walk the body until you find a (top level) function call
@@ -113,26 +113,75 @@ fn mono_function_name(fun: t.Function, sub: List(#(Int, Mono))) -> String {
 // - use the match to replace polymorphic type variables
 
 fn instantiate(c: Context, fun: t.Function, typ: Mono) -> #(Context, String) {
-  // unify types to find a substitution
   let sub = unify_poly(c, fun.typ, typ)
 
-  // get the name of the instantiated function
-  let mono_name = mono_function_name(fun, sub)
+  let type_string =
+    list.map(sub, fn(s) { type_name(s.1) })
+    |> string.concat()
 
-  // check if already instantiated
-  case list.contains(c.done, mono_name) {
-    True -> #(c, mono_name)
-    False -> {
-      // mark as done before doing recursive call
-      let c = Context(..c, done: [mono_name, ..c.done])
-      let #(c, mono_body) = typed_to_mono_exp(c, sub, fun.body)
+  case fun {
+    t.Function(name, poly, params, body) -> {
+      // unify types to find a substitution
 
-      // add the monomorphised function
-      let fun = Function(mono_name, fun.params, mono_body, typ)
-      let functions = [fun, ..c.mono.functions]
-      let c = Context(..c, mono: Module(..c.mono, functions: functions))
+      // get the name of the instantiated function
+      let mono_name = "F_" <> name <> type_string
 
-      #(c, mono_name)
+      // check if already instantiated
+      case list.contains(c.done, mono_name) {
+        True -> #(c, mono_name)
+        False -> {
+          // mark as done
+          let c = Context(..c, done: [mono_name, ..c.done])
+
+          // instantiate function
+          let #(c, mono_body) = typed_to_mono_exp(c, sub, body)
+          let fun = Function(mono_name, params, mono_body, typ)
+
+          // add to module
+          let funs = [fun, ..c.mono.functions]
+          let c = Context(..c, mono: Module(..c.mono, functions: funs))
+
+          #(c, mono_name)
+        }
+      }
+    }
+    t.Constructor(name, poly, variant, custom) -> {
+      // unify types to find a substitution
+      let sub = unify_poly(c, poly, typ)
+
+      // get the name of the instantiated type
+      let variant_mono_name = name <> type_string
+      let custom_mono_name = custom.name <> type_string
+
+      // check if custom type is already instantiated
+      case list.contains(c.done, custom_mono_name) {
+        True -> #(c, variant_mono_name)
+        False -> {
+          // mark as done
+          let c = Context(..c, done: [custom_mono_name, ..c.done])
+
+          // instantiate type
+          let variants =
+            list.map(custom.variants, fn(v) {
+              let variant_mono_name = v.name <> type_string
+              let fields =
+                list.map(v.fields, fn(f) {
+                  Field(f.name, sub_type(c, sub, f.typ))
+                })
+              Variant(variant_mono_name, fields)
+            })
+          let custom = CustomType(custom_mono_name, custom.params, variants)
+
+          // add to module
+          let types = [custom, ..c.mono.types]
+          let c = Context(..c, mono: Module(..c.mono, types: types))
+
+          #(c, variant_mono_name)
+        }
+      }
+    }
+    t.Getter(name, typ, variant, field, custom) -> {
+      #(c, variant.name <> type_string <> "_" <> field.name)
     }
   }
 }
@@ -145,7 +194,6 @@ fn typed_to_mono_exp(
   case e {
     t.Int(typ, v) -> #(c, Int(sub_type(c, sub, typ), v))
     t.Var(typ, var) -> {
-      // TODO need to unshadow first or keep track of a local env
       case list.find(c.poly.functions, fn(x) { x.name == var }) {
         Ok(fun) -> {
           let typ = sub_type(c, sub, typ)
@@ -159,34 +207,34 @@ fn typed_to_mono_exp(
       }
     }
     t.Call(typ, fun, args) -> {
-      let #(m, fun) = typed_to_mono_exp(c, sub, fun)
-      let #(m, args) =
-        list.fold(args, #(m, []), fn(acc, arg) {
-          let #(m, args) = acc
-          let #(m, arg) = typed_to_mono_exp(m, sub, arg)
-          #(m, [arg, ..args])
+      let #(c, fun) = typed_to_mono_exp(c, sub, fun)
+      let #(c, args) =
+        list.fold(args, #(c, []), fn(acc, arg) {
+          let #(c, args) = acc
+          let #(c, arg) = typed_to_mono_exp(c, sub, arg)
+          #(c, [arg, ..args])
         })
       let args = list.reverse(args)
       let typ = sub_type(c, sub, typ)
-      #(m, Call(typ, fun, args))
+      #(c, Call(typ, fun, args))
     }
     t.Fn(typ, vars, exp) -> {
-      let #(m, exp) = typed_to_mono_exp(c, sub, exp)
+      let #(c, exp) = typed_to_mono_exp(c, sub, exp)
       let typ = sub_type(c, sub, typ)
-      #(m, Fn(typ, vars, exp))
+      #(c, Fn(typ, vars, exp))
     }
     t.Let(typ, var, val, exp) -> {
-      let #(m, val) = typed_to_mono_exp(c, sub, val)
-      let #(m, exp) = typed_to_mono_exp(m, sub, exp)
+      let #(c, val) = typed_to_mono_exp(c, sub, val)
+      let #(c, exp) = typed_to_mono_exp(c, sub, exp)
       let typ = sub_type(c, sub, typ)
-      #(m, Let(typ, var, val, exp))
+      #(c, Let(typ, var, val, exp))
     }
     t.If(typ, cond, then_e, else_e) -> {
-      let #(m, cond) = typed_to_mono_exp(c, sub, cond)
-      let #(m, then_e) = typed_to_mono_exp(m, sub, then_e)
-      let #(m, else_e) = typed_to_mono_exp(m, sub, else_e)
+      let #(c, cond) = typed_to_mono_exp(c, sub, cond)
+      let #(c, then_e) = typed_to_mono_exp(c, sub, then_e)
+      let #(c, else_e) = typed_to_mono_exp(c, sub, else_e)
       let typ = sub_type(c, sub, typ)
-      #(m, If(typ, cond, then_e, else_e))
+      #(c, If(typ, cond, then_e, else_e))
     }
   }
 }

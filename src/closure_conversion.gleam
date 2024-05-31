@@ -2,7 +2,7 @@ import env
 import gleam/int
 import gleam/list
 import monomorphise.{
-  type CustomType, type Mono, Field, MonoApp, MonoFun, TypeDef, VariantDef,
+  type CustomType, type Mono, CustomType, Field, MonoApp, MonoFun, Variant,
 } as mono
 
 // assumptions:
@@ -168,10 +168,9 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
 
       // create global function
       let id = int.to_string(c.uid)
-      let fun_name = "closure_C" <> id
-      let env_name = "env_C" <> id
-      let env_type_name = "env_type_C" <> id
-      let env_type = MonoApp(env_type_name <> "*", [])
+      let fun_name = "Closure_" <> id
+      let env_name = "Env_" <> id
+      let env_type = MonoApp(env_name, [])
 
       let fun_params = [env_name, ..vars]
 
@@ -182,7 +181,7 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
           let #(name, typ) = field
 
           // function from env -> field
-          let extract_fun_name = env_type_name <> "_GET_" <> name
+          let extract_fun_name = env_name <> "_" <> name
           let extract_fun_type = MonoFun(typ, [env_type])
           let extract_fun = Var(extract_fun_type, extract_fun_name)
 
@@ -205,7 +204,7 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
       // create the closure object
       let fun_pointer = Var(typ, fun_name)
 
-      let new_env_fun_name = env_type_name <> "_NEW"
+      let new_env_fun_name = env_name <> ""
       let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
       let new_env_fun_type = MonoFun(env_type, env_arg_types)
       let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
@@ -220,8 +219,8 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
         ])
 
       let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
-      let variant = VariantDef(env_type_name, fields)
-      let typedef = TypeDef(env_type_name, [], [variant])
+      let variant = Variant(env_name, fields)
+      let typedef = CustomType(env_name, [], [variant])
 
       let types = [typedef, ..types]
 
