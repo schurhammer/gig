@@ -164,8 +164,6 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
       let closure_fields =
         list.filter_map(fv(vars, e), fn(v) { env.get_entry(n, v) })
 
-      // io.debug(closure_fields)
-
       // create global function
       let id = int.to_string(c.uid)
       let fun_name = "Closure_" <> id

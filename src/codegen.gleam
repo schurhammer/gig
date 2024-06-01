@@ -23,8 +23,6 @@ fn do_type_name(typ: Mono) -> String {
   }
 }
 
-import gleam/io
-
 fn hit_target(target: String, with: String) {
   case with {
     // TODO find a better solution for panic

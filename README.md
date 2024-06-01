@@ -1,25 +1,93 @@
 # gig
 
-[![Package Version](https://img.shields.io/hexpm/v/gig)](https://hex.pm/packages/gig)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/gig/)
+Gig is a gleam compiler written in gleam.
 
-```sh
-gleam add gig
-```
-```gleam
-import gig
+## How to use
 
-pub fn main() {
-  // TODO: An example of the project in use
-}
-```
+`gleam run -m gig program.gleam`
 
-Further documentation can be found at <https://hexdocs.pm/gig>.
+This will compile the file to `program.c` and then use gcc to compile to a binary named `program`.
 
-## Development
+Note: at the moment `program.gleam` must be a standalone gleam file. Imports are not supported yet.
 
-```sh
-gleam run   # Run the project
-gleam test  # Run the tests
-gleam shell # Run an Erlang shell
-```
+## Feature / Todo List
+
+### Basics
+
+- [ ] Modules
+- [ ] Unqualified imports
+- [x] Bools
+- [x] Ints
+- [ ] Floats
+- [ ] Number formats
+- [ ] Strings
+- [ ] Lists
+- [x] Equality
+- [x] Assignments
+- [x] Discard patterns
+- [x] Type inference
+- [ ] Type annotations
+- [ ] Type imports
+- [ ] Type aliases
+- [x] Blocks
+- [ ] Constants
+- [ ] Memory Management (GC/RC)
+
+### Functions
+
+- [x] Functions
+- [x] Higher order functions
+- [x] Anonymous functions
+- [ ] Function captures
+- [x] Generic functions
+- [ ] Pipelines
+- [x] Labelled arguments
+- [ ] Documentation comments
+- [ ] Deprecations
+
+### Flow control
+
+- [x] Case expressions
+- [x] Variable patterns
+- [x] Constructor patterns
+- [ ] String patterns
+- [ ] List patterns
+- [x] Recursion
+- [ ] Tail calls
+- [x] Multiple subjects
+- [x] Alternative patterns
+- [ ] Pattern aliases
+- [ ] Guards
+- [ ] Exhaustiveness checking
+
+### Other Data types
+
+- [ ] Tuples
+- [x] Custom types
+- [x] Records
+- [x] Record accessors
+- [ ] Record updates
+- [x] Generic custom types
+- [ ] Results
+- [ ] Bit arrays
+
+### Standard library
+
+- [ ] Standard library package
+- [ ] List module
+- [ ] Result module
+- [ ] Dict module
+- [ ] Option module
+
+### Advanced features
+
+- [ ] Opaque types
+- [ ] Use
+- [ ] Todo
+- [ ] Panic
+- [ ] Let assert
+- [ ] Externals
+
+## Contributing
+
+I am not accepting contributions at this time, feel free to make issues or discussions though.

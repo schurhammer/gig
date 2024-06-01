@@ -25,9 +25,12 @@ pub fn all_samples_tests() {
   describe("samples", tests)
 }
 
+import gleam/io
+
 fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
     it("has the correct output", fn() {
+      io.debug(file)
       let binary = compiler.compile(file)
 
       // parse the expected output out of the file's doc comment

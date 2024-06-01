@@ -15,15 +15,11 @@ pub type TypeVarRef {
 }
 
 pub type Function {
-  Function(name: String, typ: Poly, params: List(String), body: Exp)
-  // Constructor(name: String, typ: Poly, variant: Variant, custom: CustomType)
-  // Getter(
-  //   name: String,
-  //   typ: Poly,
-  //   variant: Variant,
-  //   field: Field,
-  //   custom: CustomType,
-  // )
+  Function(name: String, typ: Poly, params: List(Param), body: Exp)
+}
+
+pub type Param {
+  Param(label: String, name: String, typ: Type)
 }
 
 pub type Constructor {
@@ -171,8 +167,6 @@ pub fn infer_module(mod: g.Module) {
       let #(c, n) = acc
       let #(c, custom) = infer_custom_type(c, def.definition)
 
-      io.debug(custom)
-
       let #(c, n) =
         list.fold(custom.variants, #(c, n), fn(acc, v) {
           let #(c, n) = acc
@@ -209,7 +203,6 @@ pub fn infer_module(mod: g.Module) {
         })
 
       let c = Context(..c, types: [custom, ..c.types])
-      env.debug(n)
       #(c, n)
     })
 
@@ -228,31 +221,52 @@ pub fn infer_module(mod: g.Module) {
       // enter let level
       let c = enter_level(c)
 
-      // put the functions into env with placeholder types
-      let #(c, n) =
-        list.fold(group, #(c, n), fn(acc, name) {
-          let #(c, n) = acc
-          let #(c, t) = new_type_var_ref(c)
-          let typ = Poly([], t)
-          let kind = FunctionVar
-          let n = env.put(n, name, #(kind, typ))
-          #(c, n)
-        })
-
-      // infer each function
-      let #(c, n, group) =
-        list.fold(group, #(c, n, []), fn(acc, fun_name) {
-          let #(c, n, group) = acc
-
-          // find the function definition by name
+      // find the function definitions by name
+      let group =
+        list.map(group, fn(fun_name) {
           let assert Ok(def) =
             list.find(mod.functions, fn(x) {
               let fun = x.definition
               fun.name == fun_name
             })
+          def
+        })
+
+      // put the functions into env with placeholder types
+      let #(c, n) =
+        list.fold(group, #(c, n), fn(acc, fun) {
+          let #(c, n) = acc
+          let #(c, t) = new_type_var_ref(c)
+          let typ = Poly([], t)
+          let kind = FunctionVar
+          let n = env.put(n, fun.definition.name, #(kind, typ))
+          #(c, n)
+        })
+
+      // TODO better way to access function params while inferring
+      // insert dummy functions in the module
+      // used for accessing parameter labels
+      let funs = c.functions
+      let #(c, n, group) =
+        list.fold(group, #(c, n, []), fn(acc, def) {
+          let #(c, n, l) = acc
+          let fun = def.definition
+          let #(c, n, params) = function_parameters(c, n, fun)
+          let dummy_exp = Var(bool, "True", BuiltInVar)
+          let fun = Function(fun.name, Poly([], bool), params, dummy_exp)
+          let c = Context(..c, functions: [fun, ..c.functions])
+
+          #(c, n, [#(def, params), ..l])
+        })
+
+      // infer each function
+      let #(c, n, group) =
+        list.fold(group, #(c, n, []), fn(acc, x) {
+          let #(c, n, group) = acc
+          let #(def, params) = x
 
           // infer the function
-          let #(c, fun) = infer_function(c, n, def.definition)
+          let #(c, fun) = infer_function(c, n, def.definition, params)
 
           #(c, n, [fun, ..group])
         })
@@ -260,18 +274,21 @@ pub fn infer_module(mod: g.Module) {
       // exit let level
       let c = exit_level(c)
 
+      // revert dummy functions we added earlier
+      let c = Context(..c, functions: funs)
+
       // generalize functions
       let #(n, group) =
         list.fold(group, #(n, []), fn(acc, fun) {
           let #(n, group) = acc
-          // TODO refactor to remove the 4 tuple for Function
-          let #(name, params, body, typ) = fun
+
+          let Function(name, typ, params, body) = fun
 
           // generalise the type
           let tvs =
-            list.unique(find_tvs(c, typ))
+            list.unique(find_tvs(c, typ.typ))
             |> list.sort(int.compare)
-          let gen = Poly(tvs, typ)
+          let gen = Poly(tvs, typ.typ)
 
           // update the env with generalised type
           let fun = Function(name, gen, params, body)
@@ -380,40 +397,51 @@ fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) {
   }
 }
 
+fn function_parameters(c: Context, n: ValueEnv, fun: g.Function) {
+  // create type vars for parameters
+  let #(c, n, params) =
+    list.index_fold(fun.parameters, #(c, n, []), fn(acc, param, i) {
+      let #(c, n, param_types) = acc
+
+      let name = case param.name {
+        g.Named(s) -> s
+        g.Discarded(s) -> s
+      }
+
+      let label = case param.label {
+        Some(x) -> x
+        _ -> "param_" <> int.to_string(i)
+      }
+
+      let #(c, typ) = new_type_var_ref(c)
+      let n = env.put(n, name, #(LocalVar, Poly([], typ)))
+
+      #(c, n, [Param(label, name, typ), ..param_types])
+    })
+  let params = list.reverse(params)
+  #(c, n, params)
+}
+
 fn infer_function(
   c: Context,
   n: ValueEnv,
   fun: g.Function,
-) -> #(Context, #(String, List(String), Exp, Type)) {
-  // get list of param names
-  let params =
-    list.map(fun.parameters, fn(param) {
-      case param.name {
-        g.Named(s) -> s
-        g.Discarded(s) -> s
-      }
-    })
-
-  // create type vars for parameters
-  let #(c, n, param_types) =
-    list.fold(params, #(c, n, []), fn(acc, param) {
-      let #(c, n, param_types) = acc
-      let #(c, typ) = new_type_var_ref(c)
-      let n = env.put(n, param, #(LocalVar, Poly([], typ)))
-      #(c, n, [typ, ..param_types])
-    })
-  let param_types = list.reverse(param_types)
-
+  params: List(Param),
+) -> #(Context, Function) {
   // infer body
   let #(c, body) = infer_body(c, n, fun.body)
 
   // compute function type
-  let typ = TypeFun(body.typ, param_types)
-  // TODO access typ0 without env.get
-  let assert Ok(#(_, Poly([], typ0))) = env.get(n, fun.name)
-  let c = unify(c, typ, typ0)
+  let types = list.map(params, fn(x) { x.typ })
+  let typ = TypeFun(body.typ, types)
 
-  #(c, #(fun.name, params, body, typ))
+  // TODO access poly without env.get
+  let assert Ok(#(_, poly)) = env.get(n, fun.name)
+  let c = unify(c, typ, poly.typ)
+
+  let fun = Function(fun.name, poly, params, body)
+
+  #(c, fun)
 }
 
 fn enter_level(c: Context) -> Context {
@@ -506,7 +534,22 @@ fn infer_bind_pattern(
       let assert Ok(#(cons, poly)) = env.get(n, cons)
       case cons {
         ConstructorVar(_, variant, _) -> {
+          // match labels
+          let args = list.index_map(args, fn(x, i) { #(x, i) })
+          let args =
+            list.index_map(variant.fields, fn(field, i) {
+              let assert Ok(x) =
+                list.find(args, fn(x) {
+                  let #(arg, j) = x
+                  case arg.label {
+                    Some(some) -> field.name == some
+                    None -> i == j
+                  }
+                })
+              x.0
+            })
           let assert Ok(args) = list.strict_zip(variant.fields, args)
+          // let binding for each item
           let #(c, args) =
             list.fold(args, #(c, []), fn(acc, x) {
               let #(c, args) = acc
@@ -587,7 +630,6 @@ fn infer_expression(
   n: ValueEnv,
   exp: g.Expression,
 ) -> #(Context, Exp) {
-  io.debug(exp)
   case exp {
     g.Int(s) -> #(c, Int(int, string.replace(s, "_", "")))
     g.Variable(s) -> {
@@ -619,6 +661,50 @@ fn infer_expression(
       }
     }
     g.Call(fun, args) -> {
+      // handle labeled arguments
+      let args = case fun {
+        g.Variable(name) -> {
+          let assert Ok(#(kind, x)) = env.get(n, name)
+          case kind {
+            FunctionVar -> {
+              // TODO not sure if this algorithm is canon
+              // match labels
+              let assert Ok(fun) =
+                list.find(c.functions, fn(x) { x.name == name })
+              let args = list.index_map(args, fn(x, i) { #(x, i) })
+              list.index_map(fun.params, fn(param, i) {
+                let assert Ok(x) =
+                  list.find(args, fn(x) {
+                    let #(arg, j) = x
+                    case arg.label {
+                      Some(some) -> param.label == some
+                      None -> i == j
+                    }
+                  })
+                x.0
+              })
+            }
+            ConstructorVar(_, variant, _) -> {
+              // match labels
+              let args = list.index_map(args, fn(x, i) { #(x, i) })
+              list.index_map(variant.fields, fn(field, i) {
+                let assert Ok(x) =
+                  list.find(args, fn(x) {
+                    let #(arg, j) = x
+                    case arg.label {
+                      Some(some) -> field.name == some
+                      None -> i == j
+                    }
+                  })
+                x.0
+              })
+            }
+            _ -> args
+          }
+        }
+        _ -> args
+      }
+
       // infer the type of the function
       let #(c, fun) = infer_expression(c, n, fun)
 
@@ -716,12 +802,12 @@ fn infer_expression(
       // process each clause in order
       let #(c, e) =
         list.fold(clauses, #(c, panic_exp), fn(acc, clause) {
+          let #(c, else_exp) = acc
+          let #(patterns, body) = clause
+
           // grab the and_bool function
           let and_bool = g.Variable("and_Bool")
           let #(c, and_bool) = infer_expression(c, n, and_bool)
-
-          let #(c, else_exp) = acc
-          let #(patterns, body) = clause
 
           // check each subject
           // TODO is defaulting to true ok?
@@ -785,7 +871,6 @@ fn infer_expression(
       #(c, e)
     }
     g.FieldAccess(value, field) -> {
-      // TODO probably need to do more work to resolve this type properly
       let #(c, exp) = infer_expression(c, n, value)
       let assert TypeApp(type_name, _) = exp.typ
 
@@ -795,15 +880,8 @@ fn infer_expression(
 
       let getter_name = variant.name <> "_" <> field
 
-      // TODO we're compiling 'value' twice, try to fix that (maybe with a temp variable?)
-      let #(c, exp) =
-        infer_expression(
-          c,
-          n,
-          g.Call(g.Variable(getter_name), [g.Field(None, value)]),
-        )
-
-      io.debug(exp)
+      let getter_call = g.Call(g.Variable(getter_name), [g.Field(None, value)])
+      let #(c, exp) = infer_expression(c, n, getter_call)
       #(c, exp)
     }
     exp -> {

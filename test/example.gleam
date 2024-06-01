@@ -6,14 +6,23 @@ import monomorphise
 import typed
 
 const input = "
-//// 4
+//// 1
 
 pub fn main() {
-  case 1 == 2 {
-    True -> 3
-    False -> 4
+  a(10)
+}
+
+fn a(x) {
+  case x {
+    1 -> 1
+    n -> b(n + 1)
   }
 }
+
+fn b(x) {
+  a(x / 2)
+}
+
 "
 
 pub fn main() {

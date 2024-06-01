@@ -58,10 +58,6 @@ pub fn run(poly: t.Context) {
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == name })
   let #(c, _) = instantiate_function(c, name, sub_type(c, [], main.typ.typ))
 
-  // TODO instantiate types
-
-  list.each(c.mono.functions, fn(f) { io.debug(#(f.name, f.typ, f.body)) })
-  list.each(c.mono.types, fn(f) { io.debug(f) })
   c.mono
 }
 
@@ -143,7 +139,8 @@ fn instantiate_function(
 
       // instantiate function
       let #(c, mono_body) = typed_to_mono_exp(c, sub, fun.body)
-      let fun = Function(mono_name, fun.params, mono_body, typ)
+      let params = list.map(fun.params, fn(x) { x.name })
+      let fun = Function(mono_name, params, mono_body, typ)
 
       // add to module
       let funs = [fun, ..c.mono.functions]
