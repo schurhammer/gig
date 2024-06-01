@@ -61,8 +61,9 @@ pub type Field {
 // then maybe we can skip some lookups
 pub type VarKind {
   LocalVar
-  BuiltInVar
   FunctionVar
+  BuiltInVar
+  BuiltInPolyVar(poly: Poly)
   ConstructorVar(poly: Poly, variant: Variant, custom: CustomType)
   InstanceOfVar(poly: Poly, variant: Variant, custom: CustomType)
   GetterVar(poly: Poly, field: Field, variant: Variant, custom: CustomType)
@@ -118,6 +119,8 @@ const bool = TypeApp("Bool", [])
 
 const bool_binop = TypeFun(bool, [bool, bool])
 
+const bool_uop = TypeFun(bool, [bool])
+
 const int_binop = TypeFun(int, [int, int])
 
 const panic_ast = g.Call(g.Variable("panic"), [])
@@ -132,15 +135,19 @@ fn prelude(c: Context) -> #(Context, ValueEnv) {
 
   let #(c, a) = new_type_var_ref(c)
   let n = env.put(n, "panic", #(BuiltInVar, Poly([get_id(a)], TypeFun(a, []))))
-  let n =
-    env.put(n, "equal", #(BuiltInVar, Poly([get_id(a)], TypeFun(bool, [a, a]))))
+  let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
+  let n = env.put(n, "equal", #(BuiltInPolyVar(equal_type), equal_type))
 
-  let n = env.put(n, "add_int", #(BuiltInVar, Poly([], int_binop)))
-  let n = env.put(n, "sub_int", #(BuiltInVar, Poly([], int_binop)))
-  let n = env.put(n, "mul_int", #(BuiltInVar, Poly([], int_binop)))
-  let n = env.put(n, "div_int", #(BuiltInVar, Poly([], int_binop)))
+  let n = env.put(n, "add_Int", #(BuiltInVar, Poly([], int_binop)))
+  let n = env.put(n, "sub_Int", #(BuiltInVar, Poly([], int_binop)))
+  let n = env.put(n, "mul_Int", #(BuiltInVar, Poly([], int_binop)))
+  let n = env.put(n, "div_Int", #(BuiltInVar, Poly([], int_binop)))
 
-  let n = env.put(n, "and_bool", #(BuiltInVar, Poly([], bool_binop)))
+  let n = env.put(n, "and_Bool", #(BuiltInVar, Poly([], bool_binop)))
+  let n = env.put(n, "True", #(BuiltInVar, Poly([], bool)))
+  let n = env.put(n, "False", #(BuiltInVar, Poly([], bool)))
+  let n = env.put(n, "True_instanceof", #(BuiltInVar, Poly([], bool_uop)))
+  let n = env.put(n, "False_instanceof", #(BuiltInVar, Poly([], bool_uop)))
 
   #(c, n)
 }
@@ -439,7 +446,7 @@ fn infer_body(
           let #(c, value) = infer_expression(c, n, value)
           let c = exit_level(c)
 
-          let subject_name = "S"
+          let #(c, subject_name) = new_temp_var(c)
           let subject = g.Variable(subject_name)
           let n = env.put(n, subject_name, #(LocalVar, Poly([], value.typ)))
           let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
@@ -497,19 +504,27 @@ fn infer_bind_pattern(
     }
     g.PatternConstructor(_mod, cons, args, _spread) -> {
       let assert Ok(#(cons, poly)) = env.get(n, cons)
-      let assert ConstructorVar(_, variant, _) = cons
-      let assert Ok(args) = list.strict_zip(variant.fields, args)
-      let #(c, args) =
-        list.fold(args, #(c, []), fn(acc, x) {
-          let #(c, args) = acc
-          let #(field, pattern) = x
-          let getter_name = variant.name <> "_" <> field.name
-          let getter_args = [g.Field(None, subject)]
-          let subject = g.Call(g.Variable(getter_name), getter_args)
-          let #(c, arg) = infer_bind_pattern(c, n, pattern.item, subject)
-          #(c, [arg, ..args])
-        })
-      #(c, list.flatten(args))
+      case cons {
+        ConstructorVar(_, variant, _) -> {
+          let assert Ok(args) = list.strict_zip(variant.fields, args)
+          let #(c, args) =
+            list.fold(args, #(c, []), fn(acc, x) {
+              let #(c, args) = acc
+              let #(field, pattern) = x
+              let getter_name = variant.name <> "_" <> field.name
+              let getter_args = [g.Field(None, subject)]
+              let subject = g.Call(g.Variable(getter_name), getter_args)
+              let #(c, arg) = infer_bind_pattern(c, n, pattern.item, subject)
+              #(c, [arg, ..args])
+            })
+          #(c, list.flatten(args))
+        }
+        BuiltInVar -> #(c, [])
+        _ -> {
+          io.debug(pattern)
+          todo as "not implemented"
+        }
+      }
     }
     _ -> {
       io.debug(pattern)
@@ -536,7 +551,7 @@ fn infer_check_pattern(
       let tag_args = [g.Field(None, subject)]
       let tag = g.Variable(cons <> "_instanceof")
       let #(c, check) = infer_expression(c, n, g.Call(tag, tag_args))
-      let and_bool = g.Variable("and_bool")
+      let and_bool = g.Variable("and_Bool")
       let #(c, and_bool) = infer_expression(c, n, and_bool)
 
       // inner match
@@ -655,10 +670,11 @@ fn infer_expression(
     }
     g.BinaryOperator(name, left, right) -> {
       let name = case name {
-        g.AddInt -> "add_int"
-        g.SubInt -> "sub_int"
-        g.MultInt -> "mul_int"
-        g.DivInt -> "div_int"
+        g.AddInt -> "add_Int"
+        g.SubInt -> "sub_Int"
+        g.MultInt -> "mul_Int"
+        g.DivInt -> "div_Int"
+        g.Eq -> "equal"
         _ -> {
           io.debug(name)
           todo as "not implemented"
@@ -682,6 +698,9 @@ fn infer_expression(
       // the innermost branch will panic due to unmatched value
       let #(c, panic_exp) = infer_expression(c, n, panic_ast)
 
+      // prefix for all subjects
+      let #(c, subject_prefix) = new_temp_var(c)
+
       // create let binding for subjects
       let #(c, n, subjects) =
         list.index_fold(subjects, #(c, n, []), fn(acc, subject, i) {
@@ -689,7 +708,7 @@ fn infer_expression(
           let c = enter_level(c)
           let #(c, value) = infer_expression(c, n, subject)
           let c = exit_level(c)
-          let subject_name = "S" <> int.to_string(i)
+          let subject_name = subject_prefix <> int.to_string(i)
           let n = env.put(n, subject_name, #(LocalVar, Poly([], value.typ)))
           #(c, n, [#(subject_name, value), ..l])
         })
@@ -698,7 +717,7 @@ fn infer_expression(
       let #(c, e) =
         list.fold(clauses, #(c, panic_exp), fn(acc, clause) {
           // grab the and_bool function
-          let and_bool = g.Variable("and_bool")
+          let and_bool = g.Variable("and_Bool")
           let #(c, and_bool) = infer_expression(c, n, and_bool)
 
           let #(c, else_exp) = acc
@@ -714,7 +733,7 @@ fn infer_expression(
                 let #(c, last_e) = acc
 
                 // get the subject
-                let subject = g.Variable("S" <> int.to_string(i))
+                let subject = g.Variable(subject_prefix <> int.to_string(i))
                 // let #(c, subject) = infer_expression(c, n, subject)
 
                 // check that the subject matches the pattern
@@ -729,7 +748,7 @@ fn infer_expression(
           let #(c, bindings) =
             list.index_fold(patterns, #(c, []), fn(acc, pattern, i) {
               let #(c, l) = acc
-              let subject = g.Variable("S" <> int.to_string(i))
+              let subject = g.Variable(subject_prefix <> int.to_string(i))
               let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
               // TODO use efficient combine function instead of append?
               #(c, list.append(bindings, l))

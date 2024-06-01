@@ -188,58 +188,6 @@ fn instantiate_custom_type(
   }
 }
 
-fn instantiate_constructor(
-  c: Context,
-  poly: t.Poly,
-  variant: t.Variant,
-  custom: t.CustomType,
-  typ: Mono,
-) {
-  let sub = unify_poly(c, poly, typ)
-
-  let c = instantiate_custom_type(c, sub, custom)
-
-  let type_string = get_type_string(sub)
-  let mono_name = variant.name <> type_string
-
-  #(c, mono_name)
-}
-
-fn instantiate_instanceof(
-  c: Context,
-  poly: t.Poly,
-  variant: t.Variant,
-  custom: t.CustomType,
-  typ: Mono,
-) {
-  let sub = unify_poly(c, poly, typ)
-
-  let c = instantiate_custom_type(c, sub, custom)
-
-  let type_string = get_type_string(sub)
-  let mono_name = variant.name <> type_string <> "_instanceof"
-
-  #(c, mono_name)
-}
-
-fn instantiate_getter(
-  c: Context,
-  poly: t.Poly,
-  field: t.Field,
-  variant: t.Variant,
-  custom: t.CustomType,
-  typ: Mono,
-) {
-  let sub = unify_poly(c, poly, typ)
-
-  let c = instantiate_custom_type(c, sub, custom)
-
-  let type_string = get_type_string(sub)
-  let mono_name = variant.name <> type_string <> "_" <> field.name
-
-  #(c, mono_name)
-}
-
 fn typed_to_mono_exp(
   c: Context,
   sub: List(#(Int, Mono)),
@@ -248,38 +196,52 @@ fn typed_to_mono_exp(
   case e {
     t.Int(typ, v) -> #(c, Int(sub_type(c, sub, typ), v))
     t.Var(typ, name, kind) -> {
+      let typ = sub_type(c, sub, typ)
       case kind {
         t.LocalVar -> {
-          // TODO not sure if this sub type is really doing much, double check
-          let typ = sub_type(c, sub, typ)
           #(c, Var(typ, name))
         }
         t.BuiltInVar -> {
-          // TODO instantiate
-          let typ = sub_type(c, sub, typ)
           #(c, Var(typ, name))
         }
+        t.BuiltInPolyVar(poly) -> {
+          let sub = unify_poly(c, poly, typ)
+          let type_string = get_type_string(sub)
+          let mono_name = name <> type_string
+          #(c, Var(typ, mono_name))
+        }
         t.FunctionVar -> {
-          let typ = sub_type(c, sub, typ)
           let #(c, mono_name) = instantiate_function(c, name, typ)
           #(c, Var(typ, mono_name))
         }
         t.ConstructorVar(poly, variant, custom) -> {
-          let typ = sub_type(c, sub, typ)
-          let #(c, mono_name) =
-            instantiate_constructor(c, poly, variant, custom, typ)
+          let sub = unify_poly(c, poly, typ)
+
+          let c = instantiate_custom_type(c, sub, custom)
+
+          let type_string = get_type_string(sub)
+          let mono_name = variant.name <> type_string
+
           #(c, Var(typ, mono_name))
         }
         t.InstanceOfVar(poly, variant, custom) -> {
-          let typ = sub_type(c, sub, typ)
-          let #(c, mono_name) =
-            instantiate_instanceof(c, poly, variant, custom, typ)
+          let sub = unify_poly(c, poly, typ)
+
+          let c = instantiate_custom_type(c, sub, custom)
+
+          let type_string = get_type_string(sub)
+          let mono_name = variant.name <> type_string <> "_instanceof"
+
           #(c, Var(typ, mono_name))
         }
         t.GetterVar(poly, field, variant, custom) -> {
-          let typ = sub_type(c, sub, typ)
-          let #(c, mono_name) =
-            instantiate_getter(c, poly, field, variant, custom, typ)
+          let sub = unify_poly(c, poly, typ)
+
+          let c = instantiate_custom_type(c, sub, custom)
+
+          let type_string = get_type_string(sub)
+          let mono_name = variant.name <> type_string <> "_" <> field.name
+
           #(c, Var(typ, mono_name))
         }
       }

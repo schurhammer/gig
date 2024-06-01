@@ -193,81 +193,131 @@ fn custom_type(t: CustomType) {
     [_] -> True
     _ -> False
   }
-  list.index_map(t.variants, fn(v, i) {
-    let tag = int.to_string(i)
-    let fields =
-      list.map(v.fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
-      |> string.join("")
-    let struct = "struct " <> v.name <> "{\n" <> fields <> "};"
-    let constructor_target = case is_record {
-      True -> "RETURN"
-      False -> "RETURN.data." <> v.name
+
+  let equal =
+    "T_Bool"
+    <> " equal_"
+    <> t.name
+    <> "("
+    <> "T_"
+    <> t.name
+    <> " a, "
+    <> "T_"
+    <> t.name
+    <> " b"
+    <> ") {\n"
+    <> case t.variants {
+      [variant] ->
+        list.map(variant.fields, fn(f) {
+          "if(a->" <> f.name <> " != b->" <> f.name <> ") { return False; }\n"
+        })
+        |> string.concat
+      variants ->
+        "if (a.tag != b.tag) { return False; }\n"
+        <> list.index_map(variants, fn(v, i) {
+          "if (a.tag == "
+          <> int.to_string(i)
+          <> ") {\n"
+          <> list.map(v.fields, fn(f) {
+            let field_equal = "equal" <> mono.type_name(f.typ)
+            "if(!"
+            <> field_equal
+            <> "(a.data."
+            <> v.name
+            <> "->"
+            <> f.name
+            <> ", b.data."
+            <> v.name
+            <> "->"
+            <> f.name
+            <> ")) { return False; }\n"
+          })
+          |> string.concat
+          <> "}\n"
+        })
+        |> string.join("else ")
     }
-    let constructor =
-      "T_"
-      <> t.name
-      <> " "
-      <> v.name
-      <> "("
-      <> v.fields
-      |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
-      |> string.join(", ")
-      <> ") {\n"
-      <> "T_"
-      <> t.name
-      <> " RETURN;\n"
-      <> case is_record {
-        True -> ""
-        False -> "RETURN.tag = " <> tag <> ";\n"
+    <> "return True;\n"
+    <> "}"
+
+  let variant_definitions =
+    list.index_map(t.variants, fn(v, i) {
+      let tag = int.to_string(i)
+      let fields =
+        list.map(v.fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
+        |> string.join("")
+      let struct = "struct " <> v.name <> "{\n" <> fields <> "};"
+      let constructor_target = case is_record {
+        True -> "RETURN"
+        False -> "RETURN.data." <> v.name
       }
-      <> case v.fields {
-        [] -> constructor_target <> " = " <> "(void*) 1;\n"
-        _ ->
-          constructor_target <> " = " <> "malloc(sizeof(" <> v.name <> "));\n"
-      }
-      <> v.fields
-      |> list.map(fn(p) {
-        constructor_target <> "->" <> p.name <> " = " <> p.name <> ";\n"
-      })
-      |> string.join("")
-      <> "return RETURN;\n"
-      <> "}"
-    let instanceof =
-      "T_Bool"
-      <> " "
-      <> v.name
-      <> "_instanceof"
-      <> "("
-      <> "T_"
-      <> t.name
-      <> " data) { return "
-      <> case is_record {
-        True -> "True"
-        False -> "data.tag == " <> tag
-      }
-      <> "; }"
-    let getters =
-      list.map(v.fields, fn(f) {
-        type_name(f.typ)
+      let constructor =
+        "T_"
+        <> t.name
         <> " "
         <> v.name
-        <> "_"
-        <> f.name
+        <> "("
+        <> v.fields
+        |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
+        |> string.join(", ")
+        <> ") {\n"
+        <> "T_"
+        <> t.name
+        <> " RETURN;\n"
+        <> case is_record {
+          True -> ""
+          False -> "RETURN.tag = " <> tag <> ";\n"
+        }
+        <> case v.fields {
+          [] -> constructor_target <> " = " <> "(void*) 1;\n"
+          _ ->
+            constructor_target <> " = " <> "malloc(sizeof(" <> v.name <> "));\n"
+        }
+        <> v.fields
+        |> list.map(fn(p) {
+          constructor_target <> "->" <> p.name <> " = " <> p.name <> ";\n"
+        })
+        |> string.join("")
+        <> "return RETURN;\n"
+        <> "}"
+      let instanceof =
+        "T_Bool"
+        <> " "
+        <> v.name
+        <> "_instanceof"
         <> "("
         <> "T_"
         <> t.name
         <> " data) { return "
         <> case is_record {
-          True -> "data->"
-          False -> "data.data." <> v.name <> "->"
+          True -> "True"
+          False -> "data.tag == " <> tag
         }
-        <> f.name
         <> "; }"
-      })
-    [struct, constructor, instanceof, ..getters]
-    |> string.join("\n\n")
-  })
-  |> string.join("\n")
+      let getters =
+        list.map(v.fields, fn(f) {
+          type_name(f.typ)
+          <> " "
+          <> v.name
+          <> "_"
+          <> f.name
+          <> "("
+          <> "T_"
+          <> t.name
+          <> " data) { return "
+          <> case is_record {
+            True -> "data->"
+            False -> "data.data." <> v.name <> "->"
+          }
+          <> f.name
+          <> "; }"
+        })
+      [struct, constructor, instanceof, ..getters]
+      |> string.join("\n\n")
+    })
+    |> string.join("\n")
+
+  variant_definitions <> "\n\n" <> equal
 }
 
 pub fn module(mod: Module) -> String {

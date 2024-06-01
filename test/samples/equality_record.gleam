@@ -1,9 +1,13 @@
 //// 21
 
+type PointT {
+  Point(x: Int, y: Int)
+}
+
 pub fn main() {
-  let a = True
-  let b = True
-  let c = False
+  let a = Point(1, 2)
+  let b = Point(1, 2)
+  let c = Point(1, 3)
   let x = case a == b {
     True -> 1
     False -> 2
