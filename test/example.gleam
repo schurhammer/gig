@@ -6,21 +6,12 @@ import monomorphise
 import typed
 
 const input = "
-//// 1
+//// 3
 
 pub fn main() {
-  a(10)
-}
-
-fn a(x) {
-  case x {
-    1 -> 1
-    n -> b(n + 1)
-  }
-}
-
-fn b(x) {
-  a(x / 2)
+  let x = 1
+  let add_x = fn(y: Bool) { x + y }
+  add_x(2)
 }
 
 "

@@ -26,7 +26,7 @@ Note: at the moment `program.gleam` must be a standalone gleam file. Imports are
 - [x] Assignments
 - [x] Discard patterns
 - [x] Type inference
-- [ ] Type annotations
+- [x] Type annotations (note: only for function parameters)
 - [ ] Type imports
 - [ ] Type aliases
 - [x] Blocks

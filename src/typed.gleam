@@ -104,7 +104,7 @@ pub type Context {
     temp_uid: Int,
     // TODO I think we technically only need two levels
     // "top level" or "local level"
-    // since we only generalize top level functions (citation needed)
+    // since we only generalise top level functions (citation needed)
     level: Int,
   )
 }
@@ -118,6 +118,8 @@ const bool_binop = TypeFun(bool, [bool, bool])
 const bool_uop = TypeFun(bool, [bool])
 
 const int_binop = TypeFun(int, [int, int])
+
+const int_compop = TypeFun(bool, [int, int])
 
 const panic_ast = g.Call(g.Variable("panic"), [])
 
@@ -134,6 +136,7 @@ fn prelude(c: Context) -> #(Context, ValueEnv) {
   let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
   let n = env.put(n, "equal", #(BuiltInPolyVar(equal_type), equal_type))
 
+  let n = env.put(n, "lt_Int", #(BuiltInVar, Poly([], int_compop)))
   let n = env.put(n, "add_Int", #(BuiltInVar, Poly([], int_binop)))
   let n = env.put(n, "sub_Int", #(BuiltInVar, Poly([], int_binop)))
   let n = env.put(n, "mul_Int", #(BuiltInVar, Poly([], int_binop)))
@@ -366,7 +369,7 @@ fn infer_variant(c: Context, n: Env(String, Type), variant: g.Variant) {
       let #(c, t) = infer_type(c, n, field.item)
       let name = case field.label {
         Some(x) -> x
-        None -> "field" <> int.to_string(i)
+        None -> "_field_" <> int.to_string(i)
       }
       #(c, [Field(name, t), ..l])
     })
@@ -376,6 +379,7 @@ fn infer_variant(c: Context, n: Env(String, Type), variant: g.Variant) {
 }
 
 fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) {
+  // TODO check types actually exist?
   case typ {
     g.NamedType(name, module, params) -> {
       let #(c, params) =
@@ -388,7 +392,17 @@ fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) {
       #(c, TypeApp(name, params))
     }
     g.TupleType(elements) -> todo
-    g.FunctionType(parameters, return) -> todo
+    g.FunctionType(parameters, return) -> {
+      let #(c, params) =
+        list.fold(parameters, #(c, []), fn(acc, p) {
+          let #(c, l) = acc
+          let #(c, p) = infer_type(c, n, p)
+          #(c, [p, ..l])
+        })
+      let params = list.reverse(params)
+      let #(c, ret) = infer_type(c, n, return)
+      #(c, TypeFun(ret, params))
+    }
     g.VariableType(name) -> {
       let assert Ok(t) = env.get(n, name)
       #(c, t)
@@ -410,10 +424,14 @@ fn function_parameters(c: Context, n: ValueEnv, fun: g.Function) {
 
       let label = case param.label {
         Some(x) -> x
-        _ -> "param_" <> int.to_string(i)
+        _ -> "_param_" <> int.to_string(i)
       }
 
-      let #(c, typ) = new_type_var_ref(c)
+      let #(c, typ) = case param.type_ {
+        Some(typ) -> infer_type(c, env.new(), typ)
+        None -> new_type_var_ref(c)
+      }
+
       let n = env.put(n, name, #(LocalVar, Poly([], typ)))
 
       #(c, n, [Param(label, name, typ), ..param_types])
@@ -610,6 +628,9 @@ fn infer_check_pattern(
         })
       #(c, check)
     }
+    g.PatternList(elements, tail) -> {
+      todo
+    }
     _ -> {
       io.debug(pattern)
       io.debug(subject)
@@ -727,22 +748,23 @@ fn infer_expression(
       #(c, Call(ret, fun, args))
     }
     g.Fn(params, _, body) -> {
-      // get list of param names
-      let params =
-        list.map(params, fn(param) {
-          case param.name {
-            g.Named(s) -> s
-            g.Discarded(s) -> s
-          }
-        })
-
       // create type vars for parameters
-      let #(c, n, param_types) =
-        list.fold(params, #(c, n, []), fn(acc, param) {
-          let #(c, n, param_types) = acc
-          let #(c, typ) = new_type_var_ref(c)
-          let n = env.put(n, param, #(LocalVar, Poly([], typ)))
-          #(c, n, [typ, ..param_types])
+      let #(c, n, param_names, param_types) =
+        list.fold(params, #(c, n, [], []), fn(acc, param) {
+          let #(c, n, names, typs) = acc
+
+          let name = case param.name {
+            g.Named(s) -> s
+            g.Discarded(s) -> "_" <> s
+          }
+
+          let #(c, typ) = case param.type_ {
+            Some(typ) -> infer_type(c, env.new(), typ)
+            None -> new_type_var_ref(c)
+          }
+
+          let n = env.put(n, name, #(LocalVar, Poly([], typ)))
+          #(c, n, [name, ..names], [typ, ..typs])
         })
       let param_types = list.reverse(param_types)
 
@@ -752,7 +774,7 @@ fn infer_expression(
       // compute function type
       let typ = TypeFun(body.typ, param_types)
 
-      #(c, Fn(typ, params, body))
+      #(c, Fn(typ, param_names, body))
     }
     g.BinaryOperator(name, left, right) -> {
       let name = case name {
@@ -760,6 +782,7 @@ fn infer_expression(
         g.SubInt -> "sub_Int"
         g.MultInt -> "mul_Int"
         g.DivInt -> "div_Int"
+        g.LtInt -> "lt_Int"
         g.Eq -> "equal"
         _ -> {
           io.debug(name)
@@ -872,7 +895,9 @@ fn infer_expression(
     }
     g.FieldAccess(value, field) -> {
       let #(c, exp) = infer_expression(c, n, value)
-      let assert TypeApp(type_name, _) = exp.typ
+      io.debug(exp.typ)
+      io.debug(resolve_type(c, exp.typ))
+      let assert TypeApp(type_name, _) = resolve_type(c, exp.typ)
 
       // accessor only works with exactly one variant
       let assert Ok(custom) = list.find(c.types, fn(x) { x.name == type_name })
@@ -888,6 +913,21 @@ fn infer_expression(
       io.debug(exp)
       todo as "not implemented"
     }
+  }
+}
+
+/// follow any references to get the real type
+pub fn resolve_type(c: Context, typ: Type) {
+  case typ {
+    TypeVar(x) -> {
+      let assert Ok(x) = env.get(c.type_vars, x)
+      case x {
+        Bound(x) -> resolve_type(c, x)
+        Unbound(..) -> typ
+      }
+    }
+    TypeApp(..) -> typ
+    TypeFun(..) -> typ
   }
 }
 
