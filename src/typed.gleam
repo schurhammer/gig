@@ -902,6 +902,8 @@ fn infer_expression(
     }
     g.FieldAccess(value, field) -> {
       let #(c, exp) = infer_expression(c, n, value)
+      io.debug(value)
+      env.debug(n)
       io.debug(exp.typ)
       io.debug(resolve_type(c, exp.typ))
       let assert TypeApp(type_name, _) = resolve_type(c, exp.typ)

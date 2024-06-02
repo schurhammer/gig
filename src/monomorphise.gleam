@@ -25,7 +25,12 @@ pub type Function {
 }
 
 pub type CustomType {
-  CustomType(name: String, params: List(String), variants: List(Variant))
+  CustomType(
+    name: String,
+    params: List(String),
+    variants: List(Variant),
+    pointer: Bool,
+  )
 }
 
 pub type Variant {
@@ -174,7 +179,12 @@ fn instantiate_custom_type(
             list.map(v.fields, fn(f) { Field(f.name, sub_type(c, sub, f.typ)) })
           Variant(variant_mono_name, fields)
         })
-      let custom = CustomType(custom_mono_name, custom.params, variants)
+      let pointer = case variants {
+        [_] -> False
+        _ -> True
+      }
+      let custom =
+        CustomType(custom_mono_name, custom.params, variants, pointer)
 
       // add to module
       let types = [custom, ..c.mono.types]

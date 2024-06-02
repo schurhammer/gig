@@ -158,7 +158,14 @@ fn function_forward(fun: Function) -> String {
 fn custom_type_forward(t: CustomType) {
   let variants =
     list.map(t.variants, fn(v) {
-      "typedef struct " <> v.name <> "* S_" <> v.name <> ";\n"
+      "typedef struct "
+      <> case t.pointer {
+        True -> v.name <> "*"
+        False -> v.name
+      }
+      <> " S_"
+      <> v.name
+      <> ";\n"
     })
     |> string.concat
   let union = case t.variants {
@@ -191,6 +198,10 @@ fn custom_type(t: CustomType) {
     [_] -> True
     _ -> False
   }
+  let access_op = case t.pointer {
+    True -> "->"
+    False -> "."
+  }
 
   let equal =
     "T_Bool"
@@ -207,7 +218,13 @@ fn custom_type(t: CustomType) {
     <> case t.variants {
       [variant] ->
         list.map(variant.fields, fn(f) {
-          "if(a->" <> f.name <> " != b->" <> f.name <> ") { return False; }\n"
+          "if(a"
+          <> access_op
+          <> f.name
+          <> " != b"
+          <> access_op
+          <> f.name
+          <> ") { return False; }\n"
         })
         |> string.concat
       variants ->
@@ -222,11 +239,11 @@ fn custom_type(t: CustomType) {
             <> field_equal
             <> "(a.data."
             <> v.name
-            <> "->"
+            <> access_op
             <> f.name
             <> ", b.data."
             <> v.name
-            <> "->"
+            <> access_op
             <> f.name
             <> ")) { return False; }\n"
           })
@@ -269,11 +286,19 @@ fn custom_type(t: CustomType) {
         <> case v.fields {
           [] -> constructor_target <> " = " <> "(void*) 1;\n"
           _ ->
-            constructor_target <> " = " <> "malloc(sizeof(" <> v.name <> "));\n"
+            case t.pointer {
+              True ->
+                constructor_target
+                <> " = "
+                <> "malloc(sizeof(struct "
+                <> v.name
+                <> "));\n"
+              False -> ""
+            }
         }
         <> v.fields
         |> list.map(fn(p) {
-          constructor_target <> "->" <> p.name <> " = " <> p.name <> ";\n"
+          constructor_target <> access_op <> p.name <> " = " <> p.name <> ";\n"
         })
         |> string.join("")
         <> "return RETURN;\n"
@@ -304,8 +329,9 @@ fn custom_type(t: CustomType) {
           <> t.name
           <> " data) { return "
           <> case is_record {
-            True -> "data->"
-            False -> "data.data." <> v.name <> "->"
+            True -> "data" <> access_op
+
+            False -> "data.data." <> v.name <> access_op
           }
           <> f.name
           <> "; }"

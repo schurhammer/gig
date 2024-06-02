@@ -218,7 +218,7 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
 
       let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
       let variant = Variant(env_name, fields)
-      let typedef = CustomType(env_name, [], [variant])
+      let typedef = CustomType(env_name, [], [variant], True)
 
       let types = [typedef, ..types]
 
