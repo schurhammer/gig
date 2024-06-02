@@ -24,6 +24,10 @@ T_Bool False_instanceof(T_Bool x) { return  x == False; }
 
 T_Bool equal_Int(T_Int x, T_Int y) { return x == y; }
 T_Bool lt_Int(T_Int x, T_Int y) { return x < y; }
+T_Bool gt_Int(T_Int x, T_Int y) { return x > y; }
+T_Bool lte_Int(T_Int x, T_Int y) { return x <= y; }
+T_Bool gte_Int(T_Int x, T_Int y) { return x >= y; }
+
 T_Int add_Int(T_Int x, T_Int y) { return x + y; }
 T_Int sub_Int(T_Int x, T_Int y) { return x - y; }
 T_Int mul_Int(T_Int x, T_Int y) { return x * y; }

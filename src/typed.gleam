@@ -137,6 +137,10 @@ fn prelude(c: Context) -> #(Context, ValueEnv) {
   let n = env.put(n, "equal", #(BuiltInPolyVar(equal_type), equal_type))
 
   let n = env.put(n, "lt_Int", #(BuiltInVar, Poly([], int_compop)))
+  let n = env.put(n, "gt_Int", #(BuiltInVar, Poly([], int_compop)))
+  let n = env.put(n, "lte_Int", #(BuiltInVar, Poly([], int_compop)))
+  let n = env.put(n, "gte_Int", #(BuiltInVar, Poly([], int_compop)))
+
   let n = env.put(n, "add_Int", #(BuiltInVar, Poly([], int_binop)))
   let n = env.put(n, "sub_Int", #(BuiltInVar, Poly([], int_binop)))
   let n = env.put(n, "mul_Int", #(BuiltInVar, Poly([], int_binop)))
@@ -783,6 +787,9 @@ fn infer_expression(
         g.MultInt -> "mul_Int"
         g.DivInt -> "div_Int"
         g.LtInt -> "lt_Int"
+        g.GtInt -> "gt_Int"
+        g.LtEqInt -> "lte_Int"
+        g.GtEqInt -> "gte_Int"
         g.Eq -> "equal"
         _ -> {
           io.debug(name)
