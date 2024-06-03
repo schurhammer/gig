@@ -2,10 +2,15 @@ import closure_conversion.{
   type Exp, type Function, type Module, Call, CallClosure, If, Int, Let, Module,
   Var,
 }
+import monomorphise.{type CustomType, type Mono, CustomType, MonoApp, MonoFun} as mono
+
+import graph
+import type_graph
+
+import gleam/bool
 import gleam/int
 import gleam/list
 import gleam/string
-import monomorphise.{type CustomType, type Mono, CustomType, MonoApp, MonoFun} as mono
 
 // TODO standardise type name functions
 fn type_name(typ: Mono) -> String {
@@ -156,8 +161,22 @@ fn function_forward(fun: Function) -> String {
 }
 
 fn custom_type_forward(t: CustomType) {
+  let equal =
+    "T_Bool"
+    <> " equal_"
+    <> t.name
+    <> "("
+    <> "T_"
+    <> t.name
+    <> " a, "
+    <> "T_"
+    <> t.name
+    <> " b"
+    <> ");\n"
   let variants =
     list.map(t.variants, fn(v) {
+      // TODO we don't really need a typedef for the struct
+      // it's only used in the union
       "typedef struct "
       <> case t.pointer {
         True -> v.name <> "*"
@@ -170,7 +189,7 @@ fn custom_type_forward(t: CustomType) {
     |> string.concat
   let union = case t.variants {
     // only a single variant
-    [v] -> "typedef S_" <> v.name <> " T_" <> t.name <> ";"
+    [v] -> "typedef S_" <> v.name <> " T_" <> t.name <> ";\n"
     // either 0 or many variants
     variants -> {
       let union_name = "U_" <> t.name
@@ -184,11 +203,11 @@ fn custom_type_forward(t: CustomType) {
         <> "}\n"
         <> "data;\n"
         <> "};\n"
-      let typedef = "typedef struct " <> union_name <> " T_" <> t.name <> ";"
+      let typedef = "typedef struct " <> union_name <> " T_" <> t.name <> ";\n"
       union <> typedef
     }
   }
-  variants <> union
+  variants <> union <> equal
 }
 
 fn custom_type(t: CustomType) {
@@ -218,13 +237,17 @@ fn custom_type(t: CustomType) {
     <> case t.variants {
       [variant] ->
         list.map(variant.fields, fn(f) {
-          "if(a"
+          let field_equal = "equal" <> mono.type_name(f.typ)
+
+          "if(!"
+          <> field_equal
+          <> "(a"
           <> access_op
           <> f.name
-          <> " != b"
+          <> ", b"
           <> access_op
           <> f.name
-          <> ") { return False; }\n"
+          <> ")) { return False; }\n"
         })
         |> string.concat
       variants ->
@@ -253,7 +276,7 @@ fn custom_type(t: CustomType) {
         |> string.join("else ")
     }
     <> "return True;\n"
-    <> "}"
+    <> "}\n"
 
   let variant_definitions =
     list.index_map(t.variants, fn(v, i) {
@@ -261,7 +284,7 @@ fn custom_type(t: CustomType) {
       let fields =
         list.map(v.fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
         |> string.join("")
-      let struct = "struct " <> v.name <> "{\n" <> fields <> "};"
+      let struct = "struct " <> v.name <> "{\n" <> fields <> "};\n"
       let constructor_target = case is_record {
         True -> "RETURN"
         False -> "RETURN.data." <> v.name
@@ -283,18 +306,18 @@ fn custom_type(t: CustomType) {
           True -> ""
           False -> "RETURN.tag = " <> tag <> ";\n"
         }
-        <> case v.fields {
-          [] -> constructor_target <> " = " <> "(void*) 1;\n"
-          _ ->
-            case t.pointer {
-              True ->
+        <> case t.pointer {
+          True ->
+            case v.fields {
+              [] -> constructor_target <> " = " <> "(void*) 1;\n"
+              _ ->
                 constructor_target
                 <> " = "
                 <> "malloc(sizeof(struct "
                 <> v.name
                 <> "));\n"
-              False -> ""
             }
+          _ -> ""
         }
         <> v.fields
         |> list.map(fn(p) {
@@ -302,7 +325,7 @@ fn custom_type(t: CustomType) {
         })
         |> string.join("")
         <> "return RETURN;\n"
-        <> "}"
+        <> "}\n"
       let instanceof =
         "T_Bool"
         <> " "
@@ -316,7 +339,7 @@ fn custom_type(t: CustomType) {
           True -> "True"
           False -> "data.tag == " <> tag
         }
-        <> "; }"
+        <> "; }\n"
       let getters =
         list.map(v.fields, fn(f) {
           type_name(f.typ)
@@ -334,19 +357,32 @@ fn custom_type(t: CustomType) {
             False -> "data.data." <> v.name <> access_op
           }
           <> f.name
-          <> "; }"
+          <> "; }\n"
         })
       [struct, constructor, instanceof, ..getters]
-      |> string.join("\n\n")
+      |> string.concat
     })
-    |> string.join("\n")
+    |> string.concat
 
-  variant_definitions <> "\n\n" <> equal
+  variant_definitions <> equal
 }
 
 pub fn module(mod: Module) -> String {
   let funs = mod.functions
-  let types = mod.types
+
+  // sort types to put them in order of dependency and
+  //  "pointer types" after "struct types"
+  let type_groups =
+    type_graph.create(mod)
+    |> graph.strongly_connected_components()
+
+  let types =
+    list.flatten(type_groups)
+    |> list.map(fn(name) {
+      let assert Ok(x) = list.find(mod.types, fn(x) { x.name == name })
+      x
+    })
+    |> list.sort(fn(x, y) { bool.compare(x.pointer, y.pointer) })
 
   let type_decl =
     list.map(types, custom_type_forward)

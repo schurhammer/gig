@@ -10,14 +10,9 @@ import simplifile
 import gleam/io
 import gleam/string
 
-pub fn read_file(file_name: String) -> String {
-  let assert Ok(content) = simplifile.read(file_name)
-  content
-}
-
 // returns the file name of the binary
 pub fn compile(gleam_file_name: String) {
-  let input = read_file(gleam_file_name)
+  let assert Ok(input) = simplifile.read(gleam_file_name)
 
   // run it through the compiler chain
   let assert Ok(module) = glance.module(input)
@@ -27,7 +22,7 @@ pub fn compile(gleam_file_name: String) {
   let code = codegen.module(cc)
 
   // insert the generated code into the template
-  let template = read_file("./src/template.c")
+  let assert Ok(template) = simplifile.read("./src/template.c")
   let output = string.replace(template, "///CODEGEN_CONTENT///", code)
 
   // output the c file

@@ -59,6 +59,10 @@ pub fn run(poly: t.Context) {
   let mod = Module([], [])
   let c = Context(poly, mod, [])
 
+  // ensure Nil is instantiated, since we replace unbound types with Nil
+  let assert Ok(nil) = list.find(poly.types, fn(x) { x.name == "Nil" })
+  let c = instantiate_custom_type(c, [], nil)
+
   let name = "main"
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == name })
   let #(c, _) = instantiate_function(c, name, sub_type(c, [], main.typ.typ))
@@ -74,10 +78,7 @@ fn sub_type(c: Context, sub: List(#(Int, Mono)), typ: t.Type) -> Mono {
         t.Unbound(x, _level) ->
           case list.find(sub, fn(sub) { sub.0 == x }) {
             Ok(sub) -> sub.1
-            // TODO id(id) causes the problem because theres nothing
-            // binding what type of id the returned function uses
-            // maybe we just fill in with Nil instead of panic
-            Error(_) -> panic as "unbound type variable"
+            Error(_) -> MonoApp("Nil", [])
           }
       }
     t.TypeApp(name, args) -> MonoApp(name, list.map(args, sub_type(c, sub, _)))
@@ -95,14 +96,15 @@ pub fn type_name(mono: Mono) -> String {
       <> args
       |> list.map(type_name)
       |> string.concat()
-    MonoFun(ret, []) -> "_fn" <> type_name(ret)
-    MonoFun(ret, args) ->
-      "_fn"
-      <> args
-      |> list.map(type_name)
-      |> string.concat()
-      <> "_"
-      <> type_name(ret)
+    MonoFun(ret, []) -> "_Closure"
+    // "_fn" <> type_name(ret)
+    MonoFun(ret, args) -> "_Closure"
+    // "_fn"
+    // <> args
+    // |> list.map(type_name)
+    // |> string.concat()
+    // <> "_"
+    // <> type_name(ret)
   }
 }
 

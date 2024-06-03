@@ -1,14 +1,14 @@
 //// 21
 
-type List(a) {
-  Null
-  Cons(head: a, tail: List(a))
+type ConsList(a) {
+  NullList
+  ConsList(head: a, tail: ConsList(a))
 }
 
 pub fn main() {
-  let a = Cons(1, Cons(2, Cons(3, Null)))
-  let b = Cons(1, Cons(2, Cons(3, Null)))
-  let c = Cons(1, Cons(2, Null))
+  let a = ConsList(1, ConsList(2, ConsList(3, NullList)))
+  let b = ConsList(1, ConsList(2, ConsList(3, NullList)))
+  let c = ConsList(1, ConsList(2, NullList))
   let x = case a == b {
     True -> 1
     False -> 2

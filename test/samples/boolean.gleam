@@ -1,7 +1,7 @@
-//// 1
+//// 2
 
 pub fn main() {
-  case True {
+  case !True {
     True -> 1
     False -> 2
   }

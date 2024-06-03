@@ -3,7 +3,7 @@ import gleam/list
 import gleam/string
 import shellout
 import simplifile
-import startest.{describe, it}
+import startest.{describe, it, xit}
 import startest/expect
 
 pub fn main() {
@@ -29,7 +29,7 @@ import gleam/io
 
 fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
-    it("has the correct output", fn() {
+    it("correct output", fn() {
       io.debug(file)
       let binary = compiler.compile(file)
 
@@ -49,6 +49,13 @@ fn sample_test(file) {
       let assert Ok(output) = shellout.command(binary, [], ".", [])
 
       expect.to_equal(string.trim(output), string.trim(expected_output))
+    }),
+    xit("passes valgrind", fn() {
+      let file = string.replace(file, ".gleam", "")
+      let args = ["--error-exitcode=1", file]
+      let output = shellout.command("valgrind", args, ".", [])
+      expect.to_be_ok(output)
+      Nil
     }),
   ])
 }

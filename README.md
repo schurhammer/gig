@@ -21,7 +21,7 @@ Note: at the moment `program.gleam` must be a standalone gleam file. Imports are
 - [ ] Floats
 - [ ] Number formats
 - [ ] Strings
-- [ ] Lists
+- [x] Lists
 - [x] Equality
 - [x] Assignments
 - [x] Discard patterns
@@ -51,7 +51,7 @@ Note: at the moment `program.gleam` must be a standalone gleam file. Imports are
 - [x] Variable patterns
 - [x] Constructor patterns
 - [ ] String patterns
-- [ ] List patterns
+- [x] List patterns
 - [x] Recursion
 - [ ] Tail calls
 - [x] Multiple subjects
@@ -62,13 +62,13 @@ Note: at the moment `program.gleam` must be a standalone gleam file. Imports are
 
 ### Other Data types
 
-- [ ] Tuples
+- [x] Tuples
 - [x] Custom types
 - [x] Records
 - [x] Record accessors
 - [ ] Record updates
 - [x] Generic custom types
-- [ ] Results
+- [x] Results
 - [ ] Bit arrays
 
 ### Standard library
@@ -83,11 +83,11 @@ Note: at the moment `program.gleam` must be a standalone gleam file. Imports are
 
 - [ ] Opaque types
 - [ ] Use
-- [ ] Todo
-- [ ] Panic
-- [ ] Let assert
+- [x] Todo
+- [x] Panic
+- [x] Let assert
 - [ ] Externals
 
 ## Contributing
 
-I am not accepting contributions at this time, feel free to make issues or discussions though.
+I am not accepting code contributions at this time, feel free to make issues or discussions though.

@@ -4,6 +4,7 @@ import glance as g
 
 import gleam/io
 import gleam/list
+import gleam/option.{None, Some}
 
 type Graph =
   graph.Graph(String)
@@ -62,6 +63,14 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
     g.PatternInt(_) -> []
     g.PatternDiscard(_) -> []
     g.PatternVariable(x) -> [x]
+    g.PatternTuple(args) -> list.flat_map(args, pattern_bindings)
+    g.PatternList(elements, tail) -> {
+      let x = list.flat_map(elements, pattern_bindings)
+      case tail {
+        Some(tail) -> combine_env(x, pattern_bindings(tail))
+        _ -> x
+      }
+    }
     g.PatternConstructor(_mod, _cons, args, _spread) ->
       list.flat_map(args, fn(x) { pattern_bindings(x.item) })
     _ -> {
@@ -81,16 +90,36 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
         False -> graph.insert_edge(g, r, s)
         True -> g
       }
+    g.NegateBool(e) -> walk_expression(g, n, r, e)
+    g.NegateInt(e) -> walk_expression(g, n, r, e)
+    g.Block(statements) -> walk_body(g, n, r, statements)
+    g.Panic(e) ->
+      case e {
+        Some(e) -> walk_expression(g, n, r, e)
+        None -> g
+      }
+    g.Todo(e) ->
+      case e {
+        Some(e) -> walk_expression(g, n, r, e)
+        None -> g
+      }
+    g.Tuple(args) ->
+      list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e) })
+    g.List(elements, rest) -> {
+      let g = list.fold(elements, g, fn(g, e) { walk_expression(g, n, r, e) })
+      case rest {
+        Some(rest) -> walk_expression(g, n, r, rest)
+        None -> g
+      }
+    }
     g.Call(fun, args) -> {
       let g = walk_expression(g, n, r, fun)
       list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e.item) })
     }
+    g.TupleIndex(tuple, index) -> walk_expression(g, n, r, tuple)
     g.BinaryOperator(_, left, right) -> {
       let g = walk_expression(g, n, r, left)
       walk_expression(g, n, r, right)
-    }
-    g.Block(statements) -> {
-      walk_body(g, n, r, statements)
     }
     g.Case(subjects, clauses) -> {
       let g = list.fold(subjects, g, fn(g, e) { walk_expression(g, n, r, e) })

@@ -4,27 +4,31 @@ type Point {
   Point(x: Int, y: Int)
 }
 
-type List(a) {
-  Null
-  Cons(head: a, tail: List(a))
+type ConsList(a) {
+  NullList
+  ConsList(head: a, tail: ConsList(a))
 }
 
 pub fn main() {
-  let points = Cons(Point(1, 2), Cons(Point(3, 4), Cons(Point(5, 6), Null)))
+  let points =
+    ConsList(
+      Point(1, 2),
+      ConsList(Point(3, 4), ConsList(Point(5, 6), NullList)),
+    )
   let ints = map(points, fn(point: Point) { point.x + point.y })
   sum(ints)
 }
 
 fn map(l, f) {
   case l {
-    Null -> Null
-    Cons(a, b) -> Cons(f(a), map(b, f))
+    NullList -> NullList
+    ConsList(a, b) -> ConsList(f(a), map(b, f))
   }
 }
 
 fn sum(l) {
   case l {
-    Null -> 0
-    Cons(x, xs) -> x + sum(xs)
+    NullList -> 0
+    ConsList(x, xs) -> x + sum(xs)
   }
 }
