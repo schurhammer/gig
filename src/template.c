@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+///INCLUDES///
 
 /// builtin
 
@@ -10,6 +11,10 @@
 #define T_Int int64_t
 #define T_Bool bool
 
+// these must be short-circuiting
+#define and_Bool(x, y) (x && y)
+#define or_Bool(x, y) (x || y)
+
 void panic() { exit(1); }
 
 void print_int(T_Int number) {
@@ -17,9 +22,6 @@ void print_int(T_Int number) {
 }
 
 T_Bool equal_Bool(T_Bool x, T_Bool y) { return x == y; }
-T_Bool and_Bool(T_Bool x, T_Bool y) { return x && y; }
-T_Bool or_Bool(T_Bool x, T_Bool y) { return x || y; }
-
 T_Bool negate_Bool(T_Bool x) { return  !x; }
 T_Bool True_instanceof(T_Bool x) { return  x == True; }
 T_Bool False_instanceof(T_Bool x) { return  x == False; }
@@ -65,4 +67,7 @@ T_Bool equal_Closure(T_Closure a, T_Closure b) {
 
 /// main
 
-T_Int main() { print_int(F_main()); return 0; }
+T_Int main() {
+  ///INIT///
+  print_int(F_main()); return 0;
+}

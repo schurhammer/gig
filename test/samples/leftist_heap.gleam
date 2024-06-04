@@ -16,12 +16,6 @@ pub fn main() {
   }
 }
 
-pub type Order {
-  Eq
-  Lt
-  Gt
-}
-
 fn compare(a: Int, with b: Int) -> Order {
   case a == b {
     True -> Eq
@@ -31,6 +25,12 @@ fn compare(a: Int, with b: Int) -> Order {
         False -> Gt
       }
   }
+}
+
+pub type Order {
+  Eq
+  Lt
+  Gt
 }
 
 type Tree(a) {

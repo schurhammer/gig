@@ -63,6 +63,7 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
     g.PatternInt(_) -> []
     g.PatternDiscard(_) -> []
     g.PatternVariable(x) -> [x]
+    g.PatternAssignment(pattern, var) -> [var, ..pattern_bindings(pattern)]
     g.PatternTuple(args) -> list.flat_map(args, pattern_bindings)
     g.PatternList(elements, tail) -> {
       let x = list.flat_map(elements, pattern_bindings)

@@ -1,28 +1,29 @@
+import gleam/dict
 import gleam/io
-import gleam/list
 import gleam/string
 
 pub opaque type Env(k, v) {
-  Env(entries: List(#(k, v)))
+  Env(entries: dict.Dict(k, v))
 }
 
 pub fn new() -> Env(k, v) {
-  Env([])
+  Env(dict.new())
 }
 
 pub fn put(e: Env(k, v), k: k, v: v) -> Env(k, v) {
-  Env([#(k, v), ..e.entries])
+  dict.insert(e.entries, k, v)
+  Env(dict.insert(e.entries, k, v))
 }
 
 pub fn get(e: Env(k, v), k: k) -> Result(v, Nil) {
-  case list.find(e.entries, fn(x) { x.0 == k }) {
-    Ok(x) -> Ok(x.1)
-    Error(_) -> Error(Nil)
-  }
+  dict.get(e.entries, k)
 }
 
 pub fn get_entry(e: Env(k, v), k: k) -> Result(#(k, v), Nil) {
-  list.find(e.entries, fn(x) { x.0 == k })
+  case dict.get(e.entries, k) {
+    Ok(v) -> Ok(#(k, v))
+    Error(e) -> Error(e)
+  }
 }
 
 pub fn has(e: Env(k, v), k: k) -> Bool {
@@ -34,8 +35,8 @@ pub fn has(e: Env(k, v), k: k) -> Bool {
 
 pub fn debug(e: Env(k, v)) {
   io.println_error("Env:")
-  list.each(e.entries, fn(e) {
-    io.println_error(string.inspect(e.0) <> " -> " <> string.inspect(e.1))
+  dict.fold(e.entries, Nil, fn(_, k, v) {
+    io.println_error(string.inspect(k) <> " -> " <> string.inspect(v))
   })
   io.println_error("")
 }

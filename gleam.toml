@@ -19,5 +19,7 @@ pprint = ">= 1.0.3 and < 2.0.0"
 shellout = ">= 1.6.0 and < 2.0.0"
 simplifile = ">= 1.7.0 and < 2.0.0"
 startest = ">= 0.2.4 and < 1.0.0"
+glint = ">= 1.0.0 and < 2.0.0 or 1.0.0-rc2"
+argv = ">= 1.0.2 and < 2.0.0"
 
 [dev-dependencies]

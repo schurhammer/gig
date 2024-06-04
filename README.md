@@ -1,14 +1,22 @@
 # gig
 
-Gig is a gleam compiler written in gleam.
+Gig is a gleam compiler written in gleam. Made with fairy dust and duct tape.
 
 ## How to use
 
-`gleam run -m gig program.gleam`
+`gleam run -m gig program.gleam [--nogc] [--release]`
 
 This will compile the file to `program.c` and then use gcc to compile to a binary named `program`.
 
 Note: at the moment `program.gleam` must be a standalone gleam file. Imports are not supported yet.
+
+Optional flags:
+- nogc: disable garbage collection
+- release: enable optimisation
+
+Dependencies:
+- gcc is used to compile to binary
+- Boehm GC library needs to be installed (or use --nogc)
 
 ## Feature / Todo List
 

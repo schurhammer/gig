@@ -438,7 +438,7 @@ fn infer_variant(c: Context, n: Env(String, Type), variant: g.Variant) {
   #(c, Variant(variant.name, fields))
 }
 
-fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) {
+fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) -> #(Context, Type) {
   // TODO check types actually exist?
   case typ {
     g.NamedType(name, module, params) -> {
@@ -451,7 +451,12 @@ fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) {
       let params = list.reverse(params)
       #(c, TypeApp(name, params))
     }
-    g.TupleType(elements) -> todo
+    g.TupleType(elements) -> {
+      let size = list.length(elements)
+      let #(c, type_name) = register_tuple(c, size)
+      let typ = g.NamedType(type_name, None, elements)
+      infer_type(c, n, typ)
+    }
     g.FunctionType(parameters, return) -> {
       let #(c, params) =
         list.fold(parameters, #(c, []), fn(acc, p) {
@@ -657,12 +662,14 @@ fn infer_bind_pattern(
   case pattern {
     g.PatternInt(_) -> #(c, [])
     g.PatternDiscard(_) -> #(c, [])
-    g.PatternVariable(x) -> {
-      // let n = env.put(n, x, Poly([], subject.typ))
-      // let #(c, body) = infer_body(c, n, body)
-      // Let(body.typ, x, subject, body)
+    g.PatternVariable(name) -> {
       let #(c, subject) = infer_expression(c, n, subject)
-      #(c, [#(x, subject)])
+      #(c, [#(name, subject)])
+    }
+    g.PatternAssignment(pattern, name) -> {
+      let #(c, value) = infer_expression(c, n, subject)
+      let #(c, rest) = infer_bind_pattern(c, n, pattern, subject)
+      #(c, [#(name, value), ..rest])
     }
     g.PatternTuple(args) -> {
       let size = list.length(args)
@@ -743,6 +750,7 @@ fn infer_check_pattern(
     }
     g.PatternDiscard(_) -> #(c, Var(bool, "True", BuiltInVar))
     g.PatternVariable(_) -> #(c, Var(bool, "True", BuiltInVar))
+    g.PatternAssignment(_, _) -> #(c, Var(bool, "True", BuiltInVar))
     g.PatternTuple(args) -> {
       let size = list.length(args)
       let type_name = "Tuple" <> int.to_string(size)
@@ -752,16 +760,31 @@ fn infer_check_pattern(
     }
     g.PatternConstructor(_mod, cons, args, _spread) -> {
       // constructor match
+      let #(c, kind, _typ) = resolve_name(c, n, cons)
+
+      let fields = case kind {
+        ConstructorVar(_poly, variant, _custom) -> variant.fields
+        BuiltInVar -> []
+        _ -> {
+          io.debug(kind)
+          panic as "unexpected constructor"
+        }
+      }
+
       let tag_args = [g.Field(None, subject)]
       let tag = g.Variable(cons <> "_instanceof")
       let #(c, check) = infer_expression(c, n, g.Call(tag, tag_args))
       let and_bool = g.Variable("and_Bool")
       let #(c, and_bool) = infer_expression(c, n, and_bool)
 
+      let assert Ok(args) = list.strict_zip(args, fields)
       // inner match
       let #(c, args) =
-        list.fold(args, #(c, []), fn(acc, x) {
+        list.fold(args, #(c, []), fn(acc, entry) {
           let #(c, args) = acc
+          let #(x, field) = entry
+          let getter = g.Variable(cons <> "_" <> field.name)
+          let subject = g.Call(getter, [g.Field(None, subject)])
           let #(c, check) = infer_check_pattern(c, n, x.item, subject)
           #(c, [check, ..args])
         })
@@ -797,6 +820,47 @@ fn reduce_right(list: List(a), item: a, reducer: fn(a, a) -> a) {
     [] -> item
     [x, ..xs] -> reducer(reduce_right(xs, x, reducer), item)
   }
+}
+
+fn range(a, b) {
+  case a < b {
+    True -> [a, ..range(a + 1, b)]
+    False -> []
+  }
+}
+
+fn register_tuple(c: Context, size: Int) -> #(Context, String) {
+  let type_name = "Tuple" <> int.to_string(size)
+  let c = case list.find(c.types, fn(x) { x.name == type_name }) {
+    Ok(_) -> c
+    Error(_) -> {
+      let #(c, fields) =
+        list.fold(range(0, size), #(c, []), fn(acc, i) {
+          let #(c, l) = acc
+          let name = "field" <> int.to_string(i)
+          let #(c, typ) = new_type_var_ref(c)
+          #(c, [Field(name, typ), ..l])
+        })
+      let fields = list.reverse(fields)
+
+      let vars =
+        list.map(fields, fn(f) {
+          let assert TypeVar(ref) = f.typ
+          ref.id
+        })
+      let params = list.map(fields, fn(f) { f.name })
+      let type_params = list.map(fields, fn(f) { f.typ })
+
+      let variant = Variant(type_name, fields)
+      let poly = Poly(vars, TypeApp(type_name, type_params))
+      let custom = CustomType(type_name, params, [variant], poly)
+
+      let c = register_custom_type(c, custom)
+
+      Context(..c, types: [custom, ..c.types])
+    }
+  }
+  #(c, type_name)
 }
 
 fn infer_expression(
@@ -838,38 +902,9 @@ fn infer_expression(
     g.Panic(_) -> infer_expression(c, n, panic_ast)
     g.Todo(_) -> infer_expression(c, n, panic_ast)
     g.Tuple(args) -> {
-      let size = list.length(args)
-      let type_name = "Tuple" <> int.to_string(size)
       let args = list.map(args, fn(x) { g.Field(None, x) })
-      let c = case list.find(c.types, fn(x) { x.name == type_name }) {
-        Ok(_) -> c
-        Error(_) -> {
-          let #(c, fields) =
-            list.index_fold(args, #(c, []), fn(acc, p, i) {
-              let #(c, l) = acc
-              let name = "field" <> int.to_string(i)
-              let #(c, typ) = new_type_var_ref(c)
-              #(c, [Field(name, typ), ..l])
-            })
-          let fields = list.reverse(fields)
-
-          let vars =
-            list.map(fields, fn(f) {
-              let assert TypeVar(ref) = f.typ
-              ref.id
-            })
-          let params = list.map(fields, fn(f) { f.name })
-          let type_params = list.map(fields, fn(f) { f.typ })
-
-          let variant = Variant(type_name, fields)
-          let poly = Poly(vars, TypeApp(type_name, type_params))
-          let custom = CustomType(type_name, params, [variant], poly)
-
-          let c = register_custom_type(c, custom)
-
-          Context(..c, types: [custom, ..c.types])
-        }
-      }
+      let size = list.length(args)
+      let #(c, type_name) = register_tuple(c, size)
       infer_expression(c, n, g.Call(g.Variable(type_name), args))
     }
     g.List(elements, tail) -> {
@@ -886,7 +921,6 @@ fn infer_expression(
       infer_expression(c, n, list)
     }
     g.TupleIndex(tuple, index) -> {
-      let assert Ok(t) = env.get(n, "p")
       let field_name = "field" <> int.to_string(index)
       let exp = g.FieldAccess(tuple, field_name)
       infer_expression(c, n, exp)

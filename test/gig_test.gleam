@@ -21,6 +21,7 @@ pub fn all_samples_tests() {
   let tests =
     files
     |> list.filter(fn(file) { string.ends_with(file, ".gleam") })
+    |> list.sort(string.compare)
     |> list.map(fn(file) { sample_test(file) })
   describe("samples", tests)
 }
@@ -31,7 +32,7 @@ fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
     it("correct output", fn() {
       io.debug(file)
-      let binary = compiler.compile(file)
+      let binary = compiler.compile(file, False, False)
 
       // parse the expected output out of the file's doc comment
       let assert Ok(content) = simplifile.read(file)

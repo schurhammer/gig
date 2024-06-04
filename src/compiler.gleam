@@ -11,7 +11,8 @@ import gleam/io
 import gleam/string
 
 // returns the file name of the binary
-pub fn compile(gleam_file_name: String) {
+pub fn compile(gleam_file_name: String, gc: Bool, release: Bool) {
+  io.debug(#(gleam_file_name, gc))
   let assert Ok(input) = simplifile.read(gleam_file_name)
 
   // run it through the compiler chain
@@ -23,6 +24,25 @@ pub fn compile(gleam_file_name: String) {
 
   // insert the generated code into the template
   let assert Ok(template) = simplifile.read("./src/template.c")
+
+  let template = case gc {
+    True -> {
+      let includes =
+        "
+        #include <gc.h>
+        #define malloc(x) GC_MALLOC(x)
+      "
+      let init =
+        "
+        GC_INIT();
+      "
+      let template = string.replace(template, "///INIT///", init)
+      let template = string.replace(template, "///INCLUDES///", includes)
+      template
+    }
+    False -> template
+  }
+
   let output = string.replace(template, "///CODEGEN_CONTENT///", code)
 
   // output the c file
@@ -32,7 +52,20 @@ pub fn compile(gleam_file_name: String) {
   let assert Ok(_) = shellout.command("bash", ["-c", cmd], ".", [])
 
   // compile the c file
-  let result = shellout.command("gcc", ["-o", file_name, c_file], ".", [])
+  let args = ["-o", file_name, c_file]
+
+  let args = case gc {
+    True -> ["-lgc", ..args]
+    False -> args
+  }
+
+  let args = case release {
+    True -> ["-O3", ..args]
+    False -> args
+  }
+
+  io.debug(args)
+  let result = shellout.command("gcc", args, ".", [])
 
   case result {
     Ok(_) -> Nil
