@@ -774,8 +774,6 @@ fn infer_check_pattern(
       let tag_args = [g.Field(None, subject)]
       let tag = g.Variable(cons <> "_instanceof")
       let #(c, check) = infer_expression(c, n, g.Call(tag, tag_args))
-      let and_bool = g.Variable("and_Bool")
-      let #(c, and_bool) = infer_expression(c, n, and_bool)
 
       let assert Ok(args) = list.strict_zip(args, fields)
       // inner match
@@ -790,7 +788,7 @@ fn infer_check_pattern(
         })
       let check =
         reduce_right(args, check, fn(checks, check) {
-          Call(bool, and_bool, [check, checks])
+          call_and_bool(check, checks)
         })
       #(c, check)
     }
@@ -1064,6 +1062,7 @@ fn infer_expression(
 
       // prefix for all subjects
       let #(c, subject_prefix) = new_temp_var(c)
+      let subject_prefix = subject_prefix <> "_"
 
       // create let binding for subjects
       let #(c, n, subjects) =
@@ -1083,10 +1082,6 @@ fn infer_expression(
           let #(c, else_exp) = acc
           let #(patterns, body) = clause
 
-          // grab the and_bool function
-          let and_bool = g.Variable("and_Bool")
-          let #(c, and_bool) = infer_expression(c, n, and_bool)
-
           // check each subject
           // TODO is defaulting to true ok?
           let #(c, cond_exp) =
@@ -1104,7 +1099,7 @@ fn infer_expression(
                 let #(c, e) = infer_check_pattern(c, n, pattern, subject)
 
                 // TODO do we need to check that e is Bool?
-                #(c, Call(bool, and_bool, [e, last_e]))
+                #(c, call_and_bool(e, last_e))
               },
             )
 
@@ -1192,6 +1187,16 @@ fn is_bound(c: Context, a: Type) -> Bool {
         _ -> False
       }
     _ -> False
+  }
+}
+
+fn call_and_bool(a, b) {
+  let and_bool = Var(bool_binop, "and_Bool", BuiltInVar)
+
+  case a, b {
+    Var(_, "True", _), _ -> b
+    _, Var(_, "True", _) -> a
+    _, _ -> Call(bool, and_bool, [a, b])
   }
 }
 

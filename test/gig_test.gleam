@@ -32,7 +32,7 @@ fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
     it("correct output", fn() {
       io.debug(file)
-      let binary = compiler.compile(file, False, False)
+      let binary = compiler.compile(file, gc: False, release: True)
 
       // parse the expected output out of the file's doc comment
       let assert Ok(content) = simplifile.read(file)

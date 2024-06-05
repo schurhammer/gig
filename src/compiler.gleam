@@ -11,7 +11,7 @@ import gleam/io
 import gleam/string
 
 // returns the file name of the binary
-pub fn compile(gleam_file_name: String, gc: Bool, release: Bool) {
+pub fn compile(gleam_file_name: String, gc gc: Bool, release release: Bool) {
   io.debug(#(gleam_file_name, gc))
   let assert Ok(input) = simplifile.read(gleam_file_name)
 

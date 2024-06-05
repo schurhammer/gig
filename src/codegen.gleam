@@ -173,41 +173,53 @@ fn custom_type_forward(t: CustomType) {
     <> t.name
     <> " b"
     <> ");\n"
+
   let variants =
-    list.map(t.variants, fn(v) {
-      // TODO we don't really need a typedef for the struct
-      // it's only used in the union
-      "typedef struct "
+    t.variants
+    |> list.filter(fn(v) { !list.is_empty(v.fields) })
+    |> list.map(fn(v) { "struct " <> v.name <> ";\n" })
+    |> string.concat
+
+  let union_members =
+    t.variants
+    |> list.filter(fn(v) { !list.is_empty(v.fields) })
+    |> list.map(fn(v) {
+      "struct "
       <> case t.pointer {
         True -> v.name <> "*"
         False -> v.name
       }
-      <> " S_"
+      <> " "
       <> v.name
       <> ";\n"
     })
-    |> string.concat
-  let union = case t.variants {
+  let type_name = "T_" <> t.name
+  let type_struct = case t.variants, union_members {
     // only a single variant
-    [v] -> "typedef S_" <> v.name <> " T_" <> t.name <> ";\n"
+    [v], _ ->
+      "struct "
+      <> case t.pointer {
+        True -> v.name <> "*"
+        False -> v.name
+      }
+    // no union members
+    _, [] -> {
+      "struct " <> type_name <> "{ int tag; }"
+    }
     // either 0 or many variants
-    variants -> {
-      let union_name = "U_" <> t.name
-      let union =
-        "struct "
-        <> union_name
-        <> " {\nint tag;\n"
-        <> "union {\n"
-        <> list.map(variants, fn(v) { "S_" <> v.name <> " " <> v.name <> ";\n" })
-        |> string.concat()
-        <> "}\n"
-        <> "data;\n"
-        <> "};\n"
-      let typedef = "typedef struct " <> union_name <> " T_" <> t.name <> ";\n"
-      union <> typedef
+    _, union_members -> {
+      "struct "
+      <> type_name
+      <> " {\nint tag;\n"
+      <> "union {\n"
+      <> string.concat(union_members)
+      <> "}\n"
+      <> "data;\n"
+      <> "}"
     }
   }
-  variants <> union <> equal
+  let typedef = "typedef " <> type_struct <> " T_" <> t.name <> ";\n"
+  variants <> typedef <> equal
 }
 
 fn custom_type(t: CustomType) {
@@ -309,7 +321,12 @@ fn custom_type(t: CustomType) {
         <> case t.pointer {
           True ->
             case v.fields {
-              [] -> constructor_target <> " = " <> "(void*) 1;\n"
+              [] ->
+                case is_record {
+                  // init to 1 to make closures work - calling behaviour is based on this value
+                  True -> constructor_target <> " = " <> "(void*) 1;\n"
+                  False -> ""
+                }
               _ ->
                 constructor_target
                 <> " = "
