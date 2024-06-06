@@ -84,6 +84,7 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
 fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
   case e {
     g.Int(..) -> g
+    g.String(..) -> g
     g.FieldAccess(subject, _) -> walk_expression(g, n, r, subject)
     g.Variable(s) ->
       //  it's a function reference if the variable is not in the local env

@@ -1,8 +1,9 @@
 import closure_conversion.{
-  type Exp, type Function, type Module, Call, CallClosure, If, Int, Let, Module,
-  Var,
+  type Exp, type Function, type Module, Call, CallClosure, If, Let, Literal,
+  Module, Var,
 }
 import monomorphise.{type CustomType, type Mono, CustomType, MonoApp, MonoFun} as mono
+import typed.{Int, String}
 
 import graph
 import type_graph
@@ -12,15 +13,9 @@ import gleam/int
 import gleam/list
 import gleam/string
 
-// TODO standardise type name functions
 fn type_name(typ: Mono) -> String {
-  "T_" <> do_type_name(typ)
-}
-
-fn do_type_name(typ: Mono) -> String {
   case typ {
-    MonoApp(name, args) ->
-      string.join([name, ..list.map(args, do_type_name)], "_")
+    MonoApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
     MonoFun(..) -> {
       // TODO what do
       "Closure"
@@ -48,7 +43,14 @@ fn ternary(cond: String, then: String, els: String) -> String {
 
 fn texp(arg: Exp, target: String, id: Int) -> String {
   case arg {
-    Int(_, val) -> hit_target(target, val)
+    Literal(_, val) ->
+      case val {
+        Int(val) -> hit_target(target, val)
+        String(val) -> {
+          let size = int.to_string(string.byte_size(val))
+          hit_target(target, "new_String(\"" <> val <> "\", " <> size <> ")")
+        }
+      }
 
     Var(_, val) -> hit_target(target, val)
     Call(typ, fun, args) -> {
@@ -70,7 +72,7 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
 
       // the closure may or may not have an env parameter
       // determined by if env is a null pointer
-      let cond = env_param
+      let cond = "is_closure(" <> closure <> ")"
 
       let exp_env =
         "("
@@ -78,7 +80,7 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
         <> type_name(typ)
         <> "(*)"
         <> "("
-        <> string.join(["void*", ..param_types], ", ")
+        <> string.join(["Pointer", ..param_types], ", ")
         <> ")"
         <> ")"
         <> fun
@@ -162,64 +164,41 @@ fn function_forward(fun: Function) -> String {
 
 fn custom_type_forward(t: CustomType) {
   let equal =
-    "T_Bool"
+    "Bool"
     <> " equal_"
     <> t.name
     <> "("
-    <> "T_"
     <> t.name
     <> " a, "
-    <> "T_"
     <> t.name
     <> " b"
     <> ");\n"
-
-  let variants =
-    t.variants
-    |> list.filter(fn(v) { !list.is_empty(v.fields) })
-    |> list.map(fn(v) { "struct " <> v.name <> ";\n" })
-    |> string.concat
-
-  let union_members =
-    t.variants
-    |> list.filter(fn(v) { !list.is_empty(v.fields) })
-    |> list.map(fn(v) {
-      "struct "
-      <> case t.pointer {
-        True -> v.name <> "*"
-        False -> v.name
+  let typedef = case t.pointer {
+    True -> "typedef uintptr_t " <> t.name <> ";\n"
+    False ->
+      case t.variants {
+        [v] -> "typedef struct " <> v.name <> " " <> t.name <> ";\n"
+        _ -> panic as "unexpected struct type with multiple variants"
       }
-      <> " "
-      <> v.name
-      <> ";\n"
-    })
-  let type_name = "T_" <> t.name
-  let type_struct = case t.variants, union_members {
-    // only a single variant
-    [v], _ ->
-      "struct "
-      <> case t.pointer {
-        True -> v.name <> "*"
-        False -> v.name
-      }
-    // no union members
-    _, [] -> {
-      "struct " <> type_name <> "{ int tag; }"
-    }
-    // either 0 or many variants
-    _, union_members -> {
-      "struct "
-      <> type_name
-      <> " {\nint tag;\n"
-      <> "union {\n"
-      <> string.concat(union_members)
-      <> "}\n"
-      <> "data;\n"
-      <> "}"
-    }
   }
-  let typedef = "typedef " <> type_struct <> " T_" <> t.name <> ";\n"
-  variants <> typedef <> equal
+  typedef <> equal
+}
+
+fn decode_arg(t: CustomType, var: String) -> String {
+  case t.pointer {
+    True ->
+      "uint16_t "
+      <> var
+      <> "_tag = decode_tag("
+      <> var
+      <> ");\n"
+      <> "void* "
+      <> var
+      <> "_ptr = decode_pointer("
+      <> var
+      <> ");\n"
+    False -> ""
+  }
 }
 
 fn custom_type(t: CustomType) {
@@ -235,49 +214,72 @@ fn custom_type(t: CustomType) {
   }
 
   let equal =
-    "T_Bool"
+    "Bool"
     <> " equal_"
     <> t.name
     <> "("
-    <> "T_"
     <> t.name
     <> " a, "
-    <> "T_"
     <> t.name
     <> " b"
     <> ") {\n"
+    <> decode_arg(t, "a")
+    <> decode_arg(t, "b")
     <> case t.variants {
-      [variant] ->
-        list.map(variant.fields, fn(f) {
+      [v] ->
+        list.map(v.fields, fn(f) {
           let field_equal = "equal" <> mono.type_name(f.typ)
-
-          "if(!"
-          <> field_equal
-          <> "(a"
-          <> access_op
-          <> f.name
-          <> ", b"
-          <> access_op
-          <> f.name
-          <> ")) { return False; }\n"
+          case t.pointer {
+            True ->
+              "{ struct "
+              <> v.name
+              <> "* a = a_ptr;\n"
+              <> "struct "
+              <> v.name
+              <> "* b = b_ptr;\n"
+              <> "if(!"
+              <> field_equal
+              <> "(a"
+              <> access_op
+              <> f.name
+              <> ", b"
+              <> access_op
+              <> f.name
+              <> ")) { return False; }\n"
+              <> "}"
+            False ->
+              "if(!"
+              <> field_equal
+              <> "(a"
+              <> access_op
+              <> f.name
+              <> ", b"
+              <> access_op
+              <> f.name
+              <> ")) { return False; }\n"
+          }
         })
         |> string.concat
       variants ->
-        "if (a.tag != b.tag) { return False; }\n"
+        "if (a_tag != b_tag) { return False; }\n"
         <> list.index_map(variants, fn(v, i) {
-          "if (a.tag == "
+          "if (a_tag == "
           <> int.to_string(i)
           <> ") {\n"
+          <> "struct "
+          <> v.name
+          <> "* a = a_ptr;\n"
+          <> "struct "
+          <> v.name
+          <> "* b = b_ptr;\n"
           <> list.map(v.fields, fn(f) {
             let field_equal = "equal" <> mono.type_name(f.typ)
             "if(!"
             <> field_equal
-            <> "(a.data."
-            <> v.name
+            <> "(a"
             <> access_op
             <> f.name
-            <> ", b.data."
-            <> v.name
+            <> ", b"
             <> access_op
             <> f.name
             <> ")) { return False; }\n"
@@ -293,90 +295,89 @@ fn custom_type(t: CustomType) {
   let variant_definitions =
     list.index_map(t.variants, fn(v, i) {
       let tag = int.to_string(i)
+
       let fields =
         list.map(v.fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
         |> string.join("")
+
       let struct = "struct " <> v.name <> "{\n" <> fields <> "};\n"
-      let constructor_target = case is_record {
-        True -> "RETURN"
-        False -> "RETURN.data." <> v.name
-      }
+
       let constructor =
-        "T_"
-        <> t.name
-        <> " "
+        t.name
+        <> " new_"
         <> v.name
         <> "("
         <> v.fields
         |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
         |> string.join(", ")
         <> ") {\n"
-        <> "T_"
-        <> t.name
-        <> " RETURN;\n"
-        <> case is_record {
-          True -> ""
-          False -> "RETURN.tag = " <> tag <> ";\n"
-        }
         <> case t.pointer {
           True ->
-            case v.fields {
-              [] ->
-                case is_record {
-                  // init to 1 to make closures work - calling behaviour is based on this value
-                  True -> constructor_target <> " = " <> "(void*) 1;\n"
-                  False -> ""
-                }
-              _ ->
-                constructor_target
-                <> " = "
-                <> "malloc(sizeof(struct "
-                <> v.name
-                <> "));\n"
+            "struct "
+            <> v.name
+            <> "* _ptr = "
+            <> case v.fields {
+              [] -> "0;\n"
+              _ -> "malloc(sizeof(struct " <> v.name <> "));\n"
             }
-          _ -> ""
+            <> "uint16_t _tag = "
+            <> tag
+            <> ";\n"
+          _ -> t.name <> " _value;\n"
         }
         <> v.fields
         |> list.map(fn(p) {
-          constructor_target <> access_op <> p.name <> " = " <> p.name <> ";\n"
+          case t.pointer {
+            True -> "_ptr"
+            False -> "_value"
+          }
+          <> access_op
+          <> p.name
+          <> " = "
+          <> p.name
+          <> ";\n"
         })
         |> string.join("")
-        <> "return RETURN;\n"
-        <> "}\n"
-      let instanceof =
-        "T_Bool"
-        <> " "
-        <> v.name
-        <> "_instanceof"
-        <> "("
-        <> "T_"
-        <> t.name
-        <> " data) { return "
-        <> case is_record {
-          True -> "True"
-          False -> "data.tag == " <> tag
+        <> case t.pointer {
+          True -> "return encode_pointer(_ptr, _tag);\n"
+          False -> "return _value;\n"
         }
-        <> "; }\n"
+        <> "}\n"
+      let isa =
+        "Bool"
+        <> " isa_"
+        <> v.name
+        <> "("
+        <> t.name
+        <> " a) {\n"
+        <> case is_record {
+          True -> "return True;\n"
+          False -> decode_arg(t, "a") <> "return a_tag == " <> tag <> ";\n"
+        }
+        <> "}\n"
       let getters =
         list.map(v.fields, fn(f) {
+          // TODO getters probably broken for record types
           type_name(f.typ)
           <> " "
           <> v.name
           <> "_"
           <> f.name
           <> "("
-          <> "T_"
           <> t.name
-          <> " data) { return "
-          <> case is_record {
-            True -> "data" <> access_op
-
-            False -> "data.data." <> v.name <> access_op
+          <> " value) {"
+          <> case t.pointer {
+            True ->
+              " struct "
+              <> v.name
+              <> "* ptr = decode_pointer(value); return ptr"
+              <> access_op
+              <> f.name
+            False -> "return value" <> access_op <> f.name
           }
-          <> f.name
           <> "; }\n"
         })
-      [struct, constructor, instanceof, ..getters]
+      [struct, constructor, isa, ..getters]
       |> string.concat
     })
     |> string.concat

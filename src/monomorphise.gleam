@@ -42,7 +42,7 @@ pub type Field {
 }
 
 pub type Exp {
-  Int(typ: Mono, val: String)
+  Literal(typ: Mono, value: t.LiteralKind)
   Var(typ: Mono, var: VarName)
   Call(typ: Mono, fun: Exp, args: List(Exp))
   Fn(typ: Mono, var: List(VarName), exp: Exp)
@@ -203,7 +203,7 @@ fn typed_to_mono_exp(
   e: t.Exp,
 ) -> #(Context, Exp) {
   case e {
-    t.Int(typ, v) -> #(c, Int(sub_type(c, sub, typ), v))
+    t.Literal(typ, v) -> #(c, Literal(sub_type(c, sub, typ), v))
     t.Var(typ, name, kind) -> {
       let typ = sub_type(c, sub, typ)
       case kind {
@@ -229,17 +229,17 @@ fn typed_to_mono_exp(
           let c = instantiate_custom_type(c, sub, custom)
 
           let type_string = get_type_string(sub)
-          let mono_name = variant.name <> type_string
+          let mono_name = "new_" <> variant.name <> type_string
 
           #(c, Var(typ, mono_name))
         }
-        t.InstanceOfVar(poly, variant, custom) -> {
+        t.IsaVar(poly, variant, custom) -> {
           let sub = unify_poly(c, poly, typ)
 
           let c = instantiate_custom_type(c, sub, custom)
 
           let type_string = get_type_string(sub)
-          let mono_name = variant.name <> type_string <> "_instanceof"
+          let mono_name = "isa_" <> variant.name <> type_string
 
           #(c, Var(typ, mono_name))
         }

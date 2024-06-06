@@ -61,12 +61,17 @@ pub type VarKind {
   BuiltInVar
   BuiltInPolyVar(poly: Poly)
   ConstructorVar(poly: Poly, variant: Variant, custom: CustomType)
-  InstanceOfVar(poly: Poly, variant: Variant, custom: CustomType)
+  IsaVar(poly: Poly, variant: Variant, custom: CustomType)
   GetterVar(poly: Poly, field: Field, variant: Variant, custom: CustomType)
 }
 
+pub type LiteralKind {
+  Int(value: String)
+  String(value: String)
+}
+
 pub type Exp {
-  Int(typ: Type, val: String)
+  Literal(typ: Type, value: LiteralKind)
   Var(typ: Type, var: String, kind: VarKind)
   Call(typ: Type, fun: Exp, args: List(Exp))
   Fn(typ: Type, var: List(String), exp: Exp)
@@ -92,9 +97,8 @@ pub type TypeVar {
   Unbound(id: Int, level: Int)
 }
 
-// TODO does local env ALWAYS contain LocalVar? if so we can remove VarKind
 pub type LocalEnv =
-  Env(String, #(VarKind, Type))
+  Env(String, Type)
 
 pub type TypeVarEnv =
   Env(TypeVarRef, TypeVar)
@@ -115,9 +119,13 @@ pub type Context {
   )
 }
 
+const nil = TypeApp("Nil", [])
+
 const int = TypeApp("Int", [])
 
 const bool = TypeApp("Bool", [])
+
+const string = TypeApp("String", [])
 
 const bool_binop = TypeFun(bool, [bool, bool])
 
@@ -128,6 +136,8 @@ const int_binop = TypeFun(int, [int, int])
 const int_compop = TypeFun(bool, [int, int])
 
 const int_uop = TypeFun(int, [int])
+
+const string_binop = TypeFun(string, [string, string])
 
 const panic_ast = g.Call(g.Variable("panic"), [])
 
@@ -162,19 +172,16 @@ fn prelude(c: Context) -> Context {
   let n = env.put(n, "True", #(BuiltInVar, Poly([], bool)))
   let n = env.put(n, "False", #(BuiltInVar, Poly([], bool)))
   let n = env.put(n, "negate_Bool", #(BuiltInVar, Poly([], bool_uop)))
-  let n = env.put(n, "True_instanceof", #(BuiltInVar, Poly([], bool_uop)))
-  let n = env.put(n, "False_instanceof", #(BuiltInVar, Poly([], bool_uop)))
+  let n = env.put(n, "isa_True", #(BuiltInVar, Poly([], bool_uop)))
+  let n = env.put(n, "isa_False", #(BuiltInVar, Poly([], bool_uop)))
+
+  let n = env.put(n, "append_String", #(BuiltInVar, Poly([], string_binop)))
 
   let c = Context(..c, global_env: n)
 
+  // TODO make nil a BuiltInVar?
   // create the built in nil type
-  let nil =
-    CustomType(
-      "Nil",
-      [],
-      [Variant("Nil", fields: [])],
-      Poly([], TypeApp("Nil", [])),
-    )
+  let nil = CustomType("Nil", [], [Variant("Nil", fields: [])], Poly([], nil))
   let c = register_custom_type(c, nil)
 
   // create the built in option type
@@ -202,8 +209,8 @@ fn prelude(c: Context) -> Context {
       "List",
       ["a"],
       [
-        Variant("G_Empty", fields: []),
-        Variant("G_Cons", fields: [
+        Variant("Empty", fields: []),
+        Variant("Cons", fields: [
           Field("item", a),
           Field("next", TypeApp("List", [a])),
         ]),
@@ -229,10 +236,10 @@ fn register_custom_type(c: Context, custom: CustomType) -> Context {
       let kind = ConstructorVar(typ, v, custom)
       let n = env.put(n, v.name, #(kind, typ))
 
-      // register instanceof function
+      // register isa function
       let typ = Poly(vars, TypeFun(bool, [custom_typ]))
-      let kind = InstanceOfVar(typ, v, custom)
-      let n = env.put(n, v.name <> "_instanceof", #(kind, typ))
+      let kind = IsaVar(typ, v, custom)
+      let n = env.put(n, "isa_" <> v.name, #(kind, typ))
 
       // register getters for each field
       let #(c, n) =
@@ -296,6 +303,39 @@ pub fn infer_module(mod: g.Module) {
           def
         })
 
+      // find external functions
+      let #(ext, group) =
+        list.partition(group, fn(def) {
+          list.any(def.attributes, fn(att) {
+            case att {
+              g.Attribute("external", _) -> True
+              _ -> False
+            }
+          })
+        })
+
+      let c =
+        list.fold(ext, c, fn(c, def) {
+          let fun = def.definition
+          let assert Ok(attr) =
+            list.find(def.attributes, fn(att) {
+              case att {
+                g.Attribute("external", _) -> True
+                _ -> False
+              }
+            })
+          let assert [_, g.String(mod), g.String(name)] = attr.arguments
+          io.debug(mod)
+          io.debug(name)
+          let #(c, params, ret) = function_parameters(c, fun)
+          let params = list.map(params, fn(x) { x.typ })
+          let typ = TypeFun(ret, params)
+          let name = mod <> "__" <> name
+          //TODO finish externals - need a way of mapping to different names
+          let n = env.put(c.global_env, fun.name, #(BuiltInVar, Poly([], typ)))
+          Context(..c, global_env: n)
+        })
+
       // put the functions into env with placeholder types
       let c =
         list.fold(group, c, fn(c, fun) {
@@ -315,7 +355,7 @@ pub fn infer_module(mod: g.Module) {
         list.fold(group, #(c, []), fn(acc, def) {
           let #(c, l) = acc
           let fun = def.definition
-          let #(c, params) = function_parameters(c, fun)
+          let #(c, params, ret) = function_parameters(c, fun)
           let dummy_exp = Var(bool, "True", BuiltInVar)
           let fun = Function(fun.name, Poly([], bool), params, dummy_exp)
           let c = Context(..c, functions: [fun, ..c.functions])
@@ -483,7 +523,7 @@ fn resolve_name(
   name: String,
 ) -> #(Context, VarKind, Type) {
   case env.get(n, name) {
-    Ok(typ) -> #(c, typ.0, typ.1)
+    Ok(typ) -> #(c, LocalVar, typ)
     _ ->
       case env.get(c.global_env, name) {
         Ok(typ) -> {
@@ -553,7 +593,13 @@ fn function_parameters(c: Context, fun: g.Function) {
       #(c, [Param(label, name, typ), ..param_types])
     })
   let params = list.reverse(params)
-  #(c, params)
+
+  let #(c, ret) = case fun.return {
+    Some(ret) -> infer_type(c, type_env, ret)
+    None -> new_type_var_ref(c)
+  }
+
+  #(c, params, ret)
 }
 
 fn infer_function(
@@ -564,7 +610,7 @@ fn infer_function(
   // put params into env
   let n =
     list.fold(params, env.new(), fn(n, param) {
-      env.put(n, param.name, #(LocalVar, param.typ))
+      env.put(n, param.name, param.typ)
     })
 
   // infer body
@@ -615,14 +661,14 @@ fn infer_body(
 
           let #(c, subject_name) = new_temp_var(c)
           let subject = g.Variable(subject_name)
-          let n = env.put(n, subject_name, #(LocalVar, value.typ))
+          let n = env.put(n, subject_name, value.typ)
           let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
 
           // add bindings to environment
           let n =
             list.fold(bindings, n, fn(n, binding) {
               let #(name, value) = binding
-              env.put(n, name, #(LocalVar, value.typ))
+              env.put(n, name, value.typ)
             })
 
           // infer the rest of the body
@@ -681,13 +727,13 @@ fn infer_bind_pattern(
     g.PatternList(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.PatternConstructor(None, "G_Empty", [], False)
+        None -> g.PatternConstructor(None, "Empty", [], False)
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
           let args = [g.Field(None, x), g.Field(None, rest)]
-          g.PatternConstructor(None, "G_Cons", args, False)
+          g.PatternConstructor(None, "Cons", args, False)
         })
       infer_bind_pattern(c, n, list, subject)
     }
@@ -772,7 +818,7 @@ fn infer_check_pattern(
       }
 
       let tag_args = [g.Field(None, subject)]
-      let tag = g.Variable(cons <> "_instanceof")
+      let tag = g.Variable("isa_" <> cons)
       let #(c, check) = infer_expression(c, n, g.Call(tag, tag_args))
 
       let assert Ok(args) = list.strict_zip(args, fields)
@@ -795,13 +841,13 @@ fn infer_check_pattern(
     g.PatternList(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.PatternConstructor(None, "G_Empty", [], False)
+        None -> g.PatternConstructor(None, "Empty", [], False)
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
           let args = [g.Field(None, x), g.Field(None, rest)]
-          g.PatternConstructor(None, "G_Cons", args, False)
+          g.PatternConstructor(None, "Cons", args, False)
         })
       infer_check_pattern(c, n, list, subject)
     }
@@ -867,7 +913,8 @@ fn infer_expression(
   exp: g.Expression,
 ) -> #(Context, Exp) {
   case exp {
-    g.Int(s) -> #(c, Int(int, string.replace(s, "_", "")))
+    g.Int(s) -> #(c, Literal(int, Int(string.replace(s, "_", ""))))
+    g.String(s) -> #(c, Literal(string, String(s)))
     g.Variable(s) -> {
       // instantiate the poly type into a mono type
       let #(c, kind, typ) = resolve_name(c, n, s)
@@ -908,13 +955,13 @@ fn infer_expression(
     g.List(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.Variable("G_Empty")
+        None -> g.Variable("Empty")
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
           let args = [g.Field(None, x), g.Field(None, rest)]
-          g.Call(g.Variable("G_Cons"), args)
+          g.Call(g.Variable("Cons"), args)
         })
       infer_expression(c, n, list)
     }
@@ -1005,7 +1052,7 @@ fn infer_expression(
             None -> new_type_var_ref(c)
           }
 
-          let n = env.put(n, name, #(LocalVar, typ))
+          let n = env.put(n, name, typ)
           #(c, n, [name, ..names], [typ, ..typs])
         })
       let param_types = list.reverse(param_types)
@@ -1037,6 +1084,7 @@ fn infer_expression(
             g.GtInt -> "gt_Int"
             g.LtEqInt -> "lte_Int"
             g.GtEqInt -> "gte_Int"
+            g.Concatenate -> "append_String"
             g.Eq -> "equal"
             _ -> todo as { "binop not implemented " <> string.inspect(name) }
           }
@@ -1072,7 +1120,7 @@ fn infer_expression(
           let #(c, value) = infer_expression(c, n, subject)
           let c = exit_level(c)
           let subject_name = subject_prefix <> int.to_string(i)
-          let n = env.put(n, subject_name, #(LocalVar, value.typ))
+          let n = env.put(n, subject_name, value.typ)
           #(c, n, [#(subject_name, value), ..l])
         })
 
@@ -1117,7 +1165,7 @@ fn infer_expression(
           let n =
             list.fold(bindings, n, fn(n, binding) {
               let #(name, val) = binding
-              env.put(n, name, #(LocalVar, val.typ))
+              env.put(n, name, val.typ)
             })
 
           // infer the body
@@ -1364,7 +1412,7 @@ fn find_tvs(c: Context, t: Type) -> List(Int) {
 
 fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
   case e {
-    Int(_, _) -> #(taken, i, e)
+    Literal(_, _) -> #(taken, i, e)
     Var(_, _, _) -> #(taken, i, e)
     Call(typ, fun, args) -> {
       let #(taken, i, fun) = unshadow(taken, i, fun)
@@ -1444,7 +1492,7 @@ fn unshadow_context(c: Context) -> Context {
 
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {
   case in {
-    Int(_, _) -> in
+    Literal(_, _) -> in
     Var(typ, var, kind) ->
       case var == replace {
         True -> Var(typ, with, kind)

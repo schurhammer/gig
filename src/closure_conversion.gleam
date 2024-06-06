@@ -4,6 +4,7 @@ import gleam/list
 import monomorphise.{
   type CustomType, type Mono, CustomType, Field, MonoApp, MonoFun, Variant,
 } as mono
+import typed.{type LiteralKind}
 
 // assumptions:
 // 1. renaming has been done such that there is no shadowing
@@ -24,7 +25,7 @@ pub type Function {
 }
 
 pub type Exp {
-  Int(typ: Mono, val: String)
+  Literal(typ: Mono, val: LiteralKind)
   Var(typ: Mono, var: String)
   Call(typ: Mono, fun: Exp, arg: List(Exp))
   CallClosure(typ: Mono, fun: Exp, arg: List(Exp))
@@ -58,7 +59,7 @@ fn combine(a: List(a), b: List(a)) -> List(a) {
 
 fn fv(n: List(String), e: mono.Exp) -> List(String) {
   case e {
-    mono.Int(_, _) -> []
+    mono.Literal(_, _) -> []
     mono.Var(typ, var) -> {
       case list.contains(n, var) {
         True -> []
@@ -88,16 +89,13 @@ fn fv(n: List(String), e: mono.Exp) -> List(String) {
 
 fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
   case e {
-    mono.Int(typ, var) -> #(c, Int(typ, var))
+    mono.Literal(typ, var) -> #(c, Literal(typ, var))
     // detect functions that need to be converted to closures
     mono.Var(MonoFun(ret, params) as typ, var) -> {
       case env.has(n, var) {
         // not in local env so it must be a global function
         False -> {
-          // TODO convert!! ??
-          let null_env = Int(MonoApp("Int", []), "0")
-          let val =
-            Call(typ, Var(typ, "create_closure"), [Var(typ, var), null_env])
+          let val = Call(typ, Var(typ, "create_function"), [Var(typ, var)])
           #(c, val)
         }
         // otherwise its a closure
@@ -202,7 +200,7 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
       // create the closure object
       let fun_pointer = Var(typ, fun_name)
 
-      let new_env_fun_name = env_name <> ""
+      let new_env_fun_name = "new_" <> env_name
       let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
       let new_env_fun_type = MonoFun(env_type, env_arg_types)
       let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
