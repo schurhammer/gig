@@ -156,6 +156,13 @@ fn prelude(c: Context) -> Context {
   let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
   let n = env.put(n, "equal", #(BuiltInPolyVar(equal_type), equal_type))
 
+  let print_type = Poly([], TypeFun(string, [string]))
+  let n = env.put(n, "print", #(BuiltInVar, print_type))
+
+  let #(c, a) = new_type_var_ref(c)
+  let inspect_type = Poly([get_id(a)], TypeFun(string, [a]))
+  let n = env.put(n, "inspect", #(BuiltInPolyVar(inspect_type), inspect_type))
+
   let n = env.put(n, "lt_Int", #(BuiltInVar, Poly([], int_compop)))
   let n = env.put(n, "gt_Int", #(BuiltInVar, Poly([], int_compop)))
   let n = env.put(n, "lte_Int", #(BuiltInVar, Poly([], int_compop)))
@@ -556,10 +563,14 @@ fn function_parameters(c: Context, fun: g.Function) {
         None -> []
       }
     })
+  let vars = case fun.return {
+    Some(ret) -> list.append(find_type_vars(ret), vars)
+    None -> vars
+  }
+  let vars =
+    vars
     |> list.unique()
     |> list.sort(string.compare)
-
-  // TODO return type
 
   // create an env for the type variables
   let #(c, type_env) =

@@ -52,6 +52,13 @@ String new_String(uint8_t* bytes, int byte_length) {
   return str;
 }
 
+Bool equal_String(String a, String b) {
+  if(a.byte_length != b.byte_length) {
+    return False;
+  }
+  return strncmp(a.bytes, b.bytes, a.byte_length) == 0;
+}
+
 String append_String(String a, String b) {
   // TODO handle empty strings?
   String str;
@@ -61,6 +68,55 @@ String append_String(String a, String b) {
   memcpy(str.bytes, a.bytes, a.byte_length);
   memcpy(str.bytes + a.byte_length, b.bytes, b.byte_length);
   return str;
+}
+
+String inspect_String(String s) {
+  String q = new_String("\"", 1);
+  append_String(q, append_String(s, q));
+}
+
+String inspect_Bool(Bool b) {
+  if(b) {
+    return new_String("True", 4);
+  } else {
+    return new_String("False", 5);
+  }
+}
+
+int countDigits(int64_t num) {
+    int count = 0;
+    if (num == 0)
+        return 1;
+    while (num != 0) {
+        num /= 10;
+        count++;
+    }
+    return count;
+}
+
+String inspect_Int(Int num) {
+    int length = countDigits(num);
+    if (num < 0) {
+        length++; 
+    }
+
+    struct String result;
+    result.byte_length = length;
+    result.bytes = (uint8_t*)malloc(length);
+
+    if (num < 0) {
+        result.bytes[0] = '-';
+        num = -num;
+    }
+
+    int i = length - 1;
+    do {
+        result.bytes[i] = num % 10 + '0';
+        i = i - 1;
+        num /= 10;
+    } while (num != 0);
+
+    return result;
 }
 
 String print(String a) {
@@ -117,6 +173,10 @@ Bool is_closure(Closure c) {
 Bool equal_Closure(Closure a, Closure b)
 {
   return False;
+}
+
+String inspect_Closure(Closure c) {
+  return new_String("Closure", 7);
 }
 
 /// end of builtin

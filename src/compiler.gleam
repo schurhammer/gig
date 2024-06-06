@@ -48,8 +48,7 @@ pub fn compile(gleam_file_name: String, gc gc: Bool, release release: Bool) {
   // output the c file
   let assert [file_name, ..] = string.split(gleam_file_name, ".gleam")
   let c_file = file_name <> ".c"
-  let cmd = "echo '" <> output <> "' > " <> c_file
-  let assert Ok(_) = shellout.command("bash", ["-c", cmd], ".", [])
+  let assert Ok(_) = simplifile.write(c_file, output)
 
   // compile the c file
   let args = ["-o", file_name, c_file]

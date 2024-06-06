@@ -41,15 +41,17 @@ fn ternary(cond: String, then: String, els: String) -> String {
   "(" <> cond <> " ? " <> then <> " : " <> els <> ")"
 }
 
+fn string_lit(val: String) {
+  let size = int.to_string(string.byte_size(val))
+  "new_String(\"" <> val <> "\", " <> size <> ")"
+}
+
 fn texp(arg: Exp, target: String, id: Int) -> String {
   case arg {
     Literal(_, val) ->
       case val {
         Int(val) -> hit_target(target, val)
-        String(val) -> {
-          let size = int.to_string(string.byte_size(val))
-          hit_target(target, "new_String(\"" <> val <> "\", " <> size <> ")")
-        }
+        String(val) -> hit_target(target, string_lit(val))
       }
 
     Var(_, val) -> hit_target(target, val)
@@ -181,7 +183,8 @@ fn custom_type_forward(t: CustomType) {
         _ -> panic as "unexpected struct type with multiple variants"
       }
   }
-  typedef <> equal
+  let inspect = "String inspect_" <> t.name <> "(" <> t.name <> " a);\n"
+  typedef <> equal <> inspect
 }
 
 fn decode_arg(t: CustomType, var: String) -> String {
@@ -292,6 +295,55 @@ fn custom_type(t: CustomType) {
     <> "return True;\n"
     <> "}\n"
 
+  let inspect =
+    "String inspect_"
+    <> t.name
+    <> "("
+    <> t.name
+    <> " a) {\n"
+    <> decode_arg(t, "a")
+    <> case t.variants {
+      [v] ->
+        case t.pointer {
+          True -> "{ struct " <> v.name <> "* a = a_ptr;\n"
+          False -> ""
+        }
+        <> v.fields
+        |> list.fold(string_lit(v.name), fn(a, f) {
+          let f =
+            "inspect_" <> type_name(f.typ) <> "(a" <> access_op <> f.name <> ")"
+          "append_String(" <> a <> ", " <> f <> ")"
+        })
+        <> ";\n"
+        <> case t.pointer {
+          True -> "}\n"
+          False -> ""
+        }
+      variants ->
+        list.index_map(variants, fn(v, i) {
+          "if (a_tag == "
+          <> int.to_string(i)
+          <> ") {\n"
+          <> "struct "
+          <> v.name
+          <> "* a = a_ptr;\n"
+          <> "append_String("
+          <> v.fields
+          |> list.map(fn(f) {
+            "inspect_" <> type_name(f.typ) <> "(a" <> access_op <> f.name <> ")"
+          })
+          |> list.intersperse(string_lit(", "))
+          |> list.fold(string_lit(v.name <> "("), fn(a, f) {
+            "append_String(" <> a <> ", " <> f <> ")"
+          })
+          <> ", "
+          <> string_lit(")")
+          <> ");\n}\n"
+        })
+        |> string.concat
+    }
+    <> "}\n"
+
   let variant_definitions =
     list.index_map(t.variants, fn(v, i) {
       let tag = int.to_string(i)
@@ -382,7 +434,7 @@ fn custom_type(t: CustomType) {
     })
     |> string.concat
 
-  variant_definitions <> equal
+  variant_definitions <> equal <> inspect
 }
 
 pub fn module(mod: Module) -> String {
