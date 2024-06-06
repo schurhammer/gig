@@ -1079,9 +1079,13 @@ fn infer_expression(
     g.BinaryOperator(name, left, right) -> {
       case name {
         g.Pipe -> {
-          // TODO this doesnt work
-          let fun = g.Call(left, [g.Field(None, right)])
-          infer_expression(c, n, fun)
+          case right {
+            g.Call(fun, args) ->
+              infer_expression(c, n, g.Call(fun, [g.Field(None, left), ..args]))
+            g.Variable(_name) ->
+              infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
+            _ -> panic as "pipe to unexpected expression"
+          }
         }
         _ -> {
           let fun_name = case name {
