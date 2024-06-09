@@ -1,8 +1,11 @@
+import env
 import typed as t
 
 import gleam/io
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
+
 import pprint as pp
 
 type VarName =
@@ -60,10 +63,11 @@ pub fn run(poly: t.Context) {
   let c = Context(poly, mod, [])
 
   // ensure Nil is instantiated, since we replace unbound types with Nil
-  let assert Ok(nil) = list.find(poly.types, fn(x) { x.name == "Nil" })
+  let assert Ok(nil) =
+    list.find(poly.types, fn(x) { x.name == #(t.builtin, "Nil") })
   let c = instantiate_custom_type(c, [], nil)
 
-  let name = "main"
+  let name = #(c.poly.name, "main")
   let assert Ok(main) = list.find(poly.functions, fn(x) { x.name == name })
   let #(c, _) = instantiate_function(c, name, sub_type(c, [], main.typ.typ))
 
@@ -78,10 +82,11 @@ fn sub_type(c: Context, sub: List(#(Int, Mono)), typ: t.Type) -> Mono {
         t.Unbound(x, _level) ->
           case list.find(sub, fn(sub) { sub.0 == x }) {
             Ok(sub) -> sub.1
-            Error(_) -> MonoApp("Nil", [])
+            Error(_) -> MonoApp(global_name(#(t.builtin, "Nil")), [])
           }
       }
-    t.TypeApp(name, args) -> MonoApp(name, list.map(args, sub_type(c, sub, _)))
+    t.TypeApp(name, args) ->
+      MonoApp(global_name(name), list.map(args, sub_type(c, sub, _)))
     t.TypeFun(ret, args) ->
       MonoFun(sub_type(c, sub, ret), list.map(args, sub_type(c, sub, _)))
   }
@@ -123,7 +128,7 @@ fn get_type_string(sub: List(#(Int, Mono))) {
 
 fn instantiate_function(
   c: Context,
-  name: String,
+  name: #(String, String),
   typ: Mono,
 ) -> #(Context, String) {
   let assert Ok(fun) = list.find(c.poly.functions, fn(x) { x.name == name })
@@ -135,7 +140,7 @@ fn instantiate_function(
   // unify types to find a substitution
 
   // get the name of the instantiated function
-  let mono_name = "F_" <> fun.name <> type_string
+  let mono_name = "F_" <> global_name(fun.name) <> type_string
 
   // check if already instantiated
   case list.contains(c.done, mono_name) {
@@ -164,7 +169,7 @@ fn instantiate_custom_type(
   custom: t.CustomType,
 ) {
   let type_string = get_type_string(sub)
-  let custom_mono_name = custom.name <> type_string
+  let custom_mono_name = global_name(custom.name) <> type_string
 
   // check if custom type is already instantiated
   case list.contains(c.done, custom_mono_name) {
@@ -176,7 +181,7 @@ fn instantiate_custom_type(
       // instantiate type
       let variants =
         list.map(custom.variants, fn(v) {
-          let variant_mono_name = v.name <> type_string
+          let variant_mono_name = global_name(v.name) <> type_string
           let fields =
             list.map(v.fields, fn(f) { Field(f.name, sub_type(c, sub, f.typ)) })
           Variant(variant_mono_name, fields)
@@ -197,6 +202,13 @@ fn instantiate_custom_type(
   }
 }
 
+pub fn global_name(name: #(String, String)) -> String {
+  case name {
+    #(mod, name) if mod == t.builtin -> name
+    #(mod, name) -> string.replace(mod, "/", "_") <> "_" <> name
+  }
+}
+
 fn typed_to_mono_exp(
   c: Context,
   sub: List(#(Int, Mono)),
@@ -204,22 +216,24 @@ fn typed_to_mono_exp(
 ) -> #(Context, Exp) {
   case e {
     t.Literal(typ, v) -> #(c, Literal(sub_type(c, sub, typ), v))
-    t.Var(typ, name, kind) -> {
+    t.Var(typ, name) -> {
+      let typ = sub_type(c, sub, typ)
+      #(c, Var(typ, name))
+    }
+    t.GlobalVar(typ, name) -> {
+      let assert Ok(kind) = env.get(c.poly.global_env, name)
       let typ = sub_type(c, sub, typ)
       case kind {
-        t.LocalVar -> {
-          #(c, Var(typ, name))
-        }
-        t.BuiltInVar -> {
-          #(c, Var(typ, name))
+        t.BuiltInVar(_) -> {
+          #(c, Var(typ, name.1))
         }
         t.BuiltInPolyVar(poly) -> {
           let sub = unify_poly(c, poly, typ)
           let type_string = get_type_string(sub)
-          let mono_name = name <> type_string
+          let mono_name = global_name(name) <> type_string
           #(c, Var(typ, mono_name))
         }
-        t.FunctionVar -> {
+        t.FunctionVar(_) -> {
           let #(c, mono_name) = instantiate_function(c, name, typ)
           #(c, Var(typ, mono_name))
         }
@@ -229,7 +243,7 @@ fn typed_to_mono_exp(
           let c = instantiate_custom_type(c, sub, custom)
 
           let type_string = get_type_string(sub)
-          let mono_name = "new_" <> variant.name <> type_string
+          let mono_name = global_name(variant.name) <> type_string <> "_NEW"
 
           #(c, Var(typ, mono_name))
         }
@@ -239,7 +253,7 @@ fn typed_to_mono_exp(
           let c = instantiate_custom_type(c, sub, custom)
 
           let type_string = get_type_string(sub)
-          let mono_name = "isa_" <> variant.name <> type_string
+          let mono_name = global_name(variant.name) <> type_string <> "_IS"
 
           #(c, Var(typ, mono_name))
         }
@@ -249,7 +263,8 @@ fn typed_to_mono_exp(
           let c = instantiate_custom_type(c, sub, custom)
 
           let type_string = get_type_string(sub)
-          let mono_name = variant.name <> type_string <> "_" <> field.name
+          let mono_name =
+            global_name(variant.name) <> type_string <> "_" <> field.name
 
           #(c, Var(typ, mono_name))
         }
@@ -310,9 +325,17 @@ fn unify_type(c: Context, poly: t.Type, mono: Mono) -> List(#(Int, Mono)) {
         t.Bound(x) -> unify_type(c, x, mono)
         t.Unbound(x, _) -> [#(x, mono)]
       }
-    t.TypeApp(a, aa), MonoApp(b, ba) if a == b ->
-      list.zip(aa, ba)
-      |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) })
+    t.TypeApp(a, aa), MonoApp(b, ba) ->
+      case global_name(a) {
+        a if a == b ->
+          list.zip(aa, ba)
+          |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) })
+        _ -> {
+          io.debug(poly)
+          io.debug(mono)
+          panic as "could not unify types"
+        }
+      }
     t.TypeFun(ar, aa), MonoFun(br, ba) ->
       list.append(
         unify_type(c, ar, br),

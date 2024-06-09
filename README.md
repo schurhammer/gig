@@ -4,11 +4,9 @@ Gig is a gleam compiler written in gleam. Made with fairy dust and duct tape.
 
 ## How to use
 
-`gleam run -m gig program.gleam [--nogc] [--release]`
+`gleam run -m gig example.gleam [--nogc] [--release]`
 
-This will compile the file to `program.c` and then use gcc to compile to a binary named `program`.
-
-Note: at the moment `program.gleam` must be a standalone gleam file. Imports are not supported yet.
+This will compile the file to `example.c` and then use gcc to create a binary named `example`.
 
 Optional flags:
 - nogc: disable garbage collection
@@ -16,30 +14,30 @@ Optional flags:
 
 Dependencies:
 - gcc is used to compile to binary
-- Boehm GC library needs to be installed (or use --nogc)
+- Boehm GC library needs to be available (unless you use --nogc)
 
 ## Feature / Todo List
 
 ### Basics
 
-- [ ] Modules
+- [x] Modules (note: modules are resolved relative to the root file)
 - [ ] Unqualified imports
 - [x] Bools
 - [x] Ints
 - [ ] Floats
 - [ ] Number formats
-- [ ] Strings
+- [x] Strings
 - [x] Lists
 - [x] Equality
 - [x] Assignments
 - [x] Discard patterns
 - [x] Type inference
-- [x] Type annotations (note: only for function parameters)
+- [x] Type annotations
 - [ ] Type imports
 - [ ] Type aliases
 - [x] Blocks
 - [ ] Constants
-- [ ] Memory Management (GC/RC)
+- [x] Memory Management (GC/RC)
 
 ### Functions
 
@@ -48,7 +46,7 @@ Dependencies:
 - [x] Anonymous functions
 - [ ] Function captures
 - [x] Generic functions
-- [ ] Pipelines
+- [x] Pipelines
 - [x] Labelled arguments
 - [ ] Documentation comments
 - [ ] Deprecations
@@ -64,7 +62,7 @@ Dependencies:
 - [ ] Tail calls
 - [x] Multiple subjects
 - [x] Alternative patterns
-- [ ] Pattern aliases
+- [x] Pattern aliases
 - [ ] Guards
 - [ ] Exhaustiveness checking
 

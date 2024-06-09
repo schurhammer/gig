@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-/// INCLUDES///
+///INCLUDES///
 
 /// builtin
 
@@ -44,7 +44,7 @@ struct String {
   uint8_t* bytes;
 };
 
-String new_String(uint8_t* bytes, int byte_length) {
+String String_NEW(uint8_t* bytes, int byte_length) {
   // TODO handle empty strings?
   String str;
   str.byte_length = byte_length;
@@ -71,15 +71,15 @@ String append_String(String a, String b) {
 }
 
 String inspect_String(String s) {
-  String q = new_String("\"", 1);
+  String q = String_NEW("\"", 1);
   append_String(q, append_String(s, q));
 }
 
 String inspect_Bool(Bool b) {
   if(b) {
-    return new_String("True", 4);
+    return String_NEW("True", 4);
   } else {
-    return new_String("False", 5);
+    return String_NEW("False", 5);
   }
 }
 
@@ -176,7 +176,7 @@ Bool equal_Closure(Closure a, Closure b)
 }
 
 String inspect_Closure(Closure c) {
-  return new_String("Closure", 7);
+  return String_NEW("Closure", 7);
 }
 
 /// end of builtin
@@ -191,7 +191,6 @@ String inspect_Closure(Closure c) {
 
 Int main()
 {
-  /// INIT///
-  F_main();
+  ///INIT///
   return 0;
 }

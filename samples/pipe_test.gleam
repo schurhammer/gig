@@ -4,8 +4,8 @@ pub fn main() {
   10
   |> sub(3)
   |> sub(2)
-  |> inspect()
-  |> print()
+  |> inspect
+  |> print
 }
 
 fn sub(a, b) {

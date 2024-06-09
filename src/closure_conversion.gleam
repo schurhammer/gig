@@ -165,7 +165,7 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
       // create global function
       let id = int.to_string(c.uid)
       let fun_name = "Closure_" <> id
-      let env_name = "Env_" <> id
+      let env_name = "ClosureEnv_" <> id
       let env_type = MonoApp(env_name, [])
 
       let fun_params = [env_name, ..vars]
@@ -200,7 +200,7 @@ fn cc(c: CC, n: Env, e: mono.Exp) -> #(CC, Exp) {
       // create the closure object
       let fun_pointer = Var(typ, fun_name)
 
-      let new_env_fun_name = "new_" <> env_name
+      let new_env_fun_name = env_name <> "_NEW"
       let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
       let new_env_fun_type = MonoFun(env_type, env_arg_types)
       let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })

@@ -281,7 +281,7 @@ fn do_foldr(node: Node(k, v), acc: a, fun: fn(a, k, v) -> a) -> a {
 
 pub fn main() {
   let assert Ok(m) = glance.module(input)
-  let m = typed.infer_module(m)
+  let m = typed.infer_module(typed.prelude_context(), m)
   let m = monomorphise.run(m)
   let m = closure_conversion.cc_module(m)
   let c = codegen.module(m)

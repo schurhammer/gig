@@ -7,7 +7,7 @@ import glance as g
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 
 pub type TypeVarRef {
@@ -15,7 +15,7 @@ pub type TypeVarRef {
 }
 
 pub type Function {
-  Function(name: String, typ: Poly, params: List(Param), body: Exp)
+  Function(name: #(String, String), typ: Poly, params: List(Param), body: Exp)
 }
 
 pub type Param {
@@ -38,7 +38,7 @@ pub type Getter {
 
 pub type CustomType {
   CustomType(
-    name: String,
+    name: #(String, String),
     params: List(String),
     variants: List(Variant),
     typ: Poly,
@@ -46,7 +46,7 @@ pub type CustomType {
 }
 
 pub type Variant {
-  Variant(name: String, fields: List(Field))
+  Variant(name: #(String, String), fields: List(Field))
 }
 
 pub type Field {
@@ -55,10 +55,9 @@ pub type Field {
 
 // TODO maybe these could reference the function / custom type they need
 // then maybe we can skip some lookups
-pub type VarKind {
-  LocalVar
-  FunctionVar
-  BuiltInVar
+pub type GlobalVar {
+  FunctionVar(poly: Poly)
+  BuiltInVar(poly: Poly)
   BuiltInPolyVar(poly: Poly)
   ConstructorVar(poly: Poly, variant: Variant, custom: CustomType)
   IsaVar(poly: Poly, variant: Variant, custom: CustomType)
@@ -72,7 +71,8 @@ pub type LiteralKind {
 
 pub type Exp {
   Literal(typ: Type, value: LiteralKind)
-  Var(typ: Type, var: String, kind: VarKind)
+  Var(typ: Type, var: String)
+  GlobalVar(typ: Type, var: #(String, String))
   Call(typ: Type, fun: Exp, args: List(Exp))
   Fn(typ: Type, var: List(String), exp: Exp)
   // TODO The way bindings work in the compiler limits what actually ends up
@@ -88,7 +88,7 @@ pub type Poly {
 
 pub type Type {
   TypeVar(var: TypeVarRef)
-  TypeApp(typ: String, args: List(Type))
+  TypeApp(typ: #(String, String), args: List(Type))
   TypeFun(ret: Type, args: List(Type))
 }
 
@@ -105,11 +105,14 @@ pub type TypeVarEnv =
 
 pub type Context {
   Context(
+    name: String,
     type_vars: TypeVarEnv,
     types: List(CustomType),
     functions: List(Function),
-    // TODO can/should global env replace the functions and types list?
-    global_env: Env(String, #(VarKind, Poly)),
+    // TODO can/should global env replace the functions and types list or vice versa?
+    module_names: Env(String, String),
+    type_env: Env(#(String, String), CustomType),
+    global_env: Env(#(String, String), GlobalVar),
     type_uid: Int,
     temp_uid: Int,
     // TODO I think we technically only need two levels
@@ -119,13 +122,15 @@ pub type Context {
   )
 }
 
-const nil = TypeApp("Nil", [])
+pub const builtin = ""
 
-const int = TypeApp("Int", [])
+const nil = TypeApp(#(builtin, "Nil"), [])
 
-const bool = TypeApp("Bool", [])
+const int = TypeApp(#(builtin, "Int"), [])
 
-const string = TypeApp("String", [])
+const bool = TypeApp(#(builtin, "Bool"), [])
+
+const string = TypeApp(#(builtin, "String"), [])
 
 const bool_binop = TypeFun(bool, [bool, bool])
 
@@ -141,88 +146,117 @@ const string_binop = TypeFun(string, [string, string])
 
 const panic_ast = g.Call(g.Variable("panic"), [])
 
+const true_constructor = GlobalVar(bool, #(builtin, "True"))
+
 fn get_id(a: Type) -> Int {
   let assert TypeVar(a) = a
   a.id
 }
 
-fn prelude(c: Context) -> Context {
-  let n = c.global_env
+// add to global env in the current module
+fn put_global_env(c: Context, name: String, kind: GlobalVar) -> Context {
+  Context(..c, global_env: env.put(c.global_env, #(c.name, name), kind))
+}
 
+// look up a global name where the module might be aliased
+fn resolve_alias(c: Context, name: #(String, String)) {
+  let name = case env.get(c.module_names, name.0) {
+    Ok(mod) -> #(mod, name.1)
+    _ -> name
+  }
+  case env.get(c.global_env, name) {
+    Ok(var) -> Ok(#(name, var))
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn prelude(c: Context) -> Context {
   let #(c, a) = new_type_var_ref(c)
-  let n = env.put(n, "panic", #(BuiltInVar, Poly([get_id(a)], TypeFun(a, []))))
+  let poly = Poly([get_id(a)], TypeFun(a, []))
+  let c = put_global_env(c, "panic", BuiltInVar(poly))
 
   let #(c, a) = new_type_var_ref(c)
   let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
-  let n = env.put(n, "equal", #(BuiltInPolyVar(equal_type), equal_type))
+  let c = put_global_env(c, "equal", BuiltInPolyVar(equal_type))
 
   let print_type = Poly([], TypeFun(string, [string]))
-  let n = env.put(n, "print", #(BuiltInVar, print_type))
+  let c = put_global_env(c, "print", BuiltInVar(print_type))
 
   let #(c, a) = new_type_var_ref(c)
   let inspect_type = Poly([get_id(a)], TypeFun(string, [a]))
-  let n = env.put(n, "inspect", #(BuiltInPolyVar(inspect_type), inspect_type))
+  let c = put_global_env(c, "inspect", BuiltInPolyVar(inspect_type))
 
-  let n = env.put(n, "lt_Int", #(BuiltInVar, Poly([], int_compop)))
-  let n = env.put(n, "gt_Int", #(BuiltInVar, Poly([], int_compop)))
-  let n = env.put(n, "lte_Int", #(BuiltInVar, Poly([], int_compop)))
-  let n = env.put(n, "gte_Int", #(BuiltInVar, Poly([], int_compop)))
+  let c = put_global_env(c, "lt_Int", BuiltInVar(Poly([], int_compop)))
+  let c = put_global_env(c, "gt_Int", BuiltInVar(Poly([], int_compop)))
+  let c = put_global_env(c, "lte_Int", BuiltInVar(Poly([], int_compop)))
+  let c = put_global_env(c, "gte_Int", BuiltInVar(Poly([], int_compop)))
+  let c = put_global_env(c, "add_Int", BuiltInVar(Poly([], int_binop)))
+  let c = put_global_env(c, "sub_Int", BuiltInVar(Poly([], int_binop)))
+  let c = put_global_env(c, "mul_Int", BuiltInVar(Poly([], int_binop)))
+  let c = put_global_env(c, "div_Int", BuiltInVar(Poly([], int_binop)))
 
-  let n = env.put(n, "add_Int", #(BuiltInVar, Poly([], int_binop)))
-  let n = env.put(n, "sub_Int", #(BuiltInVar, Poly([], int_binop)))
-  let n = env.put(n, "mul_Int", #(BuiltInVar, Poly([], int_binop)))
-  let n = env.put(n, "div_Int", #(BuiltInVar, Poly([], int_binop)))
+  let c = put_global_env(c, "negate_Int", BuiltInVar(Poly([], int_uop)))
 
-  let n = env.put(n, "negate_Int", #(BuiltInVar, Poly([], int_uop)))
+  let c = put_global_env(c, "and_Bool", BuiltInVar(Poly([], bool_binop)))
+  let c = put_global_env(c, "True", BuiltInVar(Poly([], bool)))
+  let c = put_global_env(c, "False", BuiltInVar(Poly([], bool)))
+  let c = put_global_env(c, "negate_Bool", BuiltInVar(Poly([], bool_uop)))
+  let c = put_global_env(c, "isa_True", BuiltInVar(Poly([], bool_uop)))
+  let c = put_global_env(c, "isa_False", BuiltInVar(Poly([], bool_uop)))
 
-  let n = env.put(n, "and_Bool", #(BuiltInVar, Poly([], bool_binop)))
-  let n = env.put(n, "True", #(BuiltInVar, Poly([], bool)))
-  let n = env.put(n, "False", #(BuiltInVar, Poly([], bool)))
-  let n = env.put(n, "negate_Bool", #(BuiltInVar, Poly([], bool_uop)))
-  let n = env.put(n, "isa_True", #(BuiltInVar, Poly([], bool_uop)))
-  let n = env.put(n, "isa_False", #(BuiltInVar, Poly([], bool_uop)))
-
-  let n = env.put(n, "append_String", #(BuiltInVar, Poly([], string_binop)))
-
-  let c = Context(..c, global_env: n)
+  let c = put_global_env(c, "append_String", BuiltInVar(Poly([], string_binop)))
 
   // TODO make nil a BuiltInVar?
   // create the built in nil type
-  let nil = CustomType("Nil", [], [Variant("Nil", fields: [])], Poly([], nil))
+  let nil =
+    CustomType(
+      #(builtin, "Nil"),
+      [],
+      [Variant(#(builtin, "Nil"), fields: [])],
+      Poly([], nil),
+    )
   let c = register_custom_type(c, nil)
 
-  // create the built in option type
+  // create the built in bool type
+  let bool = CustomType(#(builtin, "Bool"), [], [], Poly([], bool))
+  let c = register_custom_type(c, bool)
+
+  // create the built in int type
+  let int = CustomType(#(builtin, "Int"), [], [], Poly([], int))
+  let c = register_custom_type(c, int)
+
+  // create the built in result type
   let #(c, a) = new_type_var_ref(c)
   let #(c, b) = new_type_var_ref(c)
   let assert TypeVar(a_ref) = a
   let assert TypeVar(b_ref) = b
-  let option =
+  let result =
     CustomType(
-      "Option",
+      #(builtin, "Result"),
       ["a", "b"],
       [
-        Variant("Ok", fields: [Field("value", a)]),
-        Variant("Error", fields: [Field("error", b)]),
+        Variant(#(builtin, "Ok"), fields: [Field("value", a)]),
+        Variant(#(builtin, "Error"), fields: [Field("error", b)]),
       ],
-      Poly([a_ref.id, b_ref.id], TypeApp("Option", [a, b])),
+      Poly([a_ref.id, b_ref.id], TypeApp(#(builtin, "Result"), [a, b])),
     )
-  let c = register_custom_type(c, option)
+  let c = register_custom_type(c, result)
 
   // create the built in list type
   let #(c, a) = new_type_var_ref(c)
   let assert TypeVar(ref) = a
   let list =
     CustomType(
-      "List",
+      #(builtin, "List"),
       ["a"],
       [
-        Variant("Empty", fields: []),
-        Variant("Cons", fields: [
+        Variant(#(builtin, "Empty"), fields: []),
+        Variant(#(builtin, "Cons"), fields: [
           Field("item", a),
-          Field("next", TypeApp("List", [a])),
+          Field("next", TypeApp(#(builtin, "List"), [a])),
         ]),
       ],
-      Poly([ref.id], TypeApp("List", [a])),
+      Poly([ref.id], TypeApp(#(builtin, "List"), [a])),
     )
   let c = register_custom_type(c, list)
 
@@ -230,10 +264,9 @@ fn prelude(c: Context) -> Context {
 }
 
 fn register_custom_type(c: Context, custom: CustomType) -> Context {
+  let c = Context(..c, type_env: env.put(c.type_env, custom.name, custom))
   let c =
     list.fold(custom.variants, c, fn(c, v) {
-      let n = c.global_env
-
       // register constructor function
       let vars = custom.typ.vars
       let custom_typ = custom.typ.typ
@@ -241,45 +274,53 @@ fn register_custom_type(c: Context, custom: CustomType) -> Context {
 
       let typ = Poly(vars, TypeFun(custom_typ, args))
       let kind = ConstructorVar(typ, v, custom)
-      let n = env.put(n, v.name, #(kind, typ))
+      let c = put_global_env(c, v.name.1, kind)
 
       // register isa function
       let typ = Poly(vars, TypeFun(bool, [custom_typ]))
       let kind = IsaVar(typ, v, custom)
-      let n = env.put(n, "isa_" <> v.name, #(kind, typ))
+      let c = put_global_env(c, "isa_" <> v.name.1, kind)
 
       // register getters for each field
-      let #(c, n) =
-        list.fold(v.fields, #(c, n), fn(acc, f) {
-          let #(c, n) = acc
-          let getter_name = v.name <> "_" <> f.name
-          let typ = Poly(vars, TypeFun(f.typ, [custom_typ]))
-          let kind = GetterVar(typ, f, v, custom)
-          let n = env.put(n, getter_name, #(kind, typ))
-          #(c, n)
-        })
-
-      Context(..c, global_env: n)
+      list.fold(v.fields, c, fn(c, f) {
+        let getter_name = v.name.1 <> "_" <> f.name
+        let typ = Poly(vars, TypeFun(f.typ, [custom_typ]))
+        let kind = GetterVar(typ, f, v, custom)
+        put_global_env(c, getter_name, kind)
+      })
     })
 
   Context(..c, types: [custom, ..c.types])
 }
 
-pub fn infer_module(mod: g.Module) {
+pub fn prelude_context() {
   let c =
     Context(
+      name: builtin,
       type_vars: env.new(),
       types: [],
       functions: [],
+      module_names: env.new(),
+      type_env: env.new(),
       global_env: env.new(),
       type_uid: 1000,
       temp_uid: 0,
       level: 0,
     )
 
-  let c = prelude(c)
+  prelude(c)
+}
 
-  // types
+pub fn infer_module(c: Context, mod: g.Module) {
+  // add dummy types so they can reference eachother
+  let c =
+    list.fold(mod.custom_types, c, fn(c, def) {
+      let ct = def.definition
+      let dummy = Poly([], TypeApp(#(builtin, "Dummy"), []))
+      let dummy = CustomType(#(c.name, ct.name), [], [], dummy)
+      Context(..c, type_env: env.put(c.type_env, #(c.name, ct.name), dummy))
+    })
+  // now add types fr
   let c =
     list.fold(mod.custom_types, c, fn(c, def) {
       let #(c, custom) = infer_custom_type(c, def.definition)
@@ -332,25 +373,20 @@ pub fn infer_module(mod: g.Module) {
               }
             })
           let assert [_, g.String(mod), g.String(name)] = attr.arguments
-          io.debug(mod)
-          io.debug(name)
           let #(c, params, ret) = function_parameters(c, fun)
           let params = list.map(params, fn(x) { x.typ })
           let typ = TypeFun(ret, params)
           let name = mod <> "__" <> name
           //TODO finish externals - need a way of mapping to different names
-          let n = env.put(c.global_env, fun.name, #(BuiltInVar, Poly([], typ)))
-          Context(..c, global_env: n)
+          put_global_env(c, fun.name, BuiltInVar(Poly([], typ)))
         })
 
       // put the functions into env with placeholder types
       let c =
         list.fold(group, c, fn(c, fun) {
           let #(c, typ) = new_type_var_ref(c)
-          let n = c.global_env
-          let kind = FunctionVar
-          let n = env.put(n, fun.definition.name, #(kind, Poly([], typ)))
-          Context(..c, global_env: n)
+          let kind = FunctionVar(Poly([], typ))
+          put_global_env(c, fun.definition.name, kind)
         })
 
       // TODO better way to access function params while inferring
@@ -363,8 +399,9 @@ pub fn infer_module(mod: g.Module) {
           let #(c, l) = acc
           let fun = def.definition
           let #(c, params, ret) = function_parameters(c, fun)
-          let dummy_exp = Var(bool, "True", BuiltInVar)
-          let fun = Function(fun.name, Poly([], bool), params, dummy_exp)
+          let dummy_exp = true_constructor
+          let fun =
+            Function(#(c.name, fun.name), Poly([], bool), params, dummy_exp)
           let c = Context(..c, functions: [fun, ..c.functions])
           #(c, [#(def, params), ..l])
         })
@@ -391,7 +428,6 @@ pub fn infer_module(mod: g.Module) {
       let #(c, group) =
         list.fold(group, #(c, []), fn(acc, fun) {
           let #(c, group) = acc
-          let n = c.global_env
 
           let Function(name, typ, params, body) = fun
 
@@ -403,9 +439,8 @@ pub fn infer_module(mod: g.Module) {
 
           // update the env with generalised type
           let fun = Function(name, gen, params, body)
-          let kind = FunctionVar
-          let n = env.put(n, name, #(kind, gen))
-          let c = Context(..c, global_env: n)
+          let kind = FunctionVar(gen)
+          let c = put_global_env(c, name.1, kind)
           #(c, [fun, ..group])
         })
 
@@ -464,9 +499,9 @@ fn infer_custom_type(c: Context, ct: g.CustomType) {
   // create a poly type
   let type_args = list.map(param_types, fn(x) { x.1 })
   let type_params = list.map(param_types, fn(x) { x.2 })
-  let typ = Poly(type_params, TypeApp(ct.name, type_args))
+  let typ = Poly(type_params, TypeApp(#(c.name, ct.name), type_args))
 
-  #(c, CustomType(ct.name, ct.parameters, variants, typ))
+  #(c, CustomType(#(c.name, ct.name), ct.parameters, variants, typ))
 }
 
 fn infer_variant(c: Context, n: Env(String, Type), variant: g.Variant) {
@@ -482,7 +517,32 @@ fn infer_variant(c: Context, n: Env(String, Type), variant: g.Variant) {
     })
   let fields = list.reverse(fields)
 
-  #(c, Variant(variant.name, fields))
+  #(c, Variant(#(c.name, variant.name), fields))
+}
+
+fn resolve_type_name(
+  c: Context,
+  mod: Option(String),
+  name: String,
+) -> #(String, String) {
+  case mod {
+    Some(mod) ->
+      case env.get(c.type_env, #(mod, name)) {
+        Ok(custom) -> custom.name
+        _ -> panic as { "could not resolve type " <> mod <> "." <> name }
+      }
+    None ->
+      // check this module
+      case env.get(c.type_env, #(c.name, name)) {
+        Ok(typ) -> typ.name
+        _ ->
+          // check prelude
+          case env.get(c.type_env, #(builtin, name)) {
+            Ok(typ) -> typ.name
+            _ -> panic as { "could not resolve type " <> name }
+          }
+      }
+  }
 }
 
 fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) -> #(Context, Type) {
@@ -496,6 +556,7 @@ fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) -> #(Context, Type)
           #(c, [p, ..l])
         })
       let params = list.reverse(params)
+      let name = resolve_type_name(c, module, name)
       #(c, TypeApp(name, params))
     }
     g.TupleType(elements) -> {
@@ -523,21 +584,85 @@ fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) -> #(Context, Type)
   }
 }
 
-/// Find a name from the local env or global env. Instantiate if it's a poly type.
+type ResolvedAccess {
+  FieldAccess(variant: Variant, field: Field, typ: Type)
+  ModuleAccess(name: #(String, String), typ: Poly)
+}
+
+fn find_custom_type(
+  c: Context,
+  name: #(String, String),
+) -> Result(CustomType, Nil) {
+  list.find(c.types, fn(x) { x.name == name })
+}
+
+fn find_field(variant: Variant, name: String) -> Result(Field, Nil) {
+  list.find(variant.fields, fn(x) { x.name == name })
+}
+
+/// Find a name from the local env or global env. Instantiate if needed.
+fn resolve_access(
+  c: Context,
+  n: LocalEnv,
+  qualifier: String,
+  name: String,
+) -> Result(ResolvedAccess, String) {
+  let res = resolve_name(c, n, qualifier)
+  let field_access = case res {
+    Ok(LocalName(_local, typ)) -> {
+      case resolve_type(c, typ) {
+        TypeApp(custom_name, _typ) ->
+          case find_custom_type(c, custom_name) {
+            Ok(custom) ->
+              case custom.variants {
+                [variant] ->
+                  case find_field(variant, name) {
+                    Ok(field) -> Ok(FieldAccess(variant, field, field.typ))
+                    _ -> Error(Nil)
+                  }
+                _ -> Error(Nil)
+              }
+            _ -> Error(Nil)
+          }
+        _ -> Error(Nil)
+      }
+    }
+    _ -> Error(Nil)
+  }
+  case field_access {
+    Ok(field_access) -> Ok(field_access)
+    // not a field access, try module access
+    _ ->
+      case resolve_alias(c, #(qualifier, name)) {
+        Ok(#(name, var)) -> Ok(ModuleAccess(name, var.poly))
+        _ -> Error("could not resolve name " <> qualifier <> "." <> name)
+      }
+  }
+}
+
+type ResolvedName {
+  LocalName(name: String, typ: Type)
+  GlobalName(name: #(String, String), typ: GlobalVar)
+}
+
 fn resolve_name(
   c: Context,
   n: LocalEnv,
   name: String,
-) -> #(Context, VarKind, Type) {
+) -> Result(ResolvedName, String) {
   case env.get(n, name) {
-    Ok(typ) -> #(c, LocalVar, typ)
+    // try local env
+    Ok(typ) -> Ok(LocalName(name, typ))
     _ ->
-      case env.get(c.global_env, name) {
-        Ok(typ) -> {
-          let #(c, inst) = instantiate(c, typ.1)
-          #(c, typ.0, inst)
-        }
-        _ -> panic as { "could not resolve name " <> name }
+      // try global env
+      case resolve_alias(c, #(c.name, name)) {
+        Ok(#(name, typ)) -> Ok(GlobalName(name, typ))
+        // try prelude
+        _ ->
+          case resolve_alias(c, #(builtin, name)) {
+            Ok(#(name, typ)) -> Ok(GlobalName(name, typ))
+            _ -> Error("could not resolve name " <> name)
+          }
       }
   }
 }
@@ -631,11 +756,14 @@ fn infer_function(
   let types = list.map(params, fn(x) { x.typ })
   let typ = TypeFun(body.typ, types)
 
-  // TODO access poly without env.get
-  let assert Ok(#(_, poly)) = env.get(c.global_env, fun.name)
-  let c = unify(c, typ, poly.typ)
+  // TODO access poly without env.get (pass in?)
+  // TODO this unify (and type variable) is only needed for recursive functions
+  let assert Ok(#(_name, var)) = resolve_alias(c, #(c.name, fun.name))
+  let c = unify(c, typ, var.poly.typ)
 
-  let fun = Function(fun.name, poly, params, body)
+  // this is not yet the final function definition
+  // the final version will be generalised after the recursive group is finished
+  let fun = Function(#(c.name, fun.name), var.poly, params, body)
 
   #(c, fun)
 }
@@ -749,7 +877,8 @@ fn infer_bind_pattern(
       infer_bind_pattern(c, n, list, subject)
     }
     g.PatternConstructor(_mod, cons, args, _spread) -> {
-      let #(c, cons, _typ) = resolve_name(c, n, cons)
+      let assert Ok(GlobalName(name, cons)) = resolve_name(c, n, cons)
+
       case cons {
         ConstructorVar(_, variant, _) -> {
           // match labels
@@ -772,7 +901,7 @@ fn infer_bind_pattern(
             list.fold(args, #(c, []), fn(acc, x) {
               let #(c, args) = acc
               let #(field, pattern) = x
-              let getter_name = variant.name <> "_" <> field.name
+              let getter_name = variant.name.1 <> "_" <> field.name
               let getter_args = [g.Field(None, subject)]
               let subject = g.Call(g.Variable(getter_name), getter_args)
               let #(c, arg) = infer_bind_pattern(c, n, pattern.item, subject)
@@ -780,10 +909,10 @@ fn infer_bind_pattern(
             })
           #(c, list.flatten(args))
         }
-        BuiltInVar -> #(c, [])
+        BuiltInVar(_) -> #(c, [])
         _ -> {
           io.debug(pattern)
-          todo as "not implemented"
+          panic as "expected a constructor"
         }
       }
     }
@@ -805,9 +934,9 @@ fn infer_check_pattern(
       let args = [g.Field(None, g.Int(value)), g.Field(None, subject)]
       infer_expression(c, n, g.Call(g.Variable("equal"), args))
     }
-    g.PatternDiscard(_) -> #(c, Var(bool, "True", BuiltInVar))
-    g.PatternVariable(_) -> #(c, Var(bool, "True", BuiltInVar))
-    g.PatternAssignment(_, _) -> #(c, Var(bool, "True", BuiltInVar))
+    g.PatternDiscard(_) -> #(c, true_constructor)
+    g.PatternVariable(_) -> #(c, true_constructor)
+    g.PatternAssignment(_, _) -> #(c, true_constructor)
     g.PatternTuple(args) -> {
       let size = list.length(args)
       let type_name = "Tuple" <> int.to_string(size)
@@ -817,14 +946,14 @@ fn infer_check_pattern(
     }
     g.PatternConstructor(_mod, cons, args, _spread) -> {
       // constructor match
-      let #(c, kind, _typ) = resolve_name(c, n, cons)
+      let assert Ok(GlobalName(_name, kind)) = resolve_name(c, n, cons)
 
       let fields = case kind {
         ConstructorVar(_poly, variant, _custom) -> variant.fields
-        BuiltInVar -> []
+        BuiltInVar(_) -> []
         _ -> {
           io.debug(kind)
-          panic as "unexpected constructor"
+          panic as "expected a constructor"
         }
       }
 
@@ -886,7 +1015,7 @@ fn range(a, b) {
 
 fn register_tuple(c: Context, size: Int) -> #(Context, String) {
   let type_name = "Tuple" <> int.to_string(size)
-  let c = case list.find(c.types, fn(x) { x.name == type_name }) {
+  let c = case find_custom_type(c, #(builtin, type_name)) {
     Ok(_) -> c
     Error(_) -> {
       let #(c, fields) =
@@ -906,9 +1035,9 @@ fn register_tuple(c: Context, size: Int) -> #(Context, String) {
       let params = list.map(fields, fn(f) { f.name })
       let type_params = list.map(fields, fn(f) { f.typ })
 
-      let variant = Variant(type_name, fields)
-      let poly = Poly(vars, TypeApp(type_name, type_params))
-      let custom = CustomType(type_name, params, [variant], poly)
+      let variant = Variant(#(builtin, type_name), fields)
+      let poly = Poly(vars, TypeApp(#(builtin, type_name), type_params))
+      let custom = CustomType(#(builtin, type_name), params, [variant], poly)
 
       let c = register_custom_type(c, custom)
 
@@ -928,10 +1057,12 @@ fn infer_expression(
     g.String(s) -> #(c, Literal(string, String(s)))
     g.Variable(s) -> {
       // instantiate the poly type into a mono type
-      let #(c, kind, typ) = resolve_name(c, n, s)
-      case kind {
-        ConstructorVar(_, Variant(_, []), _) -> {
-          let var = Var(typ, s, kind)
+      let assert Ok(resolved) = resolve_name(c, n, s)
+      case resolved {
+        // handle 0-arg constructors
+        GlobalName(name, ConstructorVar(poly, Variant(_, []), _)) -> {
+          let #(c, typ) = instantiate(c, poly)
+          let var = GlobalVar(typ, name)
 
           // new var for the return type
           let #(c, ret) = new_type_var_ref(c)
@@ -941,8 +1072,12 @@ fn infer_expression(
 
           #(c, Call(ret, var, []))
         }
-        _ -> {
-          #(c, Var(typ, s, kind))
+        GlobalName(name, var) -> {
+          let #(c, typ) = instantiate(c, var.poly)
+          #(c, GlobalVar(typ, name))
+        }
+        LocalName(name, typ) -> {
+          #(c, Var(typ, name))
         }
       }
     }
@@ -985,9 +1120,9 @@ fn infer_expression(
       // handle labeled arguments
       let args = case fun {
         g.Variable(name) -> {
-          let #(c, kind, typ) = resolve_name(c, n, name)
-          case kind {
-            FunctionVar -> {
+          let assert Ok(resolved) = resolve_name(c, n, name)
+          case resolved {
+            GlobalName(name, FunctionVar(_)) -> {
               // TODO not sure if this algorithm is canon
               // match labels
               let assert Ok(fun) =
@@ -1005,7 +1140,7 @@ fn infer_expression(
                 x.0
               })
             }
-            ConstructorVar(_, variant, _) -> {
+            GlobalName(name, ConstructorVar(_, variant, _)) -> {
               // match labels
               let args = list.index_map(args, fn(x, i) { #(x, i) })
               list.index_map(variant.fields, fn(field, i) {
@@ -1150,7 +1285,7 @@ fn infer_expression(
           let #(c, cond_exp) =
             list.index_fold(
               patterns,
-              #(c, Var(bool, "True", BuiltInVar)),
+              #(c, true_constructor),
               fn(acc, pattern, i) {
                 let #(c, last_e) = acc
 
@@ -1206,6 +1341,23 @@ fn infer_expression(
 
       #(c, e)
     }
+    g.FieldAccess(g.Variable(name), field) -> {
+      let resolved = resolve_access(c, n, name, field)
+      case resolved {
+        Ok(FieldAccess(variant, field, typ)) -> {
+          let getter_name = variant.name.1 <> "_" <> field.name
+          let getter_call =
+            g.Call(g.Variable(getter_name), [g.Field(None, g.Variable(name))])
+          let #(c, exp) = infer_expression(c, n, getter_call)
+          #(c, exp)
+        }
+        Ok(ModuleAccess(name, poly)) -> {
+          let #(c, typ) = instantiate(c, poly)
+          #(c, GlobalVar(typ, name))
+        }
+        _ -> panic as { "could not resolve name " <> name }
+      }
+    }
     g.FieldAccess(value, field) -> {
       let #(c, exp) = infer_expression(c, n, value)
       let assert TypeApp(type_name, _) = resolve_type(c, exp.typ)
@@ -1214,7 +1366,7 @@ fn infer_expression(
       let assert Ok(custom) = list.find(c.types, fn(x) { x.name == type_name })
       let assert [variant] = custom.variants
 
-      let getter_name = variant.name <> "_" <> field
+      let getter_name = variant.name.1 <> "_" <> field
 
       let getter_call = g.Call(g.Variable(getter_name), [g.Field(None, value)])
       let #(c, exp) = infer_expression(c, n, getter_call)
@@ -1254,11 +1406,11 @@ fn is_bound(c: Context, a: Type) -> Bool {
 }
 
 fn call_and_bool(a, b) {
-  let and_bool = Var(bool_binop, "and_Bool", BuiltInVar)
+  let and_bool = GlobalVar(bool_binop, #(builtin, "and_Bool"))
 
   case a, b {
-    Var(_, "True", _), _ -> b
-    _, Var(_, "True", _) -> a
+    GlobalVar(_, #(builtin, "True")), _ -> b
+    _, GlobalVar(_, #(builtin, "True")) -> a
     _, _ -> Call(bool, and_bool, [a, b])
   }
 }
@@ -1428,7 +1580,8 @@ fn find_tvs(c: Context, t: Type) -> List(Int) {
 fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
   case e {
     Literal(_, _) -> #(taken, i, e)
-    Var(_, _, _) -> #(taken, i, e)
+    Var(_, _) -> #(taken, i, e)
+    GlobalVar(_, _) -> #(taken, i, e)
     Call(typ, fun, args) -> {
       let #(taken, i, fun) = unshadow(taken, i, fun)
       let #(taken, i, args) =
@@ -1496,10 +1649,10 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
 }
 
 fn unshadow_context(c: Context) -> Context {
-  let globals = list.map(c.functions, fn(fun) { fun.name })
+  // TODO do we need to unshadow based on globals?
   let functions =
     list.map(c.functions, fn(fun) {
-      let #(taken, i, exp) = unshadow(globals, 1, fun.body)
+      let #(taken, i, exp) = unshadow([], 1, fun.body)
       Function(fun.name, fun.typ, fun.params, exp)
     })
   Context(..c, functions: functions)
@@ -1508,9 +1661,10 @@ fn unshadow_context(c: Context) -> Context {
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {
   case in {
     Literal(_, _) -> in
-    Var(typ, var, kind) ->
+    GlobalVar(_, _) -> in
+    Var(typ, var) ->
       case var == replace {
-        True -> Var(typ, with, kind)
+        True -> Var(typ, with)
         False -> in
       }
     Call(typ, fun, args) -> {

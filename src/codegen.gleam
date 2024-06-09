@@ -43,7 +43,7 @@ fn ternary(cond: String, then: String, els: String) -> String {
 
 fn string_lit(val: String) {
   let size = int.to_string(string.byte_size(val))
-  "new_String(\"" <> val <> "\", " <> size <> ")"
+  "String_NEW(\"" <> val <> "\", " <> size <> ")"
 }
 
 fn texp(arg: Exp, target: String, id: Int) -> String {
@@ -356,8 +356,9 @@ fn custom_type(t: CustomType) {
 
       let constructor =
         t.name
-        <> " new_"
+        <> " "
         <> v.name
+        <> "_NEW"
         <> "("
         <> v.fields
         |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
@@ -396,9 +397,9 @@ fn custom_type(t: CustomType) {
         }
         <> "}\n"
       let isa =
-        "Bool"
-        <> " isa_"
+        "Bool "
         <> v.name
+        <> "_IS"
         <> "("
         <> t.name
         <> " a) {\n"
