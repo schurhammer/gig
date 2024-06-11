@@ -2,8 +2,8 @@ import argv
 import compiler
 import glint
 
-fn nogc_flag() -> glint.Flag(Bool) {
-  glint.bool_flag("nogc")
+fn gc_flag() -> glint.Flag(Bool) {
+  glint.bool_flag("gc")
   |> glint.flag_default(False)
   |> glint.flag_help("Disable GC")
 }
@@ -14,14 +14,21 @@ fn release_flag() -> glint.Flag(Bool) {
   |> glint.flag_help("Enables optimisations.")
 }
 
+fn compiler_flag() -> glint.Flag(String) {
+  glint.string_flag("compiler")
+  |> glint.flag_default("clang")
+  |> glint.flag_help("Which c compiler.")
+}
+
 fn compile() -> glint.Command(Nil) {
   use <- glint.command_help("Compiles the file!")
-  use nogc <- glint.flag(nogc_flag())
+  use gc <- glint.flag(gc_flag())
   use release <- glint.flag(release_flag())
+  use compiler <- glint.flag(compiler_flag())
   use file <- glint.named_arg("file")
   use named, _args, flags <- glint.command()
   let file = file(named)
-  let nogc = case nogc(flags) {
+  let gc = case gc(flags) {
     Ok(flag) -> flag
     _ -> False
   }
@@ -29,7 +36,11 @@ fn compile() -> glint.Command(Nil) {
     Ok(flag) -> flag
     _ -> False
   }
-  compiler.compile(file, !nogc, release)
+  let compiler = case compiler(flags) {
+    Ok(flag) -> flag
+    Error(_) -> "clang"
+  }
+  compiler.compile(file, compiler, gc, release)
   Nil
 }
 

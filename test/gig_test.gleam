@@ -26,13 +26,32 @@ pub fn all_samples_tests() {
   describe("samples", tests)
 }
 
-import gleam/io
-
 fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
-    it("correct output", fn() {
-      io.debug(file)
-      let binary = compiler.compile(file, gc: False, release: True)
+    it("without gc", fn() {
+      let binary =
+        compiler.compile(file, compiler: "clang", gc: False, release: True)
+
+      // parse the expected output out of the file's doc comment
+      let assert Ok(content) = simplifile.read(file)
+      let expected_output =
+        string.split(content, "\n")
+        |> list.filter_map(fn(x) {
+          case string.starts_with(x, "//// ") {
+            True -> Ok(string.drop_left(x, 5))
+            False -> Error(Nil)
+          }
+        })
+        |> string.join("\n")
+
+      // run the program
+      let assert Ok(output) = shellout.command(binary, [], ".", [])
+
+      expect.to_equal(string.trim(output), string.trim(expected_output))
+    }),
+    it("with gc", fn() {
+      let binary =
+        compiler.compile(file, compiler: "clang", gc: False, release: True)
 
       // parse the expected output out of the file's doc comment
       let assert Ok(content) = simplifile.read(file)
@@ -52,8 +71,9 @@ fn sample_test(file) {
       expect.to_equal(string.trim(output), string.trim(expected_output))
     }),
     xit("passes valgrind", fn() {
-      let file = string.replace(file, ".gleam", "")
-      let args = ["--error-exitcode=1", file]
+      let binary =
+        compiler.compile(file, compiler: "clang", gc: False, release: True)
+      let args = ["--error-exitcode=1", binary]
       let output = shellout.command("valgrind", args, ".", [])
       expect.to_be_ok(output)
       Nil

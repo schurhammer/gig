@@ -4,17 +4,19 @@ Gig is a gleam compiler written in gleam. Made with fairy dust and duct tape.
 
 ## How to use
 
-`gleam run -m gig example.gleam [--nogc] [--release]`
+`gleam run -m gig example.gleam [--release] [--gc] [--compiler=clang]`
 
-This will compile the file to `example.c` and then use gcc to create a binary named `example`.
+This will compile the file to `example.c` and then use a c compiler to create a binary named `example`.
+
+Also recommended to increase your stack size `ulimit -s unlimited`, otherwise stack overflows are likely (segfault).
 
 Optional flags:
-- nogc: disable garbage collection
 - release: enable optimisation
+- gc: enable garbage collection (note: the current gc is slow af)
 
 Dependencies:
-- gcc is used to compile to binary
-- Boehm GC library needs to be available (unless you use --nogc)
+- clang/gcc is used to compile to binary (clang recommended)
+- Boehm GC library needs to be available for --gc
 
 ## Feature / Todo List
 
@@ -37,7 +39,7 @@ Dependencies:
 - [ ] Type aliases
 - [x] Blocks
 - [ ] Constants
-- [x] Memory Management (GC/RC)
+- [ ] Memory Management (GC/RC)
 
 ### Functions
 

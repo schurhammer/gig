@@ -53,8 +53,6 @@ pub type Field {
   Field(name: String, typ: Type)
 }
 
-// TODO maybe these could reference the function / custom type they need
-// then maybe we can skip some lookups
 pub type GlobalVar {
   FunctionVar(poly: Poly)
   BuiltInVar(poly: Poly)
@@ -194,6 +192,7 @@ fn prelude(c: Context) -> Context {
   let c = put_global_env(c, "sub_Int", BuiltInVar(Poly([], int_binop)))
   let c = put_global_env(c, "mul_Int", BuiltInVar(Poly([], int_binop)))
   let c = put_global_env(c, "div_Int", BuiltInVar(Poly([], int_binop)))
+  let c = put_global_env(c, "rem_Int", BuiltInVar(Poly([], int_binop)))
 
   let c = put_global_env(c, "negate_Int", BuiltInVar(Poly([], int_uop)))
 
@@ -546,7 +545,6 @@ fn resolve_type_name(
 }
 
 fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) -> #(Context, Type) {
-  // TODO check types actually exist?
   case typ {
     g.NamedType(name, module, params) -> {
       let #(c, params) =
@@ -1201,6 +1199,7 @@ fn infer_expression(
           let n = env.put(n, name, typ)
           #(c, n, [name, ..names], [typ, ..typs])
         })
+      let param_names = list.reverse(param_names)
       let param_types = list.reverse(param_types)
 
       // infer body
@@ -1222,6 +1221,11 @@ fn infer_expression(
             _ -> panic as "pipe to unexpected expression"
           }
         }
+        g.NotEq -> {
+          let eq = g.BinaryOperator(g.Eq, left, right)
+          let neq = g.NegateBool(eq)
+          infer_expression(c, n, neq)
+        }
         _ -> {
           let fun_name = case name {
             g.And -> "and_Bool"
@@ -1230,6 +1234,7 @@ fn infer_expression(
             g.SubInt -> "sub_Int"
             g.MultInt -> "mul_Int"
             g.DivInt -> "div_Int"
+            g.RemainderInt -> "rem_Int"
             g.LtInt -> "lt_Int"
             g.GtInt -> "gt_Int"
             g.LtEqInt -> "lte_Int"

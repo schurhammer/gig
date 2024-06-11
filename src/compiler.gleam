@@ -20,7 +20,12 @@ fn all_but_last(l: List(a)) -> List(a) {
 }
 
 // returns the file name of the binary
-pub fn compile(gleam_file_name: String, gc gc: Bool, release release: Bool) {
+pub fn compile(
+  gleam_file_name: String,
+  compiler compiler: String,
+  gc gc: Bool,
+  release release: Bool,
+) {
   io.debug(#(gleam_file_name, gc))
 
   let split = string.split(gleam_file_name, "/")
@@ -49,19 +54,20 @@ pub fn compile(gleam_file_name: String, gc gc: Bool, release release: Bool) {
 
   let template = case gc {
     True -> {
-      let includes =
-        "
-        #include <gc.h>
-        #define malloc(x) GC_MALLOC(x)
-      "
-      let init = "GC_INIT();\n" <> main_call
+      // TODO GC_enable_incremental
+      // TODO GC_MALLOC_ATOMIC
+      // TODO GC_set_pointer_mask(0x0000FFFFFFFFFFFF)
+      let includes = "#define GC\n"
+      let init = main_call
       let template = string.replace(template, "///INIT///", init)
       let template = string.replace(template, "///INCLUDES///", includes)
       template
     }
     False -> {
+      let includes = ""
       let init = main_call
       let template = string.replace(template, "///INIT///", init)
+      let template = string.replace(template, "///INCLUDES///", includes)
       template
     }
   }
@@ -86,8 +92,8 @@ pub fn compile(gleam_file_name: String, gc gc: Bool, release release: Bool) {
     False -> args
   }
 
-  io.debug(args)
-  let result = shellout.command("gcc", args, ".", [])
+  io.debug([compiler, ..args])
+  let result = shellout.command(compiler, args, ".", [])
 
   case result {
     Ok(_) -> Nil

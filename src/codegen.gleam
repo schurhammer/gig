@@ -17,7 +17,6 @@ fn type_name(typ: Mono) -> String {
   case typ {
     MonoApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
     MonoFun(..) -> {
-      // TODO what do
       "Closure"
     }
   }
@@ -25,13 +24,12 @@ fn type_name(typ: Mono) -> String {
 
 fn hit_target(target: String, with: String) {
   case with {
-    // TODO find a better solution for panic
     "panic()" -> "panic();\n"
     _ ->
       case target {
         "" -> with
         // TODO not sure if this is always valid
-        // "RETURN" -> "return " <> with <> ";\n"
+        "RETURN" -> "return " <> with <> ";\n"
         target -> target <> " = " <> with <> ";\n"
       }
   }
@@ -141,10 +139,7 @@ fn function(fun: Function) -> String {
   })
   |> string.join(", ")
   <> ") {\n"
-  <> type_name(ret)
-  <> " RETURN;\n"
   <> texp(body, "RETURN", 1)
-  <> "return RETURN;\n"
   <> "}"
 }
 
@@ -176,7 +171,7 @@ fn custom_type_forward(t: CustomType) {
     <> " b"
     <> ");\n"
   let typedef = case t.pointer {
-    True -> "typedef uintptr_t " <> t.name <> ";\n"
+    True -> "typedef Pointer " <> t.name <> ";\n"
     False ->
       case t.variants {
         [v] -> "typedef struct " <> v.name <> " " <> t.name <> ";\n"
