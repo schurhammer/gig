@@ -64,6 +64,7 @@ pub type GlobalVar {
 
 pub type LiteralKind {
   Int(value: String)
+  Float(value: String)
   String(value: String)
 }
 
@@ -126,6 +127,8 @@ const nil = TypeApp(#(builtin, "Nil"), [])
 
 const int = TypeApp(#(builtin, "Int"), [])
 
+const float = TypeApp(#(builtin, "Float"), [])
+
 const bool = TypeApp(#(builtin, "Bool"), [])
 
 const string = TypeApp(#(builtin, "String"), [])
@@ -136,7 +139,11 @@ const bool_uop = TypeFun(bool, [bool])
 
 const int_binop = TypeFun(int, [int, int])
 
+const float_binop = TypeFun(float, [float, float])
+
 const int_compop = TypeFun(bool, [int, int])
+
+const float_compop = TypeFun(bool, [float, float])
 
 const int_uop = TypeFun(int, [int])
 
@@ -196,12 +203,22 @@ fn prelude(c: Context) -> Context {
 
   let c = put_global_env(c, "negate_Int", BuiltInVar(Poly([], int_uop)))
 
-  let c = put_global_env(c, "and_Bool", BuiltInVar(Poly([], bool_binop)))
+  let c = put_global_env(c, "lt_Float", BuiltInVar(Poly([], float_compop)))
+  let c = put_global_env(c, "gt_Float", BuiltInVar(Poly([], float_compop)))
+  let c = put_global_env(c, "lte_Float", BuiltInVar(Poly([], float_compop)))
+  let c = put_global_env(c, "gte_Float", BuiltInVar(Poly([], float_compop)))
+  let c = put_global_env(c, "add_Float", BuiltInVar(Poly([], float_binop)))
+  let c = put_global_env(c, "sub_Float", BuiltInVar(Poly([], float_binop)))
+  let c = put_global_env(c, "mul_Float", BuiltInVar(Poly([], float_binop)))
+  let c = put_global_env(c, "div_Float", BuiltInVar(Poly([], float_binop)))
+
   let c = put_global_env(c, "True", BuiltInVar(Poly([], bool)))
   let c = put_global_env(c, "False", BuiltInVar(Poly([], bool)))
-  let c = put_global_env(c, "negate_Bool", BuiltInVar(Poly([], bool_uop)))
   let c = put_global_env(c, "isa_True", BuiltInVar(Poly([], bool_uop)))
   let c = put_global_env(c, "isa_False", BuiltInVar(Poly([], bool_uop)))
+  let c = put_global_env(c, "negate_Bool", BuiltInVar(Poly([], bool_uop)))
+  let c = put_global_env(c, "and_Bool", BuiltInVar(Poly([], bool_binop)))
+  let c = put_global_env(c, "or_Bool", BuiltInVar(Poly([], bool_binop)))
 
   let c = put_global_env(c, "append_String", BuiltInVar(Poly([], string_binop)))
 
@@ -844,6 +861,7 @@ fn infer_bind_pattern(
   // I think its done in infer_body already
   case pattern {
     g.PatternInt(_) -> #(c, [])
+    g.PatternFloat(_) -> #(c, [])
     g.PatternDiscard(_) -> #(c, [])
     g.PatternVariable(name) -> {
       let #(c, subject) = infer_expression(c, n, subject)
@@ -930,6 +948,10 @@ fn infer_check_pattern(
   case pattern {
     g.PatternInt(value) -> {
       let args = [g.Field(None, g.Int(value)), g.Field(None, subject)]
+      infer_expression(c, n, g.Call(g.Variable("equal"), args))
+    }
+    g.PatternFloat(value) -> {
+      let args = [g.Field(None, g.Float(value)), g.Field(None, subject)]
       infer_expression(c, n, g.Call(g.Variable("equal"), args))
     }
     g.PatternDiscard(_) -> #(c, true_constructor)
@@ -1052,6 +1074,7 @@ fn infer_expression(
 ) -> #(Context, Exp) {
   case exp {
     g.Int(s) -> #(c, Literal(int, Int(string.replace(s, "_", ""))))
+    g.Float(s) -> #(c, Literal(float, Float(s)))
     g.String(s) -> #(c, Literal(string, String(s)))
     g.Variable(s) -> {
       // instantiate the poly type into a mono type
@@ -1228,8 +1251,11 @@ fn infer_expression(
         }
         _ -> {
           let fun_name = case name {
+            // Bool
+            g.Eq -> "equal"
             g.And -> "and_Bool"
             g.Or -> "or_Bool"
+            // Int
             g.AddInt -> "add_Int"
             g.SubInt -> "sub_Int"
             g.MultInt -> "mul_Int"
@@ -1239,8 +1265,17 @@ fn infer_expression(
             g.GtInt -> "gt_Int"
             g.LtEqInt -> "lte_Int"
             g.GtEqInt -> "gte_Int"
+            // Float
+            g.AddFloat -> "add_Float"
+            g.SubFloat -> "sub_Float"
+            g.MultFloat -> "mul_Float"
+            g.DivFloat -> "div_Float"
+            g.LtFloat -> "lt_Float"
+            g.GtFloat -> "gt_Float"
+            g.LtEqFloat -> "lte_Float"
+            g.GtEqFloat -> "gte_Float"
+            // String
             g.Concatenate -> "append_String"
-            g.Eq -> "equal"
             _ -> todo as { "binop not implemented " <> string.inspect(name) }
           }
           let args = [g.Field(None, left), g.Field(None, right)]

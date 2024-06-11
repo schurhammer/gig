@@ -110,6 +110,7 @@ void *arena_malloc(size_t size)
 #define True true
 #define False false
 #define Int int64_t
+#define Float double
 #define Bool bool
 
 // these must be short-circuiting
@@ -124,7 +125,6 @@ Bool isa_True(Bool x) { return x == True; }
 Bool isa_False(Bool x) { return x == False; }
 
 Bool equal_Int(Int x, Int y) { return x == y; }
-
 Bool lt_Int(Int x, Int y) { return x < y; }
 Bool gt_Int(Int x, Int y) { return x > y; }
 Bool lte_Int(Int x, Int y) { return x <= y; }
@@ -135,6 +135,16 @@ Int sub_Int(Int x, Int y) { return x - y; }
 Int mul_Int(Int x, Int y) { return x * y; }
 Int div_Int(Int x, Int y) { return x / y; }
 Int rem_Int(Int x, Int y) { return x % y; }
+
+Bool equal_Float(Float x, Float y) { return x == y; }
+Bool lt_Float(Float x, Float y) { return x < y; }
+Bool gt_Float(Float x, Float y) { return x > y; }
+Bool lte_Float(Float x, Float y) { return x <= y; }
+Bool gte_Float(Float x, Float y) { return x >= y; }
+Float add_Float(Float x, Float y) { return x + y; }
+Float sub_Float(Float x, Float y) { return x - y; }
+Float mul_Float(Float x, Float y) { return x * y; }
+Float div_Float(Float x, Float y) { return x / y; }
 
 Int negate_Int(Int x) { return -x; }
 
@@ -148,6 +158,9 @@ struct String
 
 String String_NEW(uint8_t *bytes, int byte_length)
 {
+  if (byte_length < 0) {
+    byte_length = strlen(bytes);
+  }
   // TODO handle empty strings?
   String str;
   str.byte_length = byte_length;
@@ -185,55 +198,36 @@ String inspect_String(String s)
 String inspect_Bool(Bool b)
 {
   if (b)
-  {
     return String_NEW("True", 4);
-  }
   else
-  {
     return String_NEW("False", 5);
-  }
 }
 
-int countDigits(int64_t num)
+String inspect_Int(Int value)
 {
-  int count = 0;
-  if (num == 0)
-    return 1;
-  while (num != 0)
-  {
-    num /= 10;
-    count++;
-  }
-  return count;
+    static uint8_t buffer[32];
+    snprintf(buffer, sizeof(buffer), "%lld", value);
+
+    struct String result;
+    result.byte_length = strlen(buffer);
+    result.bytes = malloc(result.byte_length);
+
+    memcpy(result.bytes, buffer, result.byte_length);
+
+    return result;
 }
 
-String inspect_Int(Int num)
-{
-  int length = countDigits(num);
-  if (num < 0)
-  {
-    length++;
-  }
+String inspect_Float(Float value) {
+    static uint8_t buffer[32];
+    snprintf(buffer, sizeof(buffer), "%g", value);
 
-  struct String result;
-  result.byte_length = length;
-  result.bytes = (uint8_t *)malloc(length);
+    struct String result;
+    result.byte_length = strlen(buffer);
+    result.bytes = malloc(result.byte_length);
 
-  if (num < 0)
-  {
-    result.bytes[0] = '-';
-    num = -num;
-  }
+    memcpy(result.bytes, buffer, result.byte_length);
 
-  int i = length - 1;
-  do
-  {
-    result.bytes[i] = num % 10 + '0';
-    i = i - 1;
-    num /= 10;
-  } while (num != 0);
-
-  return result;
+    return result;
 }
 
 String print(String a)

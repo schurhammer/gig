@@ -13,9 +13,10 @@ Also recommended to increase your stack size `ulimit -s unlimited`, otherwise st
 Optional flags:
 - release: enable optimisation
 - gc: enable garbage collection (note: the current gc is slow af)
+- compiler: the name/path of the c compiler
 
 Dependencies:
-- clang/gcc is used to compile to binary (clang recommended)
+- clang/gcc is needed to compile to binary (clang recommended)
 - Boehm GC library needs to be available for --gc
 
 ## Feature / Todo List
@@ -26,7 +27,7 @@ Dependencies:
 - [ ] Unqualified imports
 - [x] Bools
 - [x] Ints
-- [ ] Floats
+- [x] Floats
 - [ ] Number formats
 - [x] Strings
 - [x] Lists
@@ -39,7 +40,7 @@ Dependencies:
 - [ ] Type aliases
 - [x] Blocks
 - [ ] Constants
-- [ ] Memory Management (GC/RC)
+- [x] Memory Management (GC/RC)
 
 ### Functions
 
@@ -61,7 +62,7 @@ Dependencies:
 - [ ] String patterns
 - [x] List patterns
 - [x] Recursion
-- [ ] Tail calls
+- [ ] Tail calls (note: the c compiler may do this for us)
 - [x] Multiple subjects
 - [x] Alternative patterns
 - [x] Pattern aliases

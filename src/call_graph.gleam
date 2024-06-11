@@ -61,6 +61,7 @@ fn walk_body(g: Graph, n: Env, r: String, body: List(g.Statement)) -> Graph {
 fn pattern_bindings(pattern: g.Pattern) -> List(String) {
   case pattern {
     g.PatternInt(_) -> []
+    g.PatternFloat(_) -> []
     g.PatternDiscard(_) -> []
     g.PatternVariable(x) -> [x]
     g.PatternAssignment(pattern, var) -> [var, ..pattern_bindings(pattern)]
@@ -84,6 +85,7 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
 fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
   case e {
     g.Int(..) -> g
+    g.Float(..) -> g
     g.String(..) -> g
     g.FieldAccess(subject, _) -> walk_expression(g, n, r, subject)
     g.Variable(s) ->

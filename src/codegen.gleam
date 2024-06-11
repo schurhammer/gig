@@ -3,7 +3,7 @@ import closure_conversion.{
   Module, Var,
 }
 import monomorphise.{type CustomType, type Mono, CustomType, MonoApp, MonoFun} as mono
-import typed.{Int, String}
+import typed.{Float, Int, String}
 
 import graph
 import type_graph
@@ -40,7 +40,10 @@ fn ternary(cond: String, then: String, els: String) -> String {
 }
 
 fn string_lit(val: String) {
-  let size = int.to_string(string.byte_size(val))
+  // TODO this doesnt work for strings like "\n"
+  // for now ive made size -1 check the size at runtime
+  // let size = int.to_string(string.byte_size(val))
+  let size = "-1"
   "String_NEW(\"" <> val <> "\", " <> size <> ")"
 }
 
@@ -49,6 +52,7 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
     Literal(_, val) ->
       case val {
         Int(val) -> hit_target(target, val)
+        Float(val) -> hit_target(target, val <> "L")
         String(val) -> hit_target(target, string_lit(val))
       }
 
