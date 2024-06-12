@@ -47,7 +47,7 @@ Dependencies:
 - [x] Functions
 - [x] Higher order functions
 - [x] Anonymous functions
-- [ ] Function captures
+- [x] Function captures
 - [x] Generic functions
 - [x] Pipelines
 - [x] Labelled arguments

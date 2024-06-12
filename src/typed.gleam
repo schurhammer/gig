@@ -1137,6 +1137,14 @@ fn infer_expression(
       let exp = g.FieldAccess(tuple, field_name)
       infer_expression(c, n, exp)
     }
+    g.FnCapture(label, fun, before, after) -> {
+      let #(c, x) = new_temp_var(c)
+      let arg = g.Field(label, g.Variable(x))
+      let args = list.concat([before, [arg], after])
+      let param = g.FnParameter(g.Named(x), None)
+      let abs = g.Fn([param], None, [g.Expression(g.Call(fun, args))])
+      infer_expression(c, n, abs)
+    }
     g.Call(fun, args) -> {
       // handle labeled arguments
       let args = case fun {

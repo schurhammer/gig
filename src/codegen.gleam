@@ -29,6 +29,7 @@ fn hit_target(target: String, with: String) {
       case target {
         "" -> with
         // TODO not sure if this is always valid
+        // TODO could do something similar with "ignored" targets? e.g. _xyz
         "RETURN" -> "return " <> with <> ";\n"
         target -> target <> " = " <> with <> ";\n"
       }

@@ -120,7 +120,13 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
       let g = walk_expression(g, n, r, fun)
       list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e.item) })
     }
-    g.TupleIndex(tuple, index) -> walk_expression(g, n, r, tuple)
+    g.TupleIndex(tuple, _index) -> walk_expression(g, n, r, tuple)
+    g.FnCapture(_label, fun, before, after) -> {
+      let before = list.map(before, fn(x) { x.item })
+      let after = list.map(after, fn(x) { x.item })
+      let args = list.concat([[fun], before, after])
+      list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e) })
+    }
     g.BinaryOperator(_, left, right) -> {
       let g = walk_expression(g, n, r, left)
       walk_expression(g, n, r, right)

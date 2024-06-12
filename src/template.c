@@ -34,6 +34,8 @@ uint16_t decode_tag(Pointer ptr)
   return ptr.tag;
 }
 
+// TODO figure out how to use POINTER_MASK so we don't need to use fat pointers
+// or implement a custom GC
 #include <gc.h>
 #define malloc(x) GC_MALLOC(x)
 
@@ -129,7 +131,6 @@ Bool lt_Int(Int x, Int y) { return x < y; }
 Bool gt_Int(Int x, Int y) { return x > y; }
 Bool lte_Int(Int x, Int y) { return x <= y; }
 Bool gte_Int(Int x, Int y) { return x >= y; }
-
 Int add_Int(Int x, Int y) { return x + y; }
 Int sub_Int(Int x, Int y) { return x - y; }
 Int mul_Int(Int x, Int y) { return x * y; }
@@ -203,29 +204,30 @@ String inspect_Bool(Bool b)
     return String_NEW("False", 5);
 }
 
+static uint8_t inspect_buf[32];
+
 String inspect_Int(Int value)
 {
-    static uint8_t buffer[32];
-    snprintf(buffer, sizeof(buffer), "%lld", value);
+    snprintf(inspect_buf, sizeof(inspect_buf), "%lld", value);
 
     struct String result;
-    result.byte_length = strlen(buffer);
+    result.byte_length = strlen(inspect_buf);
     result.bytes = malloc(result.byte_length);
 
-    memcpy(result.bytes, buffer, result.byte_length);
+    memcpy(result.bytes, inspect_buf, result.byte_length);
 
     return result;
 }
 
-String inspect_Float(Float value) {
-    static uint8_t buffer[32];
-    snprintf(buffer, sizeof(buffer), "%g", value);
+String inspect_Float(Float value)
+{
+    snprintf(inspect_buf, sizeof(inspect_buf), "%g", value);
 
     struct String result;
-    result.byte_length = strlen(buffer);
+    result.byte_length = strlen(inspect_buf);
     result.bytes = malloc(result.byte_length);
 
-    memcpy(result.bytes, buffer, result.byte_length);
+    memcpy(result.bytes, inspect_buf, result.byte_length);
 
     return result;
 }
