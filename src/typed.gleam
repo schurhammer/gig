@@ -1297,7 +1297,9 @@ fn infer_expression(
       // we do this because they bind variables differently
       let clauses =
         list.flat_map(clauses, fn(clause: g.Clause) {
-          list.map(clause.patterns, fn(patterns) { #(patterns, clause.body) })
+          list.map(clause.patterns, fn(patterns) {
+            #(patterns, clause.guard, clause.body)
+          })
         })
 
       // need to reverse to make the last one the innermost after the fold
@@ -1326,36 +1328,14 @@ fn infer_expression(
       let #(c, e) =
         list.fold(clauses, #(c, panic_exp), fn(acc, clause) {
           let #(c, else_exp) = acc
-          let #(patterns, body) = clause
+          let #(patterns, guard, body) = clause
 
-          // check each subject
-          // TODO is defaulting to true ok?
-          let #(c, cond_exp) =
-            list.index_fold(
-              patterns,
-              #(c, true_constructor),
-              fn(acc, pattern, i) {
-                let #(c, last_e) = acc
-
-                // get the subject
-                let subject = g.Variable(subject_prefix <> int.to_string(i))
-                // let #(c, subject) = infer_expression(c, n, subject)
-
-                // check that the subject matches the pattern
-                let #(c, e) = infer_check_pattern(c, n, pattern, subject)
-
-                // TODO do we need to check that e is Bool?
-                #(c, call_and_bool(e, last_e))
-              },
-            )
-
-          // find bindings for all subjects
+          // find bindings
           let #(c, bindings) =
             list.index_fold(patterns, #(c, []), fn(acc, pattern, i) {
               let #(c, l) = acc
               let subject = g.Variable(subject_prefix <> int.to_string(i))
               let #(c, bindings) = infer_bind_pattern(c, n, pattern, subject)
-              // TODO use efficient combine function instead of append?
               #(c, list.append(bindings, l))
             })
 
@@ -1364,6 +1344,36 @@ fn infer_expression(
             list.fold(bindings, n, fn(n, binding) {
               let #(name, val) = binding
               env.put(n, name, val.typ)
+            })
+
+          let #(c, guard) = case guard {
+            Some(guard) -> {
+              // infer guard expression
+              let #(c, guard) = infer_expression(c, n, guard)
+              // inline bindings in the guard
+              let guard =
+                list.fold(bindings, guard, fn(guard, binding) {
+                  replace_var(binding.0, binding.1, guard)
+                })
+              #(c, guard)
+            }
+            None -> #(c, true_constructor)
+          }
+
+          // create boolean expression
+          let #(c, cond_exp) =
+            list.index_fold(patterns, #(c, guard), fn(acc, pattern, i) {
+              let #(c, last_e) = acc
+
+              // get the subject
+              let subject = g.Variable(subject_prefix <> int.to_string(i))
+              // let #(c, subject) = infer_expression(c, n, subject)
+
+              // check that the subject matches the pattern
+              let #(c, e) = infer_check_pattern(c, n, pattern, subject)
+
+              // TODO do we need to check that e is Bool?
+              #(c, call_and_bool(e, last_e))
             })
 
           // infer the body
@@ -1704,6 +1714,46 @@ fn unshadow_context(c: Context) -> Context {
       Function(fun.name, fun.typ, fun.params, exp)
     })
   Context(..c, functions: functions)
+}
+
+fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
+  case in {
+    Literal(_, _) -> in
+    GlobalVar(_, _) -> in
+    Var(_typ, var) ->
+      case var == replace {
+        True -> with
+        False -> in
+      }
+    Call(typ, fun, args) -> {
+      let fun = replace_var(replace, with, fun)
+      let args = list.map(args, replace_var(replace, with, _))
+      Call(typ, fun, args)
+    }
+    Fn(typ, vars, exp) ->
+      case list.contains(vars, replace) {
+        True -> in
+        False -> Fn(typ, vars, replace_var(replace, with, exp))
+      }
+    Let(typ, var, val, exp) ->
+      case var == replace {
+        True -> Let(typ, var, replace_var(replace, with, val), exp)
+        False ->
+          Let(
+            typ,
+            var,
+            replace_var(replace, with, val),
+            replace_var(replace, with, exp),
+          )
+      }
+    If(typ, cond, then_exp, else_exp) ->
+      If(
+        typ,
+        replace_var(replace, with, cond),
+        replace_var(replace, with, then_exp),
+        replace_var(replace, with, else_exp),
+      )
+  }
 }
 
 fn rename_var(replace: String, with: String, in: Exp) -> Exp {

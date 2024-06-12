@@ -193,7 +193,7 @@ String append_String(String a, String b)
 String inspect_String(String s)
 {
   String q = String_NEW("\"", 1);
-  append_String(q, append_String(s, q));
+  return append_String(q, append_String(s, q));
 }
 
 String inspect_Bool(Bool b)
