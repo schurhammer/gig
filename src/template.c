@@ -115,49 +115,55 @@ void *arena_malloc(size_t size)
 #define Float double
 #define Bool bool
 
-// these must be short-circuiting
-#define and_Bool(x, y) (x && y)
-#define or_Bool(x, y) (x || y)
+typedef struct String String;
+typedef struct Closure Closure;
 
-void panic() { exit(1); }
+struct String
+{
+  int byte_length;
+  char *bytes;
+};
+
+struct Closure
+{
+  void *fun;
+  Pointer env;
+};
+
+// these must be short-circuiting
+#define and_bool(x, y) (x && y)
+#define or_bool(x, y) (x || y)
+
+void panic_exit() { exit(1); }
 
 Bool equal_Bool(Bool x, Bool y) { return x == y; }
-Bool negate_Bool(Bool x) { return !x; }
+Bool negate_bool(Bool x) { return !x; }
 Bool isa_True(Bool x) { return x == True; }
 Bool isa_False(Bool x) { return x == False; }
 
 Bool equal_Int(Int x, Int y) { return x == y; }
-Bool lt_Int(Int x, Int y) { return x < y; }
-Bool gt_Int(Int x, Int y) { return x > y; }
-Bool lte_Int(Int x, Int y) { return x <= y; }
-Bool gte_Int(Int x, Int y) { return x >= y; }
-Int add_Int(Int x, Int y) { return x + y; }
-Int sub_Int(Int x, Int y) { return x - y; }
-Int mul_Int(Int x, Int y) { return x * y; }
-Int div_Int(Int x, Int y) { return x / y; }
-Int rem_Int(Int x, Int y) { return x % y; }
+Bool lt_int(Int x, Int y) { return x < y; }
+Bool gt_int(Int x, Int y) { return x > y; }
+Bool lte_int(Int x, Int y) { return x <= y; }
+Bool gte_int(Int x, Int y) { return x >= y; }
+Int add_int(Int x, Int y) { return x + y; }
+Int sub_int(Int x, Int y) { return x - y; }
+Int mul_int(Int x, Int y) { return x * y; }
+Int div_int(Int x, Int y) { return x / y; }
+Int rem_int(Int x, Int y) { return x % y; }
+Int negate_int(Int x) { return -x; }
 
 Bool equal_Float(Float x, Float y) { return x == y; }
-Bool lt_Float(Float x, Float y) { return x < y; }
-Bool gt_Float(Float x, Float y) { return x > y; }
-Bool lte_Float(Float x, Float y) { return x <= y; }
-Bool gte_Float(Float x, Float y) { return x >= y; }
-Float add_Float(Float x, Float y) { return x + y; }
-Float sub_Float(Float x, Float y) { return x - y; }
-Float mul_Float(Float x, Float y) { return x * y; }
-Float div_Float(Float x, Float y) { return x / y; }
+Bool lt_float(Float x, Float y) { return x < y; }
+Bool gt_float(Float x, Float y) { return x > y; }
+Bool lte_float(Float x, Float y) { return x <= y; }
+Bool gte_float(Float x, Float y) { return x >= y; }
+Float add_float(Float x, Float y) { return x + y; }
+Float sub_float(Float x, Float y) { return x - y; }
+Float mul_float(Float x, Float y) { return x * y; }
+Float div_float(Float x, Float y) { return x / y; }
 
-Int negate_Int(Int x) { return -x; }
-
-typedef struct String String;
-
-struct String
-{
-  uint64_t byte_length;
-  uint8_t *bytes;
-};
-
-String String_NEW(uint8_t *bytes, int byte_length)
+String String_NEW(char *bytes, int byte_length)
 {
   if (byte_length < 0) {
     byte_length = strlen(bytes);
@@ -166,6 +172,7 @@ String String_NEW(uint8_t *bytes, int byte_length)
   String str;
   str.byte_length = byte_length;
   str.bytes = bytes;
+
   return str;
 }
 
@@ -178,7 +185,7 @@ Bool equal_String(String a, String b)
   return strncmp(a.bytes, b.bytes, a.byte_length) == 0;
 }
 
-String append_String(String a, String b)
+String append_string(String a, String b)
 {
   // TODO handle empty strings?
   String str;
@@ -190,10 +197,10 @@ String append_String(String a, String b)
   return str;
 }
 
-String inspect_String(String s)
+Int print(String a)
 {
-  String q = String_NEW("\"", 1);
-  return append_String(q, append_String(s, q));
+  printf("%.*s", a.byte_length, a.bytes);
+  return 0;
 }
 
 String inspect_Bool(Bool b)
@@ -204,11 +211,11 @@ String inspect_Bool(Bool b)
     return String_NEW("False", 5);
 }
 
-static uint8_t inspect_buf[32];
+static char inspect_buf[32];
 
 String inspect_Int(Int value)
 {
-    snprintf(inspect_buf, sizeof(inspect_buf), "%lld", value);
+    snprintf(inspect_buf, sizeof(inspect_buf), "%ld", value);
 
     struct String result;
     result.byte_length = strlen(inspect_buf);
@@ -232,19 +239,16 @@ String inspect_Float(Float value)
     return result;
 }
 
-String print(String a)
+String inspect_String(String s)
 {
-  printf("%.*s", a.byte_length, a.bytes);
-  return a;
+  String q = String_NEW("\"", 1);
+  return append_string(q, append_string(s, q));
 }
 
-typedef struct Closure Closure;
-
-struct Closure
+String inspect_Closure(Closure c)
 {
-  void *fun;
-  Pointer env;
-};
+  return String_NEW("Closure", 7);
+}
 
 Closure create_closure(void *fun, Pointer env)
 {
@@ -272,11 +276,6 @@ Bool equal_Closure(Closure a, Closure b)
   return False;
 }
 
-String inspect_Closure(Closure c)
-{
-  return String_NEW("Closure", 7);
-}
-
 /// end of builtin
 
 /// codegen
@@ -287,7 +286,7 @@ String inspect_Closure(Closure c)
 
 /// main
 
-Int main()
+int main()
 {
 #ifdef GC
   GC_INIT();

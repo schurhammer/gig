@@ -2,7 +2,9 @@ import closure_conversion.{
   type Exp, type Function, type Module, Call, CallClosure, If, Let, Literal,
   Module, Var,
 }
-import monomorphise.{type CustomType, type Mono, CustomType, MonoApp, MonoFun} as mono
+import monomorphise.{
+  type CustomType, type Mono, CustomType, Field, MonoApp, MonoFun,
+} as mono
 import typed.{Float, Int, String}
 
 import graph
@@ -24,12 +26,13 @@ fn type_name(typ: Mono) -> String {
 
 fn hit_target(target: String, with: String) {
   case with {
-    "panic()" -> "panic();\n"
+    "panic_exit()" -> "panic_exit();\n"
     _ ->
       case target {
         "" -> with
         // TODO not sure if this is always valid
         // TODO could do something similar with "ignored" targets? e.g. _xyz
+        // TODO this causes warnings about functions not having return
         "RETURN" -> "return " <> with <> ";\n"
         target -> target <> " = " <> with <> ";\n"
       }
@@ -144,7 +147,10 @@ fn function(fun: Function) -> String {
   })
   |> string.join(", ")
   <> ") {\n"
+  <> type_name(ret)
+  <> " RETURN;\n"
   <> texp(body, "RETURN", 1)
+  <> "return RETURN;\n"
   <> "}"
 }
 
@@ -308,13 +314,27 @@ fn custom_type(t: CustomType) {
           True -> "{ struct " <> v.name <> "* a = a_ptr;\n"
           False -> ""
         }
-        <> v.fields
-        |> list.fold(string_lit(v.name), fn(a, f) {
-          let f =
-            "inspect_" <> type_name(f.typ) <> "(a" <> access_op <> f.name <> ")"
-          "append_String(" <> a <> ", " <> f <> ")"
-        })
-        <> ";\n"
+        <> case v.fields {
+          [] -> "return " <> string_lit(v.name) <> ";\n"
+          _ ->
+            "return append_string("
+            <> v.fields
+            |> list.map(fn(f) {
+              "inspect_"
+              <> type_name(f.typ)
+              <> "(a"
+              <> access_op
+              <> f.name
+              <> ")"
+            })
+            |> list.intersperse(string_lit(", "))
+            |> list.fold(string_lit(v.name <> "("), fn(a, f) {
+              "append_string(" <> a <> ", " <> f <> ")"
+            })
+            <> ", "
+            <> string_lit(")")
+            <> ");\n"
+        }
         <> case t.pointer {
           True -> "}\n"
           False -> ""
@@ -327,29 +347,46 @@ fn custom_type(t: CustomType) {
           <> "struct "
           <> v.name
           <> "* a = a_ptr;\n"
-          <> "append_String("
-          <> v.fields
-          |> list.map(fn(f) {
-            "inspect_" <> type_name(f.typ) <> "(a" <> access_op <> f.name <> ")"
-          })
-          |> list.intersperse(string_lit(", "))
-          |> list.fold(string_lit(v.name <> "("), fn(a, f) {
-            "append_String(" <> a <> ", " <> f <> ")"
-          })
-          <> ", "
-          <> string_lit(")")
-          <> ");\n}\n"
+          <> case v.fields {
+            [] -> "return " <> string_lit(v.name) <> ";\n"
+            _ ->
+              "return append_string("
+              <> v.fields
+              |> list.map(fn(f) {
+                "inspect_"
+                <> type_name(f.typ)
+                <> "(a"
+                <> access_op
+                <> f.name
+                <> ")"
+              })
+              |> list.intersperse(string_lit(", "))
+              |> list.fold(string_lit(v.name <> "("), fn(a, f) {
+                "append_string(" <> a <> ", " <> f <> ")"
+              })
+              <> ", "
+              <> string_lit(")")
+              <> ");\n"
+          }
+          <> "}\n"
         })
         |> string.concat
     }
+    <> "return "
+    <> string_lit("???")
+    <> ";\n"
     <> "}\n"
 
   let variant_definitions =
     list.index_map(t.variants, fn(v, i) {
       let tag = int.to_string(i)
-
+      // put in a placeholder field in empty structs
+      let fields = case v.fields {
+        [] -> [Field("placeholder", MonoApp("Int", []))]
+        x -> x
+      }
       let fields =
-        list.map(v.fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
+        list.map(fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
         |> string.join("")
 
       let struct = "struct " <> v.name <> "{\n" <> fields <> "};\n"

@@ -34,7 +34,11 @@ pub fn compile(
     all_but_last(split)
     |> string.join("/")
 
+  // process the prelude
+  let assert Ok(prelude) = simplifile.read("./stdlib/gleam.gleam")
+  let assert Ok(prelude) = glance.module(prelude)
   let c = t.prelude_context()
+  let c = t.infer_module(c, prelude)
 
   // let assert Ok(input) = simplifile.read(gleam_file_name)
   // run it through the compiler chain

@@ -55,7 +55,7 @@ pub type Field {
 
 pub type GlobalVar {
   FunctionVar(poly: Poly)
-  BuiltInVar(poly: Poly)
+  BuiltInVar(poly: Poly, external_name: #(String, String))
   BuiltInPolyVar(poly: Poly)
   ConstructorVar(poly: Poly, variant: Variant, custom: CustomType)
   IsaVar(poly: Poly, variant: Variant, custom: CustomType)
@@ -149,7 +149,7 @@ const int_uop = TypeFun(int, [int])
 
 const string_binop = TypeFun(string, [string, string])
 
-const panic_ast = g.Call(g.Variable("panic"), [])
+const panic_ast = g.Call(g.Variable("panic_exit"), [])
 
 const true_constructor = GlobalVar(bool, #(builtin, "True"))
 
@@ -177,50 +177,54 @@ fn resolve_alias(c: Context, name: #(String, String)) {
 
 fn prelude(c: Context) -> Context {
   let #(c, a) = new_type_var_ref(c)
-  let poly = Poly([get_id(a)], TypeFun(a, []))
-  let c = put_global_env(c, "panic", BuiltInVar(poly))
-
-  let #(c, a) = new_type_var_ref(c)
   let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
   let c = put_global_env(c, "equal", BuiltInPolyVar(equal_type))
-
-  let print_type = Poly([], TypeFun(string, [string]))
-  let c = put_global_env(c, "print", BuiltInVar(print_type))
 
   let #(c, a) = new_type_var_ref(c)
   let inspect_type = Poly([get_id(a)], TypeFun(string, [a]))
   let c = put_global_env(c, "inspect", BuiltInPolyVar(inspect_type))
 
-  let c = put_global_env(c, "lt_Int", BuiltInVar(Poly([], int_compop)))
-  let c = put_global_env(c, "gt_Int", BuiltInVar(Poly([], int_compop)))
-  let c = put_global_env(c, "lte_Int", BuiltInVar(Poly([], int_compop)))
-  let c = put_global_env(c, "gte_Int", BuiltInVar(Poly([], int_compop)))
-  let c = put_global_env(c, "add_Int", BuiltInVar(Poly([], int_binop)))
-  let c = put_global_env(c, "sub_Int", BuiltInVar(Poly([], int_binop)))
-  let c = put_global_env(c, "mul_Int", BuiltInVar(Poly([], int_binop)))
-  let c = put_global_env(c, "div_Int", BuiltInVar(Poly([], int_binop)))
-  let c = put_global_env(c, "rem_Int", BuiltInVar(Poly([], int_binop)))
+  let put_builtin = fn(c, name, typ) {
+    put_global_env(c, name, BuiltInVar(typ, #(builtin, name)))
+  }
 
-  let c = put_global_env(c, "negate_Int", BuiltInVar(Poly([], int_uop)))
+  let #(c, a) = new_type_var_ref(c)
+  let poly = Poly([get_id(a)], TypeFun(a, []))
+  let c = put_builtin(c, "panic_exit", poly)
 
-  let c = put_global_env(c, "lt_Float", BuiltInVar(Poly([], float_compop)))
-  let c = put_global_env(c, "gt_Float", BuiltInVar(Poly([], float_compop)))
-  let c = put_global_env(c, "lte_Float", BuiltInVar(Poly([], float_compop)))
-  let c = put_global_env(c, "gte_Float", BuiltInVar(Poly([], float_compop)))
-  let c = put_global_env(c, "add_Float", BuiltInVar(Poly([], float_binop)))
-  let c = put_global_env(c, "sub_Float", BuiltInVar(Poly([], float_binop)))
-  let c = put_global_env(c, "mul_Float", BuiltInVar(Poly([], float_binop)))
-  let c = put_global_env(c, "div_Float", BuiltInVar(Poly([], float_binop)))
+  let c = put_builtin(c, "lt_int", Poly([], int_compop))
+  let c = put_builtin(c, "gt_int", Poly([], int_compop))
+  let c = put_builtin(c, "lte_int", Poly([], int_compop))
+  let c = put_builtin(c, "gte_int", Poly([], int_compop))
+  let c = put_builtin(c, "add_int", Poly([], int_binop))
+  let c = put_builtin(c, "sub_int", Poly([], int_binop))
+  let c = put_builtin(c, "mul_int", Poly([], int_binop))
+  let c = put_builtin(c, "div_int", Poly([], int_binop))
+  let c = put_builtin(c, "rem_int", Poly([], int_binop))
 
-  let c = put_global_env(c, "True", BuiltInVar(Poly([], bool)))
-  let c = put_global_env(c, "False", BuiltInVar(Poly([], bool)))
-  let c = put_global_env(c, "isa_True", BuiltInVar(Poly([], bool_uop)))
-  let c = put_global_env(c, "isa_False", BuiltInVar(Poly([], bool_uop)))
-  let c = put_global_env(c, "negate_Bool", BuiltInVar(Poly([], bool_uop)))
-  let c = put_global_env(c, "and_Bool", BuiltInVar(Poly([], bool_binop)))
-  let c = put_global_env(c, "or_Bool", BuiltInVar(Poly([], bool_binop)))
+  let c = put_builtin(c, "negate_int", Poly([], int_uop))
 
-  let c = put_global_env(c, "append_String", BuiltInVar(Poly([], string_binop)))
+  let c = put_builtin(c, "lt_float", Poly([], float_compop))
+  let c = put_builtin(c, "gt_float", Poly([], float_compop))
+  let c = put_builtin(c, "lte_float", Poly([], float_compop))
+  let c = put_builtin(c, "gte_float", Poly([], float_compop))
+  let c = put_builtin(c, "add_float", Poly([], float_binop))
+  let c = put_builtin(c, "sub_float", Poly([], float_binop))
+  let c = put_builtin(c, "mul_float", Poly([], float_binop))
+  let c = put_builtin(c, "div_float", Poly([], float_binop))
+
+  let c = put_builtin(c, "True", Poly([], bool))
+  let c = put_builtin(c, "False", Poly([], bool))
+  let c = put_builtin(c, "isa_True", Poly([], bool_uop))
+  let c = put_builtin(c, "isa_False", Poly([], bool_uop))
+  let c = put_builtin(c, "negate_bool", Poly([], bool_uop))
+  let c = put_builtin(c, "and_bool", Poly([], bool_binop))
+  let c = put_builtin(c, "or_bool", Poly([], bool_binop))
+
+  let c = put_builtin(c, "append_string", Poly([], string_binop))
+
+  let print_type = Poly([], TypeFun(string, [string]))
+  let c = put_builtin(c, "print", print_type)
 
   // TODO make nil a BuiltInVar?
   // create the built in nil type
@@ -284,26 +288,31 @@ fn register_custom_type(c: Context, custom: CustomType) -> Context {
   let c =
     list.fold(custom.variants, c, fn(c, v) {
       // register constructor function
+      let n = c.global_env
       let vars = custom.typ.vars
       let custom_typ = custom.typ.typ
       let args = list.map(v.fields, fn(f) { f.typ })
 
       let typ = Poly(vars, TypeFun(custom_typ, args))
       let kind = ConstructorVar(typ, v, custom)
-      let c = put_global_env(c, v.name.1, kind)
+
+      let n = env.put(n, v.name, kind)
 
       // register isa function
       let typ = Poly(vars, TypeFun(bool, [custom_typ]))
       let kind = IsaVar(typ, v, custom)
-      let c = put_global_env(c, "isa_" <> v.name.1, kind)
+      let n = env.put(n, #(v.name.0, "isa_" <> v.name.1), kind)
 
       // register getters for each field
-      list.fold(v.fields, c, fn(c, f) {
-        let getter_name = v.name.1 <> "_" <> f.name
-        let typ = Poly(vars, TypeFun(f.typ, [custom_typ]))
-        let kind = GetterVar(typ, f, v, custom)
-        put_global_env(c, getter_name, kind)
-      })
+      let n =
+        list.fold(v.fields, n, fn(n, f) {
+          let getter_name = v.name.1 <> "_" <> f.name
+          let typ = Poly(vars, TypeFun(f.typ, [custom_typ]))
+          let kind = GetterVar(typ, f, v, custom)
+          env.put(n, #(v.name.0, getter_name), kind)
+        })
+
+      Context(..c, global_env: n)
     })
 
   Context(..c, types: [custom, ..c.types])
@@ -324,7 +333,27 @@ pub fn prelude_context() {
       level: 0,
     )
 
-  prelude(c)
+  let put_builtin = fn(c, name, typ) {
+    put_global_env(c, name, BuiltInVar(typ, #(builtin, name)))
+  }
+
+  // let c = put_builtin(c, "Nil", Poly([], nil))
+  // let c = put_builtin(c, "isa_Nil", Poly([], TypeFun(bool, [nil])))
+
+  let c = put_builtin(c, "True", Poly([], bool))
+  let c = put_builtin(c, "False", Poly([], bool))
+  let c = put_builtin(c, "isa_True", Poly([], bool_uop))
+  let c = put_builtin(c, "isa_False", Poly([], bool_uop))
+
+  let #(c, a) = new_type_var_ref(c)
+  let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
+  let c = put_global_env(c, "equal", BuiltInPolyVar(equal_type))
+
+  let #(c, a) = new_type_var_ref(c)
+  let inspect_type = Poly([get_id(a)], TypeFun(string, [a]))
+  let c = put_global_env(c, "inspect", BuiltInPolyVar(inspect_type))
+  // prelude(c)
+  c
 }
 
 pub fn infer_module(c: Context, mod: g.Module) {
@@ -378,6 +407,7 @@ pub fn infer_module(c: Context, mod: g.Module) {
           })
         })
 
+      // process external functions
       let c =
         list.fold(ext, c, fn(c, def) {
           let fun = def.definition
@@ -388,13 +418,16 @@ pub fn infer_module(c: Context, mod: g.Module) {
                 _ -> False
               }
             })
-          let assert [_, g.String(mod), g.String(name)] = attr.arguments
+          let assert [_, g.String(ext_mod), g.String(ext_name)] = attr.arguments
           let #(c, params, ret) = function_parameters(c, fun)
           let params = list.map(params, fn(x) { x.typ })
-          let typ = TypeFun(ret, params)
-          let name = mod <> "__" <> name
-          //TODO finish externals - need a way of mapping to different names
-          put_global_env(c, fun.name, BuiltInVar(Poly([], typ)))
+
+          let c = exit_level(c)
+          let gen = generalise(c, TypeFun(ret, params))
+          let c = enter_level(c)
+
+          let var = BuiltInVar(gen, #(ext_mod, ext_name))
+          put_global_env(c, fun.name, var)
         })
 
       // put the functions into env with placeholder types
@@ -440,18 +473,15 @@ pub fn infer_module(c: Context, mod: g.Module) {
       // revert dummy functions we added earlier
       let c = Context(..c, functions: funs)
 
-      // generalize functions
+      // generalise functions
       let #(c, group) =
         list.fold(group, #(c, []), fn(acc, fun) {
           let #(c, group) = acc
 
-          let Function(name, typ, params, body) = fun
+          let Function(name, gen, params, body) = fun
 
           // generalise the type
-          let tvs =
-            list.unique(find_tvs(c, typ.typ))
-            |> list.sort(int.compare)
-          let gen = Poly(tvs, typ.typ)
+          let gen = generalise(c, gen.typ)
 
           // update the env with generalised type
           let fun = Function(name, gen, params, body)
@@ -464,6 +494,13 @@ pub fn infer_module(c: Context, mod: g.Module) {
     })
 
   unshadow_context(c)
+}
+
+pub fn generalise(c: Context, typ: Type) {
+  let tvs =
+    list.unique(find_tvs(c, typ))
+    |> list.sort(int.compare)
+  Poly(tvs, typ)
 }
 
 pub fn get_type_var(c: Context, var: TypeVarRef) {
@@ -876,26 +913,37 @@ fn infer_bind_pattern(
       let size = list.length(args)
       let type_name = "Tuple" <> int.to_string(size)
       let args = list.map(args, fn(x) { g.Field(None, x) })
-      let pattern = g.PatternConstructor(None, type_name, args, False)
+      let pattern = g.PatternConstructor(Some(builtin), type_name, args, False)
       infer_bind_pattern(c, n, pattern, subject)
     }
     g.PatternList(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.PatternConstructor(None, "Empty", [], False)
+        None -> g.PatternConstructor(Some(builtin), "Empty", [], False)
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
           let args = [g.Field(None, x), g.Field(None, rest)]
-          g.PatternConstructor(None, "Cons", args, False)
+          g.PatternConstructor(Some(builtin), "Cons", args, False)
         })
       infer_bind_pattern(c, n, list, subject)
     }
-    g.PatternConstructor(_mod, cons, args, _spread) -> {
-      let assert Ok(GlobalName(name, cons)) = resolve_name(c, n, cons)
+    g.PatternConstructor(mod, cons, args, _spread) -> {
+      let #(_name, kind) = case mod {
+        Some(mod) ->
+          case resolve_alias(c, #(mod, cons)) {
+            Ok(res) -> res
+            _ -> panic as { "could not resolve " <> mod <> "." <> cons }
+          }
+        None ->
+          case resolve_name(c, n, cons) {
+            Ok(GlobalName(name, var)) -> #(name, var)
+            _ -> panic as { "could not resolve " <> cons }
+          }
+      }
 
-      case cons {
+      case kind {
         ConstructorVar(_, variant, _) -> {
           // match labels
           let args = list.index_map(args, fn(x, i) { #(x, i) })
@@ -925,7 +973,7 @@ fn infer_bind_pattern(
             })
           #(c, list.flatten(args))
         }
-        BuiltInVar(_) -> #(c, [])
+        BuiltInVar(_, _) -> #(c, [])
         _ -> {
           io.debug(pattern)
           panic as "expected a constructor"
@@ -961,16 +1009,27 @@ fn infer_check_pattern(
       let size = list.length(args)
       let type_name = "Tuple" <> int.to_string(size)
       let args = list.map(args, fn(x) { g.Field(None, x) })
-      let pattern = g.PatternConstructor(None, type_name, args, False)
+      let pattern = g.PatternConstructor(Some(builtin), type_name, args, False)
       infer_check_pattern(c, n, pattern, subject)
     }
-    g.PatternConstructor(_mod, cons, args, _spread) -> {
+    g.PatternConstructor(mod, cons, args, _spread) -> {
       // constructor match
-      let assert Ok(GlobalName(_name, kind)) = resolve_name(c, n, cons)
+      let #(_name, kind) = case mod {
+        Some(mod) ->
+          case resolve_alias(c, #(mod, cons)) {
+            Ok(res) -> res
+            _ -> panic as { "could not resolve " <> mod <> "." <> cons }
+          }
+        None ->
+          case resolve_name(c, n, cons) {
+            Ok(GlobalName(name, var)) -> #(name, var)
+            _ -> panic as { "could not resolve " <> cons }
+          }
+      }
 
       let fields = case kind {
         ConstructorVar(_poly, variant, _custom) -> variant.fields
-        BuiltInVar(_) -> []
+        BuiltInVar(_, _) -> []
         _ -> {
           io.debug(kind)
           panic as "expected a constructor"
@@ -1001,13 +1060,13 @@ fn infer_check_pattern(
     g.PatternList(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.PatternConstructor(None, "Empty", [], False)
+        None -> g.PatternConstructor(Some(builtin), "Empty", [], False)
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
           let args = [g.Field(None, x), g.Field(None, rest)]
-          g.PatternConstructor(None, "Cons", args, False)
+          g.PatternConstructor(Some(builtin), "Cons", args, False)
         })
       infer_check_pattern(c, n, list, subject)
     }
@@ -1067,6 +1126,10 @@ fn register_tuple(c: Context, size: Int) -> #(Context, String) {
   #(c, type_name)
 }
 
+fn access_builtin(name: String) {
+  g.FieldAccess(g.Variable(builtin), name)
+}
+
 fn infer_expression(
   c: Context,
   n: LocalEnv,
@@ -1103,11 +1166,11 @@ fn infer_expression(
       }
     }
     g.NegateBool(e) -> {
-      let fun = g.Call(g.Variable("negate_Bool"), [g.Field(None, e)])
+      let fun = g.Call(access_builtin("negate_bool"), [g.Field(None, e)])
       infer_expression(c, n, fun)
     }
     g.NegateInt(e) -> {
-      let fun = g.Call(g.Variable("negate_Int"), [g.Field(None, e)])
+      let fun = g.Call(access_builtin("negate_int"), [g.Field(None, e)])
       infer_expression(c, n, fun)
     }
     g.Block(statements) -> infer_body(c, n, statements)
@@ -1117,18 +1180,18 @@ fn infer_expression(
       let args = list.map(args, fn(x) { g.Field(None, x) })
       let size = list.length(args)
       let #(c, type_name) = register_tuple(c, size)
-      infer_expression(c, n, g.Call(g.Variable(type_name), args))
+      infer_expression(c, n, g.Call(access_builtin(type_name), args))
     }
     g.List(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.Variable("Empty")
+        None -> g.Call(access_builtin("Empty"), [])
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
           let args = [g.Field(None, x), g.Field(None, rest)]
-          g.Call(g.Variable("Cons"), args)
+          g.Call(access_builtin("Cons"), args)
         })
       infer_expression(c, n, list)
     }
@@ -1261,33 +1324,33 @@ fn infer_expression(
           let fun_name = case name {
             // Bool
             g.Eq -> "equal"
-            g.And -> "and_Bool"
-            g.Or -> "or_Bool"
+            g.And -> "and_bool"
+            g.Or -> "or_bool"
             // Int
-            g.AddInt -> "add_Int"
-            g.SubInt -> "sub_Int"
-            g.MultInt -> "mul_Int"
-            g.DivInt -> "div_Int"
-            g.RemainderInt -> "rem_Int"
-            g.LtInt -> "lt_Int"
-            g.GtInt -> "gt_Int"
-            g.LtEqInt -> "lte_Int"
-            g.GtEqInt -> "gte_Int"
+            g.AddInt -> "add_int"
+            g.SubInt -> "sub_int"
+            g.MultInt -> "mul_int"
+            g.DivInt -> "div_int"
+            g.RemainderInt -> "rem_int"
+            g.LtInt -> "lt_int"
+            g.GtInt -> "gt_int"
+            g.LtEqInt -> "lte_int"
+            g.GtEqInt -> "gte_int"
             // Float
-            g.AddFloat -> "add_Float"
-            g.SubFloat -> "sub_Float"
-            g.MultFloat -> "mul_Float"
-            g.DivFloat -> "div_Float"
-            g.LtFloat -> "lt_Float"
-            g.GtFloat -> "gt_Float"
-            g.LtEqFloat -> "lte_Float"
-            g.GtEqFloat -> "gte_Float"
+            g.AddFloat -> "add_float"
+            g.SubFloat -> "sub_float"
+            g.MultFloat -> "mul_float"
+            g.DivFloat -> "div_float"
+            g.LtFloat -> "lt_float"
+            g.GtFloat -> "gt_float"
+            g.LtEqFloat -> "lte_float"
+            g.GtEqFloat -> "gte_float"
             // String
-            g.Concatenate -> "append_String"
+            g.Concatenate -> "append_string"
             _ -> todo as { "binop not implemented " <> string.inspect(name) }
           }
           let args = [g.Field(None, left), g.Field(None, right)]
-          let fun = g.Call(g.Variable(fun_name), args)
+          let fun = g.Call(access_builtin(fun_name), args)
           infer_expression(c, n, fun)
         }
       }
@@ -1464,7 +1527,7 @@ fn is_bound(c: Context, a: Type) -> Bool {
 }
 
 fn call_and_bool(a, b) {
-  let and_bool = GlobalVar(bool_binop, #(builtin, "and_Bool"))
+  let and_bool = GlobalVar(bool_binop, #(builtin, "and_bool"))
 
   case a, b {
     GlobalVar(_, #(builtin, "True")), _ -> b

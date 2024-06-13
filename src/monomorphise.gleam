@@ -224,8 +224,8 @@ fn typed_to_mono_exp(
       let assert Ok(kind) = env.get(c.poly.global_env, name)
       let typ = sub_type(c, sub, typ)
       case kind {
-        t.BuiltInVar(_) -> {
-          #(c, Var(typ, name.1))
+        t.BuiltInVar(_, ext_name) -> {
+          #(c, Var(typ, global_name(ext_name)))
         }
         t.BuiltInPolyVar(poly) -> {
           let sub = unify_poly(c, poly, typ)
