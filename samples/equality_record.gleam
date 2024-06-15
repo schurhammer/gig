@@ -1,5 +1,7 @@
 //// 21
 
+import gleam/io
+
 type PointT {
   Point(x: Int, y: Int)
 }
@@ -16,5 +18,5 @@ pub fn main() {
     True -> 10
     False -> 20
   }
-  print(inspect(x + y))
+  io.debug(x + y)
 }

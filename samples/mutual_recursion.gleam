@@ -1,7 +1,9 @@
 //// 1
 
+import gleam/io
+
 pub fn main() {
-  print(inspect(a(10)))
+  io.debug(a(10))
 }
 
 fn a(x) {

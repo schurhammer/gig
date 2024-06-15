@@ -123,8 +123,6 @@ pub type Context {
 
 pub const builtin = ""
 
-const nil = TypeApp(#(builtin, "Nil"), [])
-
 const int = TypeApp(#(builtin, "Int"), [])
 
 const float = TypeApp(#(builtin, "Float"), [])
@@ -136,18 +134,6 @@ const string = TypeApp(#(builtin, "String"), [])
 const bool_binop = TypeFun(bool, [bool, bool])
 
 const bool_uop = TypeFun(bool, [bool])
-
-const int_binop = TypeFun(int, [int, int])
-
-const float_binop = TypeFun(float, [float, float])
-
-const int_compop = TypeFun(bool, [int, int])
-
-const float_compop = TypeFun(bool, [float, float])
-
-const int_uop = TypeFun(int, [int])
-
-const string_binop = TypeFun(string, [string, string])
 
 const panic_ast = g.Call(g.Variable("panic_exit"), [])
 
@@ -173,114 +159,6 @@ fn resolve_alias(c: Context, name: #(String, String)) {
     Ok(var) -> Ok(#(name, var))
     Error(_) -> Error(Nil)
   }
-}
-
-fn prelude(c: Context) -> Context {
-  let #(c, a) = new_type_var_ref(c)
-  let equal_type = Poly([get_id(a)], TypeFun(bool, [a, a]))
-  let c = put_global_env(c, "equal", BuiltInPolyVar(equal_type))
-
-  let #(c, a) = new_type_var_ref(c)
-  let inspect_type = Poly([get_id(a)], TypeFun(string, [a]))
-  let c = put_global_env(c, "inspect", BuiltInPolyVar(inspect_type))
-
-  let put_builtin = fn(c, name, typ) {
-    put_global_env(c, name, BuiltInVar(typ, #(builtin, name)))
-  }
-
-  let #(c, a) = new_type_var_ref(c)
-  let poly = Poly([get_id(a)], TypeFun(a, []))
-  let c = put_builtin(c, "panic_exit", poly)
-
-  let c = put_builtin(c, "lt_int", Poly([], int_compop))
-  let c = put_builtin(c, "gt_int", Poly([], int_compop))
-  let c = put_builtin(c, "lte_int", Poly([], int_compop))
-  let c = put_builtin(c, "gte_int", Poly([], int_compop))
-  let c = put_builtin(c, "add_int", Poly([], int_binop))
-  let c = put_builtin(c, "sub_int", Poly([], int_binop))
-  let c = put_builtin(c, "mul_int", Poly([], int_binop))
-  let c = put_builtin(c, "div_int", Poly([], int_binop))
-  let c = put_builtin(c, "rem_int", Poly([], int_binop))
-
-  let c = put_builtin(c, "negate_int", Poly([], int_uop))
-
-  let c = put_builtin(c, "lt_float", Poly([], float_compop))
-  let c = put_builtin(c, "gt_float", Poly([], float_compop))
-  let c = put_builtin(c, "lte_float", Poly([], float_compop))
-  let c = put_builtin(c, "gte_float", Poly([], float_compop))
-  let c = put_builtin(c, "add_float", Poly([], float_binop))
-  let c = put_builtin(c, "sub_float", Poly([], float_binop))
-  let c = put_builtin(c, "mul_float", Poly([], float_binop))
-  let c = put_builtin(c, "div_float", Poly([], float_binop))
-
-  let c = put_builtin(c, "True", Poly([], bool))
-  let c = put_builtin(c, "False", Poly([], bool))
-  let c = put_builtin(c, "isa_True", Poly([], bool_uop))
-  let c = put_builtin(c, "isa_False", Poly([], bool_uop))
-  let c = put_builtin(c, "negate_bool", Poly([], bool_uop))
-  let c = put_builtin(c, "and_bool", Poly([], bool_binop))
-  let c = put_builtin(c, "or_bool", Poly([], bool_binop))
-
-  let c = put_builtin(c, "append_string", Poly([], string_binop))
-
-  let print_type = Poly([], TypeFun(string, [string]))
-  let c = put_builtin(c, "print", print_type)
-
-  // TODO make nil a BuiltInVar?
-  // create the built in nil type
-  let nil =
-    CustomType(
-      #(builtin, "Nil"),
-      [],
-      [Variant(#(builtin, "Nil"), fields: [])],
-      Poly([], nil),
-    )
-  let c = register_custom_type(c, nil)
-
-  // create the built in bool type
-  let bool = CustomType(#(builtin, "Bool"), [], [], Poly([], bool))
-  let c = register_custom_type(c, bool)
-
-  // create the built in int type
-  let int = CustomType(#(builtin, "Int"), [], [], Poly([], int))
-  let c = register_custom_type(c, int)
-
-  // create the built in result type
-  let #(c, a) = new_type_var_ref(c)
-  let #(c, b) = new_type_var_ref(c)
-  let assert TypeVar(a_ref) = a
-  let assert TypeVar(b_ref) = b
-  let result =
-    CustomType(
-      #(builtin, "Result"),
-      ["a", "b"],
-      [
-        Variant(#(builtin, "Ok"), fields: [Field("value", a)]),
-        Variant(#(builtin, "Error"), fields: [Field("error", b)]),
-      ],
-      Poly([a_ref.id, b_ref.id], TypeApp(#(builtin, "Result"), [a, b])),
-    )
-  let c = register_custom_type(c, result)
-
-  // create the built in list type
-  let #(c, a) = new_type_var_ref(c)
-  let assert TypeVar(ref) = a
-  let list =
-    CustomType(
-      #(builtin, "List"),
-      ["a"],
-      [
-        Variant(#(builtin, "Empty"), fields: []),
-        Variant(#(builtin, "Cons"), fields: [
-          Field("item", a),
-          Field("next", TypeApp(#(builtin, "List"), [a])),
-        ]),
-      ],
-      Poly([ref.id], TypeApp(#(builtin, "List"), [a])),
-    )
-  let c = register_custom_type(c, list)
-
-  c
 }
 
 fn register_custom_type(c: Context, custom: CustomType) -> Context {
@@ -351,8 +229,8 @@ pub fn prelude_context() {
 
   let #(c, a) = new_type_var_ref(c)
   let inspect_type = Poly([get_id(a)], TypeFun(string, [a]))
-  let c = put_global_env(c, "inspect", BuiltInPolyVar(inspect_type))
-  // prelude(c)
+  let c = put_global_env(c, "gleam_inspect", BuiltInPolyVar(inspect_type))
+
   c
 }
 
@@ -579,11 +457,16 @@ fn resolve_type_name(
   name: String,
 ) -> #(String, String) {
   case mod {
-    Some(mod) ->
-      case env.get(c.type_env, #(mod, name)) {
+    Some(mod) -> {
+      let qual_name = case env.get(c.module_names, mod) {
+        Ok(mod) -> #(mod, name)
+        _ -> #(mod, name)
+      }
+      case env.get(c.type_env, qual_name) {
         Ok(custom) -> custom.name
         _ -> panic as { "could not resolve type " <> mod <> "." <> name }
       }
+    }
     None ->
       // check this module
       case env.get(c.type_env, #(c.name, name)) {
@@ -638,7 +521,7 @@ fn infer_type(c: Context, n: Env(String, Type), typ: g.Type) -> #(Context, Type)
 
 type ResolvedAccess {
   FieldAccess(variant: Variant, field: Field, typ: Type)
-  ModuleAccess(name: #(String, String), typ: Poly)
+  ModuleAccess(name: #(String, String), typ: GlobalVar)
 }
 
 fn find_custom_type(
@@ -686,7 +569,7 @@ fn resolve_access(
     // not a field access, try module access
     _ ->
       case resolve_alias(c, #(qualifier, name)) {
-        Ok(#(name, var)) -> Ok(ModuleAccess(name, var.poly))
+        Ok(#(name, var)) -> Ok(ModuleAccess(name, var))
         _ -> Error("could not resolve name " <> qualifier <> "." <> name)
       }
   }
@@ -1014,7 +897,7 @@ fn infer_check_pattern(
     }
     g.PatternConstructor(mod, cons, args, _spread) -> {
       // constructor match
-      let #(_name, kind) = case mod {
+      let #(name, kind) = case mod {
         Some(mod) ->
           case resolve_alias(c, #(mod, cons)) {
             Ok(res) -> res
@@ -1037,7 +920,7 @@ fn infer_check_pattern(
       }
 
       let tag_args = [g.Field(None, subject)]
-      let tag = g.Variable("isa_" <> cons)
+      let tag = g.FieldAccess(g.Variable(name.0), "isa_" <> cons)
       let #(c, check) = infer_expression(c, n, g.Call(tag, tag_args))
 
       let assert Ok(args) = list.strict_zip(args, fields)
@@ -1185,7 +1068,7 @@ fn infer_expression(
     g.List(elements, tail) -> {
       let tail = case tail {
         Some(tail) -> tail
-        None -> g.Call(access_builtin("Empty"), [])
+        None -> access_builtin("Empty")
       }
       let elements = list.reverse(elements)
       let list =
@@ -1311,6 +1194,8 @@ fn infer_expression(
             g.Call(fun, args) ->
               infer_expression(c, n, g.Call(fun, [g.Field(None, left), ..args]))
             g.Variable(_name) ->
+              infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
+            g.FieldAccess(_value, _field) ->
               infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
             _ -> panic as "pipe to unexpected expression"
           }
@@ -1472,11 +1357,24 @@ fn infer_expression(
           let #(c, exp) = infer_expression(c, n, getter_call)
           #(c, exp)
         }
-        Ok(ModuleAccess(name, poly)) -> {
+        // handle 0-arg constructors
+        Ok(ModuleAccess(name, ConstructorVar(poly, Variant(_, []), _))) -> {
           let #(c, typ) = instantiate(c, poly)
+          let var = GlobalVar(typ, name)
+
+          // new var for the return type
+          let #(c, ret) = new_type_var_ref(c)
+
+          // unify the actual function type with the types of args
+          let c = unify(c, typ, TypeFun(ret, []))
+
+          #(c, Call(ret, var, []))
+        }
+        Ok(ModuleAccess(name, var)) -> {
+          let #(c, typ) = instantiate(c, var.poly)
           #(c, GlobalVar(typ, name))
         }
-        _ -> panic as { "could not resolve name " <> name }
+        _ -> panic as { "could not resolve name " <> name <> "." <> field }
       }
     }
     g.FieldAccess(value, field) -> {

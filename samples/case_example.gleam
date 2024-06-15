@@ -1,7 +1,9 @@
 //// 3
 
+import gleam/io
+
 pub fn main() {
-  print(inspect(f(1) + f(2) + f(3)))
+  io.debug(f(1) + f(2) + f(3))
 }
 
 fn f(n) {

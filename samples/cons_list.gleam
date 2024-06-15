@@ -1,12 +1,14 @@
 //// 6
 
+import gleam/io
+
 type ConsList(a) {
   NullList
   ConsList(head: a, tail: ConsList(a))
 }
 
 pub fn main() {
-  print(inspect(sum(range(3))))
+  io.debug(sum(range(3)))
 }
 
 fn sum(l) {

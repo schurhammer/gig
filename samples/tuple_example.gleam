@@ -1,5 +1,7 @@
 //// 9
 
+import gleam/io
+
 pub fn main() {
   let p = #(1, 2, True)
   let x = case p.2 {
@@ -7,5 +9,5 @@ pub fn main() {
     False -> p.0 + p.1 + 4
   }
   let #(y, z, _) = p
-  print(inspect(x + y + z))
+  io.debug(x + y + z)
 }

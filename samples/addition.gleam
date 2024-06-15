@@ -1,5 +1,7 @@
 //// 3
 
+import gleam/io
+
 pub fn main() {
-  print(inspect(1 + 2))
+  io.debug(1 + 2)
 }

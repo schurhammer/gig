@@ -1,7 +1,9 @@
 //// 3
 
+import gleam/io
+
 pub fn main() {
-  print(inspect(apply(inc, 2)))
+  io.debug(apply(inc, 2))
 }
 
 fn apply(f, x) {

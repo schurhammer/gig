@@ -1,5 +1,7 @@
 //// 21
 
+import gleam/io
+
 pub fn main() {
   let a = True
   let b = True
@@ -12,5 +14,5 @@ pub fn main() {
     True -> 10
     False -> 20
   }
-  print(inspect(x + y))
+  io.debug(x + y)
 }

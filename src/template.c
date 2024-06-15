@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-///INCLUDES///
+/// INCLUDES
 
 #ifdef GC
 
@@ -118,6 +118,7 @@ void *arena_malloc(size_t size)
 typedef struct String String;
 typedef struct Closure Closure;
 
+// NOTE: Strings might not be null terminated
 struct String
 {
   int byte_length;
@@ -163,12 +164,12 @@ Float sub_float(Float x, Float y) { return x - y; }
 Float mul_float(Float x, Float y) { return x * y; }
 Float div_float(Float x, Float y) { return x / y; }
 
-String String_NEW(char *bytes, int byte_length)
+String String_LIT(char *bytes, int byte_length)
 {
-  if (byte_length < 0) {
+  if (byte_length < 0)
+  {
     byte_length = strlen(bytes);
   }
-  // TODO handle empty strings?
   String str;
   str.byte_length = byte_length;
   str.bytes = bytes;
@@ -185,9 +186,16 @@ Bool equal_String(String a, String b)
   return strncmp(a.bytes, b.bytes, a.byte_length) == 0;
 }
 
-String append_string(String a, String b)
+String append_String(String a, String b)
 {
-  // TODO handle empty strings?
+  if (a.byte_length == 0)
+  {
+    return b;
+  }
+  if (b.byte_length == 0)
+  {
+    return a;
+  }
   String str;
   int byte_length = a.byte_length + b.byte_length;
   str.bytes = malloc(byte_length);
@@ -197,57 +205,155 @@ String append_string(String a, String b)
   return str;
 }
 
-Int print(String a)
+Bool starts_with_String(String string, String with)
+{
+  if (string.byte_length < with.byte_length)
+  {
+    return False;
+  }
+  for (int i = 0; i < with.byte_length; i++)
+  {
+    if (string.bytes[i] != with.bytes[i])
+    {
+      return False;
+    }
+  }
+  return True;
+}
+
+Bool ends_with_String(String string, String with)
+{
+  if (string.byte_length < with.byte_length)
+  {
+    return False;
+  }
+  int j = string.byte_length;
+  int k = with.byte_length;
+  for (int i = 1; i <= with.byte_length; i++)
+  {
+    if (string.bytes[j - i] != with.bytes[k - i])
+    {
+      return False;
+    }
+  }
+  return True;
+}
+
+Int compare_String(struct String str1, struct String str2) {
+    if (str1.byte_length != str2.byte_length) {
+        return str1.byte_length - str2.byte_length;
+    }
+    return memcmp(str1.bytes, str2.bytes, str1.byte_length);
+}
+
+String cstring_to_String(char *bytes)
+{
+  String str;
+  str.byte_length = strlen(bytes);
+  str.bytes = malloc(str.byte_length);
+  memcpy(str.bytes, bytes, str.byte_length);
+  return str;
+}
+
+Int print_String(String a)
 {
   printf("%.*s", a.byte_length, a.bytes);
   return 0;
 }
 
-String inspect_Bool(Bool b)
+String gets_String(Int max_length)
+{
+  // extra space for null terminator
+  max_length += 1;
+  char buffer[max_length];
+  if (fgets(buffer, max_length, stdin) != NULL)
+  {
+    return cstring_to_String(buffer);
+  }
+  else
+  {
+    struct String str;
+    str.byte_length = 0;
+    str.bytes = NULL;
+    return str;
+  }
+}
+
+String gleam_inspect_Bool(Bool b)
 {
   if (b)
-    return String_NEW("True", 4);
+    return String_LIT("True", 4);
   else
-    return String_NEW("False", 5);
+    return String_LIT("False", 5);
 }
 
-static char inspect_buf[32];
-
-String inspect_Int(Int value)
+String gleam_inspect_Int(Int value)
 {
-    snprintf(inspect_buf, sizeof(inspect_buf), "%ld", value);
+  char buffer[32];
+  snprintf(buffer, sizeof(buffer), "%ld", value);
 
-    struct String result;
-    result.byte_length = strlen(inspect_buf);
-    result.bytes = malloc(result.byte_length);
+  struct String result;
+  result.byte_length = strlen(buffer);
+  result.bytes = malloc(result.byte_length);
 
-    memcpy(result.bytes, inspect_buf, result.byte_length);
+  memcpy(result.bytes, buffer, result.byte_length);
 
-    return result;
+  return result;
 }
 
-String inspect_Float(Float value)
+String gleam_inspect_Float(Float value)
 {
-    snprintf(inspect_buf, sizeof(inspect_buf), "%g", value);
+  char buffer[32];
+  snprintf(buffer, sizeof(buffer), "%g", value);
 
-    struct String result;
-    result.byte_length = strlen(inspect_buf);
-    result.bytes = malloc(result.byte_length);
+  struct String result;
+  result.byte_length = strlen(buffer);
+  result.bytes = malloc(result.byte_length);
 
-    memcpy(result.bytes, inspect_buf, result.byte_length);
+  memcpy(result.bytes, buffer, result.byte_length);
 
-    return result;
+  return result;
 }
 
-String inspect_String(String s)
+String gleam_inspect_String(String s)
 {
-  String q = String_NEW("\"", 1);
-  return append_string(q, append_string(s, q));
+  // escape special characters
+  char ooh[255] = {0};
+  ooh['\a'] = 'n';
+  ooh['\b'] = 'b';
+  ooh['\f'] = 'f';
+  ooh['\n'] = 'n';
+  ooh['\r'] = 'r';
+  ooh['\t'] = 't';
+  ooh['\v'] = 'v';
+  ooh['\\'] = '\\';
+  ooh['"'] = '"';
+
+  char buffer[s.byte_length * 2 + 1];
+  size_t bp = 0;
+  for (size_t sp = 0; sp < s.byte_length; sp++)
+  {
+    if (ooh[s.bytes[sp]])
+    {
+      buffer[bp++] = '\\';
+      buffer[bp++] = ooh[s.bytes[sp]];
+    }
+    else
+    {
+      buffer[bp++] = s.bytes[sp];
+    }
+  }
+  buffer[bp] = 0;
+  s = cstring_to_String(buffer);
+
+  // slap on some quotes
+  String q = String_LIT("\"", 1);
+  return append_String(q, append_String(s, q));
 }
 
-String inspect_Closure(Closure c)
+String gleam_inspect_Closure(Closure c)
 {
-  return String_NEW("Closure", 7);
+  return String_LIT("Closure", 7);
 }
 
 Closure create_closure(void *fun, Pointer env)
@@ -280,7 +386,7 @@ Bool equal_Closure(Closure a, Closure b)
 
 /// codegen
 
-///CODEGEN_CONTENT///
+/// CODEGEN
 
 /// end of codegen
 
@@ -291,6 +397,6 @@ int main()
 #ifdef GC
   GC_INIT();
 #endif
-  ///INIT///
+  /// INIT
   return 0;
 }

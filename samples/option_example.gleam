@@ -1,5 +1,7 @@
 //// 11
 
+import gleam/io
+
 pub fn main() {
   let x = Ok(1)
   let x = case x {
@@ -11,5 +13,5 @@ pub fn main() {
     Ok(_) -> 20
     Error(x) -> x
   }
-  print(inspect(x + y))
+  io.debug(x + y)
 }

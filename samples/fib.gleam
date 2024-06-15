@@ -1,7 +1,9 @@
 //// 21
 
+import gleam/io
+
 pub fn main() {
-  print(inspect(fib(8)))
+  io.debug(fib(8))
 }
 
 fn fib(n) {

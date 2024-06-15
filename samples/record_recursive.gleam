@@ -1,5 +1,7 @@
 //// 21
 
+import gleam/io
+
 type Option(a) {
   None
   Some(item: a)
@@ -11,7 +13,7 @@ type Point {
 
 pub fn main() {
   let a = Point(1, 2, Some(Point(3, 4, Some(Point(5, 6, None)))))
-  print(inspect(sum(a)))
+  io.debug(sum(a))
 }
 
 fn sum(p: Point) {

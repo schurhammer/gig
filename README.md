@@ -1,34 +1,37 @@
 # gig
 
-Gig is a gleam compiler written in gleam. Made with fairy dust and duct tape.
+Gig is a gleam compiler written in gleam.
 
 ## How to use
 
-`gleam run -m gig example.gleam [--release] [--gc] [--compiler=clang]`
+```
+git clone https://github.com/schurhammer/gig
+cd gig
+gleam run -m gig samples/hello_world.gleam
+./samples/hello_world
+```
 
-This will compile the file to `example.c` and then use a c compiler to create a binary named `example`.
-
-Also recommended to increase your stack size `ulimit -s unlimited`, otherwise stack overflows are likely (segfault).
+This will compile the file `samples/hello_world.gleam` to `samples/hello_world.c` and then use a c compiler to create a binary at `samples/hello_world`.
 
 Optional flags:
-- release: enable optimisation
-- gc: enable garbage collection
-- compiler: the name/path of the c compiler
+- `--release`: enable optimisation
+- `--gc`: enable garbage collection
+- `--compiler=name`: the name/path of the c compiler
 
 Dependencies:
 - clang/gcc/tcc is needed to compile to binary (clang seems to work best for gc)
 - Boehm GC library needs to be available for --gc
 
+You may wish to increase your stack size `ulimit -s unlimited` to avoid stack overflows.
+
 ## Feature / Todo List
 
 ### Basics
 
-- [x] Modules (note: modules are resolved relative to the root file)
-- [ ] Unqualified imports
 - [x] Bools
 - [x] Ints
 - [x] Floats
-- [ ] Number formats
+- [ ] Number formats (other than decimal)
 - [x] Strings
 - [x] Lists
 - [x] Equality
@@ -36,7 +39,9 @@ Dependencies:
 - [x] Discard patterns
 - [x] Type inference
 - [x] Type annotations
-- [ ] Type imports
+- [x] Modules (note: modules are resolved relative to the root file)
+- [ ] Dependencies
+- [ ] Unqualified imports
 - [ ] Type aliases
 - [x] Blocks
 - [ ] Constants
@@ -82,11 +87,7 @@ Dependencies:
 
 ### Standard library
 
-- [ ] Standard library package
-- [ ] List module
-- [ ] Result module
-- [ ] Dict module
-- [ ] Option module
+There is limited support for standard library functions, see `stdlib/`.
 
 ### Advanced features
 
@@ -99,4 +100,4 @@ Dependencies:
 
 ## Contributing
 
-I am not accepting code contributions at this time, feel free to make issues or discussions though.
+I am not accepting code contributions at this time. Feel free to make issues, suggestions, or discussions though.

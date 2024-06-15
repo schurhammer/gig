@@ -1,5 +1,7 @@
 //// 21
 
+import gleam/io
+
 type ConsList(a) {
   NullList
   ConsList(head: a, tail: ConsList(a))
@@ -17,5 +19,5 @@ pub fn main() {
     True -> 10
     False -> 20
   }
-  print(inspect(x + y))
+  io.debug(x + y)
 }

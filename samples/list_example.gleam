@@ -1,7 +1,9 @@
 //// 6
 
+import gleam/io
+
 pub fn main() {
-  print(inspect(sum(range(3))))
+  io.debug(sum(range(3)))
 }
 
 fn sum(l) {

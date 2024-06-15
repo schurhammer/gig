@@ -5,15 +5,17 @@
 //// 2
 //// 12345678912345
 
+import gleam/io
+
 pub fn main() {
   let x = 0.1
   let y = 0.1
   let z = 0.2
-  print(inspect(z) <> "\n")
-  print(inspect(z +. x) <> "\n")
-  print(inspect(z -. x) <> "\n")
-  print(inspect(z *. x) <> "\n")
-  print(inspect(z /. x) <> "\n")
+  io.debug(z)
+  io.debug(z +. x)
+  io.debug(z -. x)
+  io.debug(z *. x)
+  io.debug(z /. x)
   case x == y {
     True -> print("1")
     False -> print("0")

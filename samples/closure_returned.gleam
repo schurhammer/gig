@@ -1,8 +1,10 @@
 //// 7
 
+import gleam/io
+
 pub fn main() {
   let add5 = make_adder(5)
-  print(inspect(add5(2)))
+  io.debug(add5(2))
 }
 
 pub fn make_adder(x) {

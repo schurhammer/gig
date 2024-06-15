@@ -1,5 +1,7 @@
 //// 6
 
+import gleam/io
+
 pub fn main() {
   let x = 1
   let y = {
@@ -7,5 +9,5 @@ pub fn main() {
     let y = 3
     x + y
   }
-  print(inspect(x + y))
+  io.debug(x + y)
 }

@@ -48,7 +48,7 @@ fn string_lit(val: String) {
   // for now ive made size -1 check the size at runtime
   // let size = int.to_string(string.byte_size(val))
   let size = "-1"
-  "String_NEW(\"" <> val <> "\", " <> size <> ")"
+  "String_LIT(\"" <> val <> "\", " <> size <> ")"
 }
 
 fn texp(arg: Exp, target: String, id: Int) -> String {
@@ -189,7 +189,7 @@ fn custom_type_forward(t: CustomType) {
         _ -> panic as "unexpected struct type with multiple variants"
       }
   }
-  let inspect = "String inspect_" <> t.name <> "(" <> t.name <> " a);\n"
+  let inspect = "String gleam_inspect_" <> t.name <> "(" <> t.name <> " a);\n"
   typedef <> equal <> inspect
 }
 
@@ -302,7 +302,7 @@ fn custom_type(t: CustomType) {
     <> "}\n"
 
   let inspect =
-    "String inspect_"
+    "String gleam_inspect_"
     <> t.name
     <> "("
     <> t.name
@@ -317,10 +317,10 @@ fn custom_type(t: CustomType) {
         <> case v.fields {
           [] -> "return " <> string_lit(v.name) <> ";\n"
           _ ->
-            "return append_string("
+            "return append_String("
             <> v.fields
             |> list.map(fn(f) {
-              "inspect_"
+              "gleam_inspect_"
               <> type_name(f.typ)
               <> "(a"
               <> access_op
@@ -329,7 +329,7 @@ fn custom_type(t: CustomType) {
             })
             |> list.intersperse(string_lit(", "))
             |> list.fold(string_lit(v.name <> "("), fn(a, f) {
-              "append_string(" <> a <> ", " <> f <> ")"
+              "append_String(" <> a <> ", " <> f <> ")"
             })
             <> ", "
             <> string_lit(")")
@@ -350,10 +350,10 @@ fn custom_type(t: CustomType) {
           <> case v.fields {
             [] -> "return " <> string_lit(v.name) <> ";\n"
             _ ->
-              "return append_string("
+              "return append_String("
               <> v.fields
               |> list.map(fn(f) {
-                "inspect_"
+                "gleam_inspect_"
                 <> type_name(f.typ)
                 <> "(a"
                 <> access_op
@@ -362,7 +362,7 @@ fn custom_type(t: CustomType) {
               })
               |> list.intersperse(string_lit(", "))
               |> list.fold(string_lit(v.name <> "("), fn(a, f) {
-                "append_string(" <> a <> ", " <> f <> ")"
+                "append_String(" <> a <> ", " <> f <> ")"
               })
               <> ", "
               <> string_lit(")")
