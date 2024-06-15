@@ -17,59 +17,59 @@ pub fn main() {
   io.debug(z *. x)
   io.debug(z /. x)
   case x == y {
-    True -> print("1")
-    False -> print("0")
+    True -> io.print("1")
+    False -> io.print("0")
   }
   case x == z {
-    True -> print("0")
-    False -> print("2")
+    True -> io.print("0")
+    False -> io.print("2")
   }
   case x <. y {
-    True -> print("0")
-    False -> print("3")
+    True -> io.print("0")
+    False -> io.print("3")
   }
   case x <. z {
-    True -> print("4")
-    False -> print("0")
+    True -> io.print("4")
+    False -> io.print("0")
   }
   case z <. x {
-    True -> print("0")
-    False -> print("5")
+    True -> io.print("0")
+    False -> io.print("5")
   }
   case x >. y {
-    True -> print("0")
-    False -> print("6")
+    True -> io.print("0")
+    False -> io.print("6")
   }
   case x >. z {
-    True -> print("0")
-    False -> print("7")
+    True -> io.print("0")
+    False -> io.print("7")
   }
   case z >. x {
-    True -> print("8")
-    False -> print("0")
+    True -> io.print("8")
+    False -> io.print("0")
   }
   case x <=. y {
-    True -> print("9")
-    False -> print("0")
+    True -> io.print("9")
+    False -> io.print("0")
   }
   case x <=. z {
-    True -> print("1")
-    False -> print("0")
+    True -> io.print("1")
+    False -> io.print("0")
   }
   case z <=. x {
-    True -> print("0")
-    False -> print("2")
+    True -> io.print("0")
+    False -> io.print("2")
   }
   case x >=. y {
-    True -> print("3")
-    False -> print("0")
+    True -> io.print("3")
+    False -> io.print("0")
   }
   case x >=. z {
-    True -> print("0")
-    False -> print("4")
+    True -> io.print("0")
+    False -> io.print("4")
   }
   case z >=. x {
-    True -> print("5")
-    False -> print("0")
+    True -> io.print("5")
+    False -> io.print("0")
   }
 }

@@ -94,12 +94,6 @@ pub fn div_float(a: Float, b: Float) -> Float
 @external(c, "", "append_String")
 pub fn append_string(a: String, b: String) -> String
 
-@external(c, "", "print_String")
-pub fn print(s: String) -> Int
-
-@external(c, "", "gets_String")
-fn gets(length: Int) -> String
-
 // Other Functions
 
 @external(c, "", "panic_exit")

@@ -1,7 +1,9 @@
 //// world
 
+import gleam/io
+
 pub fn world() {
-  print("world")
+  io.print("world")
 }
 
 pub fn main() {

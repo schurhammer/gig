@@ -1,7 +1,9 @@
 //// hello world
 
+import gleam/io
+
 pub fn main() {
   let x = "hello"
   let y = "world"
-  print(x <> " " <> y)
+  io.print(x <> " " <> y)
 }
