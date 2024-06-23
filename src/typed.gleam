@@ -1187,6 +1187,47 @@ fn infer_expression(
 
       #(c, Fn(typ, param_names, body))
     }
+    g.RecordUpdate(module, constructor, record, fields) -> {
+      // Resolve the constructor
+      let constructor_name = case module {
+        Some(mod_name) -> mod_name <> "." <> constructor
+        None -> constructor
+      }
+      let assert Ok(resolved) = resolve_name(c, n, constructor_name)
+      let assert GlobalName(_name, ConstructorVar(_poly, variant, _)) = resolved
+
+      // Create a list of all fields, merging new values with the original record
+      let all_fields =
+        list.map(variant.fields, fn(field) {
+          case list.find(fields, fn(f) { f.0 == field.name }) {
+            Ok(#(_, new_value)) -> {
+              // If a new value is povided, use it
+              g.Field(Some(field.name), new_value)
+            }
+            Error(Nil) -> {
+              // If no new value, access the field from the original record
+              let field_access = g.FieldAccess(record, field.name)
+              g.Field(Some(field.name), field_access)
+            }
+          }
+        })
+
+      // Fold the field inference results
+      let #(c, all_fields) =
+        list.fold(all_fields, #(c, []), fn(acc, field) {
+          let #(c, fields) = acc
+          #(c, [field, ..fields])
+        })
+
+      // Reverse the fields to maintain the original order
+      let all_fields = list.reverse(all_fields)
+
+      // Create a new constructor call with all fields
+      let updated_record = g.Call(g.Variable(constructor), all_fields)
+
+      // Infer the type of the updated record
+      infer_expression(c, n, updated_record)
+    }
     g.BinaryOperator(name, left, right) -> {
       case name {
         g.Pipe -> {

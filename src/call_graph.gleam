@@ -159,6 +159,10 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
       let n = combine_env(params, n)
       walk_body(g, n, r, body)
     }
+    g.RecordUpdate(_module, _constructor, record, fields) -> {
+      let g = walk_expression(g, n, r, record)
+      list.fold(fields, g, fn(g, f) { walk_expression(g, n, r, f.1) })
+    }
     _ -> {
       io.debug(e)
       todo

@@ -318,7 +318,7 @@ String gleam_inspect_Float(Float value)
 String gleam_inspect_String(String s)
 {
   // escape special characters
-  char ooh[255] = {0};
+  char ooh[256] = {0};
   ooh['\a'] = 'n';
   ooh['\b'] = 'b';
   ooh['\f'] = 'f';
@@ -329,8 +329,9 @@ String gleam_inspect_String(String s)
   ooh['\\'] = '\\';
   ooh['"'] = '"';
 
-  char buffer[s.byte_length * 2 + 1];
+  char buffer[s.byte_length * 2 + 3];
   size_t bp = 0;
+  buffer[bp++] = '"';
   for (size_t sp = 0; sp < s.byte_length; sp++)
   {
     if (ooh[s.bytes[sp]])
@@ -343,12 +344,9 @@ String gleam_inspect_String(String s)
       buffer[bp++] = s.bytes[sp];
     }
   }
+  buffer[bp++] = '"';
   buffer[bp] = 0;
-  s = cstring_to_String(buffer);
-
-  // slap on some quotes
-  String q = String_LIT("\"", 1);
-  return append_String(q, append_String(s, q));
+  return cstring_to_String(buffer);
 }
 
 String gleam_inspect_Closure(Closure c)
