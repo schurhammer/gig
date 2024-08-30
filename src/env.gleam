@@ -26,6 +26,10 @@ pub fn get_entry(e: Env(k, v), k: k) -> Result(#(k, v), Nil) {
   }
 }
 
+pub fn fold(e: Env(k, v), from: a, fun: fn(a, k, v) -> a) {
+  dict.fold(e.entries, from, fun)
+}
+
 pub fn has(e: Env(k, v), k: k) -> Bool {
   case get(e, k) {
     Ok(_) -> True

@@ -1454,17 +1454,6 @@ pub fn resolve_type(c: Context, typ: Type) {
   }
 }
 
-fn is_bound(c: Context, a: Type) -> Bool {
-  case a {
-    TypeVar(ref) ->
-      case get_type_var(c, ref) {
-        Bound(a) -> True
-        _ -> False
-      }
-    _ -> False
-  }
-}
-
 fn call_and_bool(a, b) {
   let and_bool = GlobalVar(bool_binop, #(builtin, "and_bool"))
 
@@ -1502,19 +1491,10 @@ fn occurs(c: Context, id: Int, level: Int, in: Type) -> #(Context, Bool) {
 }
 
 fn unify(c: Context, a: Type, b: Type) -> Context {
-  // TODO not sure if this is_bound check are necessary
-  let a_bound = is_bound(c, a)
-  let b_bound = is_bound(c, b)
-  case a, b, a_bound, b_bound {
-    TypeVar(ref), b, True, _ -> {
-      let assert Bound(a) = get_type_var(c, ref)
-      unify(c, a, b)
-    }
-    a, TypeVar(ref), _, True -> {
-      let assert Bound(b) = get_type_var(c, ref)
-      unify(c, a, b)
-    }
-    TypeVar(ref), b, _, _ ->
+  let a = resolve_type(c, a)
+  let b = resolve_type(c, b)
+  case a, b {
+    TypeVar(ref), b ->
       case a == b {
         True -> c
         False -> {
@@ -1532,30 +1512,13 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
           }
         }
       }
-    a, TypeVar(ref), _, _ ->
-      case a == b {
-        True -> c
-        False -> {
-          let assert Unbound(bid, blevel) = get_type_var(c, ref)
-          let #(c, occurs) = occurs(c, bid, blevel, a)
-          case occurs {
-            True -> {
-              io.debug(a)
-              io.debug(b)
-              panic as "recursive type"
-            }
-            False -> {
-              set_type_var(c, ref, Bound(a))
-            }
-          }
-        }
-      }
-    TypeApp(aname, _), TypeApp(bname, _), _, _ if aname != bname -> {
+    a, TypeVar(ref) -> unify(c, b, a)
+    TypeApp(aname, _), TypeApp(bname, _) if aname != bname -> {
       io.debug(a)
       io.debug(b)
       panic as "failed to unify types"
     }
-    TypeApp(_, aargs), TypeApp(_, bargs), _, _ -> {
+    TypeApp(_, aargs), TypeApp(_, bargs) -> {
       case list.strict_zip(aargs, bargs) {
         Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
         Error(_) -> {
@@ -1565,7 +1528,7 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
         }
       }
     }
-    TypeFun(aret, aargs), TypeFun(bret, bargs), _, _ -> {
+    TypeFun(aret, aargs), TypeFun(bret, bargs) -> {
       let c = unify(c, aret, bret)
       case list.strict_zip(aargs, bargs) {
         Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
@@ -1576,7 +1539,7 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
         }
       }
     }
-    _, _, _, _ -> {
+    _, _ -> {
       io.debug(a)
       io.debug(b)
       panic as "failed to unify types"
