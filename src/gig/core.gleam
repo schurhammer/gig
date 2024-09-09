@@ -1,4 +1,5 @@
 import env
+import gig/gen_names.{get_id}
 import gig/typed_ast as t
 import glance as g
 import gleam/int
@@ -54,11 +55,19 @@ pub type CustomType {
 }
 
 pub type Variant {
+  // TODO bring back field names?
   Variant(typ: Poly, id: String, fields: List(Type))
 }
 
 pub type Function {
-  Function(typ: Poly, id: String, parameters: List(Parameter), body: Exp)
+  Function(
+    typ: Poly,
+    id: String,
+    parameters: List(Parameter),
+    body: Exp,
+    external: Bool,
+    monomorphise: Bool,
+  )
 }
 
 pub type Context {
@@ -95,8 +104,8 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
 
   let acc =
     list.fold(module.custom_types, acc, fn(acc, custom) {
-      case custom.definition.parameters {
-        // no parameters is considered external
+      case custom.definition.variants {
+        // no variants is considered external
         [] -> acc
         _ -> {
           let custom = lower_custom_type(c, custom.definition)
@@ -107,19 +116,8 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
 
   let acc =
     list.fold(module.functions, acc, fn(acc, fun) {
-      let external = list.any(fun.attributes, fn(x) { x.name == "external" })
-      let monomorphise =
-        list.any(fun.attributes, fn(x) { x.name == "monomorphise" })
-      // external functions are not lowered
-      // TODO bit of a hack to makes it monomorphise
-      // find a better way - maybe external functions env / flag?
-      case external && !monomorphise {
-        True -> acc
-        False -> {
-          let fun = lower_function(c, fun.definition)
-          Context(..acc, functions: env.put(acc.functions, fun.id, fun))
-        }
-      }
+      let fun = lower_function(c, fun)
+      Context(..acc, functions: env.put(acc.functions, fun.id, fun))
     })
   acc
 }
@@ -141,14 +139,21 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
   CustomType(typ, id, parameters, variants)
 }
 
-fn lower_function(c: t.Context, function: t.Function) {
+fn lower_function(c: t.Context, def: t.Definition(t.Function)) {
+  let function = def.definition
   let typ = map_poly(c, function.typ)
   let module = c.current_module
   let name = function.name
   let id = get_id(module, name)
   let parameters = list.map(function.parameters, lower_parameter(c, _))
   let body = lower_body(c, function.body)
-  Function(typ:, id:, parameters:, body:)
+
+  let external = list.any(def.attributes, fn(x) { x.name == "external" })
+  let monomorphise =
+    list.any(def.attributes, fn(x) { x.name == "monomorphise" })
+  let monomorphise = monomorphise || !external
+
+  Function(typ:, id:, parameters:, body:, external:, monomorphise:)
 }
 
 fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
@@ -221,20 +226,21 @@ fn lower_pattern_bindings(
       ordered_arguments,
       _,
       _,
-    ) -> todo
+    ) -> {
+      let elems: List(t.Pattern) = ordered_arguments
+      list.index_map(elems, fn(elem, i) {
+        let subject =
+          t.FieldAccess(elem.typ, subject, module, constructor, "", i)
+        lower_pattern_bindings(c, elem, subject)
+      })
+      |> list.flatten
+    }
   }
 }
 
 const bool_type = NamedType("Bool", [])
 
 const true_value = Global(bool_type, "True")
-
-pub fn get_id(module: String, name: String) -> String {
-  case module == t.builtin {
-    True -> name
-    False -> string.replace(module, "/", "_") <> "_" <> name
-  }
-}
 
 fn and_exp(first: Exp, second: Exp) {
   case first, second {
@@ -254,10 +260,6 @@ fn tuple_type_name(typ: Type) {
     TupleType(e) -> "Tuple" <> int.to_string(list.length(e))
     _ -> panic as "expected tuple type"
   }
-}
-
-fn getter_name(constructor: String, field_index: Int) {
-  constructor <> "_get_" <> int.to_string(field_index)
 }
 
 fn lower_pattern_match(
@@ -321,9 +323,10 @@ fn lower_pattern_match(
       _,
       _,
     ) -> {
-      let elems: List(t.Pattern) = todo
+      let elems: List(t.Pattern) = ordered_arguments
       list.index_fold(elems, true_value, fn(match, elem, i) {
-        let subject = t.FieldAccess(elem.typ, subject, "", i)
+        let subject =
+          t.FieldAccess(elem.typ, subject, module, constructor, "", i)
         let elem_match = lower_pattern_match(c, elem, subject)
         and_exp(elem_match, match)
       })
@@ -338,6 +341,15 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.String(typ, value) -> Literal(map_type(c, typ), String(value))
     t.LocalVariable(typ, name) -> Local(map_type(c, typ), name)
     t.GlobalVariable(typ, module, name) -> {
+      let assert Ok(#(_, _, _, kind)) = t.resolve_global_name(c, module, name)
+
+      // rewrite function name if its a constructor function
+      // TODO maybe change type naming scheme so we can keep constructor names
+      let name = case kind {
+        t.ConstructorFunction -> gen_names.get_constructor_name(name)
+        _ -> name
+      }
+
       let typ = map_type(c, typ)
       Global(typ, get_id(module, name))
     }
@@ -399,12 +411,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Fn(typ, parameters, body)
     }
     t.RecordUpdate(typ, module, constructor, record, fields) -> todo
-    t.FieldAccess(typ, container, label, index) -> {
-      let module = todo
-      let constructor = todo
+    t.FieldAccess(typ, container, module, variant, label, index) -> {
       let typ = map_type(c, typ)
       let container = lower_expression(c, container)
-      let getter_name = constructor <> "_get_" <> label
+      let getter_name = gen_names.get_getter_name(variant, index)
       let getter_typ = FunctionType([container.typ], typ)
       let getter = Global(getter_typ, get_id(module, getter_name))
       Call(typ, getter, [container])
@@ -419,7 +429,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let typ = map_type(c, typ)
       let tuple = lower_expression(c, tuple)
       let constructor = tuple_type_name(tuple.typ)
-      let getter_name = getter_name(constructor, index)
+      let getter_name = gen_names.get_getter_name(constructor, index)
       let getter_typ = FunctionType([tuple.typ], typ)
       let getter = Global(getter_typ, getter_name)
       Call(typ, getter, [tuple])

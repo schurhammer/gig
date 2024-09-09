@@ -10,6 +10,10 @@ pub fn new() -> Env(k, v) {
   Env(dict.new())
 }
 
+pub fn values(e: Env(k, v)) {
+  dict.values(e.entries)
+}
+
 pub fn put(e: Env(k, v), k: k, v: v) -> Env(k, v) {
   dict.insert(e.entries, k, v)
   Env(dict.insert(e.entries, k, v))

@@ -1,7 +1,7 @@
 // TODO figure out the minimum required external functions to be able to
 // implement all the string functionality
 // maybe we can build on bitstring / dynamic types once its supported
-
+import gleam
 import gleam/order
 
 @external(c, "", "append_String")
@@ -25,5 +25,5 @@ pub fn compare(a: String, b: String) -> order.Order {
 }
 
 pub fn inspect(value: a) -> String {
-    gleam_inspect(value)
+    gleam.inspect(value)
 }

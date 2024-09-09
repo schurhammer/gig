@@ -4,25 +4,18 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/string
+import pprint
 
 pub type Context {
-  Context(
-    types_in: env.Env(String, t.CustomType),
-    functions_in: env.Env(String, t.Function),
-    types_out: env.Env(String, t.CustomType),
-    functions_out: env.Env(String, t.Function),
-  )
+  Context(in: t.Context, out: t.Context)
 }
 
 pub fn run(c: t.Context, main_name: String) {
-  let c =
-    Context(
-      types_in: c.types,
-      functions_in: c.functions,
-      types_out: env.new(),
-      functions_out: env.new(),
-    )
-  let assert Ok(main) = env.get(c.functions_in, main_name)
+  let oc = t.Context(env.new(), env.new())
+  let c = Context(in: c, out: oc)
+  pprint.debug(c.in.functions)
+  pprint.debug(main_name)
+  let assert Ok(main) = env.get(c.in.functions, main_name)
   let typ = sub_type(c, [], main.typ.typ)
   let #(c, main_name) = instantiate_function(c, main_name, typ)
   c
@@ -114,14 +107,14 @@ fn get_type_string(sub: List(#(Int, t.Type))) {
 fn instantiate_type(c: Context, typ: t.Type) {
   case typ {
     t.NamedType(name, _args) -> {
-      case env.get(c.types_in, name) {
+      case env.get(c.in.types, name) {
         Ok(custom) -> {
           let mono = sub_type(c, [], typ)
           let sub = unify_poly(c, custom.typ, mono)
           let type_string = get_type_string(sub)
           let mono_name = custom.id <> type_string
 
-          case env.get(c.types_out, mono_name) {
+          case env.get(c.out.types, mono_name) {
             Ok(_) -> c
             Error(_) -> {
               // instantiate variants
@@ -141,8 +134,8 @@ fn instantiate_type(c: Context, typ: t.Type) {
                 t.CustomType(t.Poly([], mono), mono_name, parameters, variants)
 
               // add to module
-              let out = env.put(c.types_out, mono_name, custom)
-              Context(..c, types_out: out)
+              let types = env.put(c.out.types, mono_name, custom)
+              Context(..c, out: t.Context(..c.out, types:))
             }
           }
         }
@@ -156,34 +149,51 @@ fn instantiate_type(c: Context, typ: t.Type) {
 }
 
 fn instantiate_function(c: Context, name: String, mono: t.Type) {
-  case env.get(c.functions_in, name) {
+  case env.get(c.in.functions, name) {
     Ok(fun) -> {
       let sub = unify_poly(c, fun.typ, mono)
 
       let type_string = get_type_string(sub)
       let mono_name = fun.id <> type_string
 
-      case env.get(c.functions_out, mono_name) {
+      case env.get(c.out.functions, mono_name) {
         Ok(fun) -> #(c, fun.id)
         Error(_) -> {
-          // add placeholder to prevent duplicates
-          let out = env.put(c.functions_out, mono_name, fun)
-          let c = Context(..c, functions_out: out)
+          case fun.external {
+            True ->
+              case fun.monomorphise {
+                True -> #(c, mono_name)
+                False -> #(c, name)
+              }
+            False -> {
+              // add placeholder to prevent infinite recursion
+              let functions = env.put(c.out.functions, mono_name, fun)
+              let c = Context(..c, out: t.Context(..c.out, functions:))
 
-          // instantiate function
-          let #(c, mono_body) = typed_to_mono_exp(c, sub, fun.body)
-          let params =
-            list.map(fun.parameters, fn(p) {
-              let typ = sub_type(c, sub, p.typ)
-              t.Parameter(typ, p.name)
-            })
-          let fun = t.Function(t.Poly([], mono), mono_name, params, mono_body)
+              // instantiate function
+              let #(c, mono_body) = typed_to_mono_exp(c, sub, fun.body)
+              let params =
+                list.map(fun.parameters, fn(p) {
+                  let typ = sub_type(c, sub, p.typ)
+                  t.Parameter(typ, p.name)
+                })
+              let fun =
+                t.Function(
+                  typ: t.Poly([], mono),
+                  id: mono_name,
+                  parameters: params,
+                  body: mono_body,
+                  external: False,
+                  monomorphise: False,
+                )
 
-          // add to module
-          let out = env.put(c.functions_out, mono_name, fun)
-          let c = Context(..c, functions_out: out)
+              // add to module
+              let functions = env.put(c.out.functions, mono_name, fun)
+              let c = Context(..c, out: t.Context(..c.out, functions:))
 
-          #(c, mono_name)
+              #(c, mono_name)
+            }
+          }
         }
       }
     }
@@ -199,8 +209,6 @@ fn typed_to_mono_exp(
   sub: List(#(Int, t.Type)),
   e: t.Exp,
 ) -> #(Context, t.Exp) {
-  // TODO maybe we don't need to do this for *every* expression?
-  let c = instantiate_type(c, e.typ)
   case e {
     t.Literal(typ, v) -> #(c, t.Literal(sub_type(c, sub, typ), v))
     t.Local(typ, name) -> {
@@ -208,6 +216,10 @@ fn typed_to_mono_exp(
       #(c, t.Local(typ, name))
     }
     t.Global(typ, name) -> {
+      let c = case typ {
+        t.FunctionType(_, ret) -> instantiate_type(c, ret)
+        _ -> instantiate_type(c, e.typ)
+      }
       let typ = sub_type(c, sub, typ)
       let #(c, name) = instantiate_function(c, name, typ)
       #(c, t.Global(typ, name))

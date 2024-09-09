@@ -8,7 +8,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/result.{try}
 import gleam/string
 import graph
-import pprint
 
 pub const builtin = "gleam"
 
@@ -39,6 +38,11 @@ pub type Attribute {
   Attribute(name: String, arguments: List(Expression))
 }
 
+pub type ValueKind {
+  ConstructorFunction
+  TopLevelFunction
+}
+
 // TODO it would probably be good to parameterise the Type
 // then we can offer an ast with resolved types and also library users
 // can add their own info
@@ -47,7 +51,7 @@ pub type Module {
     name: String,
     // TODO move these into context instead of module?
     type_env: env.Env(String, #(Poly, List(Variant))),
-    value_env: env.Env(String, #(Poly, List(Option(String)))),
+    value_env: env.Env(String, #(Poly, List(Option(String)), ValueKind)),
     imports: List(Definition(Import)),
     custom_types: List(Definition(CustomType)),
     type_aliases: List(Definition(TypeAlias)),
@@ -142,7 +146,14 @@ pub type Expression {
     record: Expression,
     fields: List(#(String, Expression)),
   )
-  FieldAccess(typ: Type, container: Expression, label: String, index: Int)
+  FieldAccess(
+    typ: Type,
+    container: Expression,
+    module: String,
+    variant: String,
+    label: String,
+    index: Int,
+  )
   Call(
     typ: Type,
     function: Expression,
@@ -309,6 +320,7 @@ pub type TypeVarEnv =
 pub type Context {
   Context(
     current_module: String,
+    module_alias_env: env.Env(String, String),
     type_vars: TypeVarEnv,
     modules: env.Env(String, Module),
     type_uid: Int,
@@ -325,6 +337,7 @@ pub type TypeEnv =
 pub fn new_context() -> Context {
   Context(
     current_module: "",
+    module_alias_env: env.new(),
     type_vars: env.new(),
     modules: env.new(),
     type_uid: 0,
@@ -333,7 +346,18 @@ pub fn new_context() -> Context {
 }
 
 pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
+  io.debug("infer module " <> name)
   let c = Context(..c, current_module: name)
+
+  // handle module imports
+  let module_alias_env =
+    list.fold(module.imports, env.new(), fn(n, imp) {
+      let name = imp.definition.module
+      let assert Ok(alias) = list.last(string.split(name, "/"))
+      env.put(n, alias, name)
+    })
+
+  let c = Context(..c, module_alias_env:)
 
   // add types to env so they can reference eachother and themselves
   let c =
@@ -375,7 +399,13 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
       list.fold(group, c, fn(c, fun) {
         let #(c, typ) = new_type_var_ref(c)
         let labels = list.map(fun.definition.parameters, fn(f) { f.label })
-        register_value(c, fun.definition.name, Poly([], typ), labels)
+        register_value(
+          c,
+          fun.definition.name,
+          Poly([], typ),
+          labels,
+          TopLevelFunction,
+        )
       })
 
     // infer types for each function
@@ -392,7 +422,7 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
     list.fold(group, c, fn(c, def) {
       let fun = def.definition
       let labels = list.map(fun.parameters, fn(f) { f.label })
-      let c = register_value(c, fun.name, fun.typ, labels)
+      let c = register_value(c, fun.name, fun.typ, labels, TopLevelFunction)
       update_module(c, fn(mod) {
         Module(..mod, functions: [def, ..mod.functions])
       })
@@ -435,9 +465,10 @@ fn register_value(
   name: String,
   typ: Poly,
   labels: List(Option(String)),
+  kind: ValueKind,
 ) -> Context {
   update_module(c, fn(module) {
-    let value_env = env.put(module.value_env, name, #(typ, labels))
+    let value_env = env.put(module.value_env, name, #(typ, labels, kind))
     Module(..module, value_env:)
   })
 }
@@ -583,7 +614,7 @@ fn infer_variant(c, n, typ: Type, variant: g.Variant) -> #(Context, Variant) {
   }
   let typ = generalise(c, typ)
 
-  let c = register_value(c, variant.name, typ, labels)
+  let c = register_value(c, variant.name, typ, labels, ConstructorFunction)
 
   #(c, Variant(typ, variant.name, fields))
 }
@@ -758,31 +789,41 @@ fn resolve_unqualified_global(
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
   // try global env
-  let q_name = QualifiedName(c.current_module, name)
-  case resolve_id(c, q_name) {
-    Ok(#(typ, labels)) -> Ok(#(q_name, typ, labels))
+  case resolve_global_name(c, c.current_module, name) {
+    Ok(#(name, typ, labels, _)) -> Ok(#(name, typ, labels))
     // try prelude
     Error(_) -> {
-      let q_name = QualifiedName(builtin, name)
-      case resolve_id(c, q_name) {
-        Ok(#(typ, labels)) -> Ok(#(q_name, typ, labels))
+      case resolve_global_name(c, builtin, name) {
+        Ok(#(name, typ, labels, _)) -> Ok(#(name, typ, labels))
         Error(_) -> Error("could not resolve name " <> name)
       }
     }
   }
 }
 
-fn resolve_id(
+fn resolve_aliased_name(
   c: Context,
   name: QualifiedName,
-) -> Result(#(Poly, List(Option(String))), String) {
-  case env.get(c.modules, name.module) {
+) -> Result(#(QualifiedName, Poly, List(Option(String)), ValueKind), String) {
+  case env.get(c.module_alias_env, name.module) {
+    Ok(module) -> resolve_global_name(c, module, name.name)
+    Error(_) -> Error("Could not resolve module name " <> name.module)
+  }
+}
+
+pub fn resolve_global_name(
+  c: Context,
+  module_name: String,
+  name: String,
+) -> Result(#(QualifiedName, Poly, List(Option(String)), ValueKind), String) {
+  case env.get(c.modules, module_name) {
     Ok(module) ->
-      case env.get(module.value_env, name.name) {
-        Ok(#(typ, labels)) -> Ok(#(typ, labels))
-        Error(_) -> Error("could not resolve name " <> name.name)
+      case env.get(module.value_env, name) {
+        Ok(#(typ, labels, kind)) ->
+          Ok(#(QualifiedName(module_name, name), typ, labels, kind))
+        Error(_) -> Error("Could not resolve name " <> name)
       }
-    Error(_) -> Error("could not resolve module " <> name.module)
+    Error(_) -> Error("Missing module " <> module_name)
   }
 }
 
@@ -792,7 +833,7 @@ fn resolve_type_name(
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
   case mod {
-    Some(mod) -> resolve_global_type_name(c, mod, name)
+    Some(mod) -> resolve_aliased_type_name(c, mod, name)
     None ->
       case resolve_global_type_name(c, c.current_module, name) {
         Ok(result) -> Ok(result)
@@ -805,7 +846,18 @@ fn resolve_type_name(
   }
 }
 
-fn resolve_global_type_name(
+fn resolve_aliased_type_name(
+  c: Context,
+  module: String,
+  name: String,
+) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
+  case env.get(c.module_alias_env, module) {
+    Ok(module) -> resolve_global_type_name(c, module, name)
+    Error(_) -> Error("Could not resolve module name " <> module)
+  }
+}
+
+pub fn resolve_global_type_name(
   c: Context,
   module: String,
   name: String,
@@ -817,7 +869,7 @@ fn resolve_global_type_name(
           Ok(#(QualifiedName(module, name), typ, variants))
         Error(_) -> Error("Could not resolve type " <> name)
       }
-    Error(_) -> Error("Could not resolve module " <> module)
+    Error(_) -> Error("Missing module " <> module)
   }
 }
 
@@ -825,8 +877,8 @@ fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
   case mod {
     Some(mod) -> {
       let q_name = QualifiedName(mod, name)
-      resolve_id(c, q_name)
-      |> result.map(fn(global) { #(q_name, global.0, global.1) })
+      resolve_aliased_name(c, q_name)
+      |> result.map(fn(global) { #(global.0, global.1, global.2) })
     }
     None -> {
       resolve_unqualified_global(c, name)
@@ -1327,17 +1379,18 @@ fn infer_expression(
       //   try to resolve module acccess
       let field_access = case infer_expression(c, n, container) {
         Ok(#(c, container)) -> {
-          case container.typ {
+          case resolve_type(c, container.typ) {
             NamedType(name, module, params) -> {
               let assert Ok(#(_, _, variants)) =
-                resolve_global_type_name(c, module, name)
+                resolve_aliased_type_name(c, module, name)
               case variants {
                 [v] ->
                   v.fields
                   |> list.index_map(fn(x, i) { #(x, i) })
                   |> list.find_map(fn(field) {
                     case { field.0 }.label == Some(label) {
-                      True -> Ok(#(c, container, v, field.0, field.1))
+                      True ->
+                        Ok(#(c, container, module, v.name, field.0, field.1))
                       False -> Error(Nil)
                     }
                   })
@@ -1350,21 +1403,22 @@ fn infer_expression(
         Error(_) -> Error(Nil)
       }
       case field_access {
-        Ok(#(c, container, variant, field, index)) -> {
+        Ok(#(c, container, module, variant, field, index)) -> {
           // TODO need to instantiate this type somehow
           // using the container's type to fill in variables
+          // (the field comes straight from the type definition)
           let typ = field.item.typ
-          // TODO probably want variant in there?
-          let field_access = FieldAccess(typ, container, label, index)
+          let field_access =
+            FieldAccess(typ, container, module, variant, label, index)
           Ok(#(c, field_access))
         }
         Error(_) -> {
           case container {
             g.Variable(module) -> {
-              case resolve_id(c, QualifiedName(module, label)) {
-                Ok(#(poly, _labels)) -> {
+              case resolve_aliased_name(c, QualifiedName(module, label)) {
+                Ok(#(name, poly, _labels, _)) -> {
                   let #(c, typ) = instantiate(c, poly)
-                  Ok(#(c, GlobalVariable(typ, module, label)))
+                  Ok(#(c, GlobalVariable(typ, name.module, name.name)))
                 }
                 Error(s) -> Error(s)
               }
@@ -1391,8 +1445,8 @@ fn infer_expression(
       // handle labels
       let labels = case fun {
         GlobalVariable(_typ, module, name) -> {
-          let assert Ok(#(_poly, labels)) =
-            resolve_id(c, QualifiedName(module, name))
+          let assert Ok(#(_name, _poly, labels, _)) =
+            resolve_global_name(c, module, name)
           labels
         }
         _ -> list.map(args, fn(_) { None })
