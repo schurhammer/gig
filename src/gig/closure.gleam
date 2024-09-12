@@ -1,7 +1,7 @@
 import gig/core as t
-import gig/env
 import gig/gen_names
 import gig/mono
+import gleam/dict.{type Dict}
 
 import gleam/int
 import gleam/list
@@ -44,7 +44,7 @@ pub fn cc_module(mod: mono.Context) {
   let c = CC(Module([], []), 1)
 
   let c =
-    env.fold(mod.out.functions, c, fn(c, id, fun) {
+    dict.fold(mod.out.functions, c, fn(c, id, fun) {
       let #(c, e) = cc(c, fun.body)
 
       let parameters = list.map(fun.parameters, fn(x) { x.name })
@@ -55,7 +55,7 @@ pub fn cc_module(mod: mono.Context) {
     })
 
   let c =
-    env.fold(mod.out.types, c, fn(c, id, custom) {
+    dict.fold(mod.out.types, c, fn(c, id, custom) {
       let variants =
         list.map(custom.variants, fn(v) {
           let fields =

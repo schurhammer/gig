@@ -1,7 +1,8 @@
 import gig/call_graph
-import gig/env
 import gig/graph
 import glance as g
+
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/io
 import gleam/list
@@ -52,8 +53,8 @@ pub type Module {
   Module(
     name: String,
     // TODO move these into context instead of module?
-    type_env: env.Env(String, #(Poly, List(Variant))),
-    value_env: env.Env(String, #(Poly, List(Option(String)), ValueKind)),
+    type_env: Dict(String, #(Poly, List(Variant))),
+    value_env: Dict(String, #(Poly, List(Option(String)), ValueKind)),
     imports: List(Definition(Import)),
     custom_types: List(Definition(CustomType)),
     type_aliases: List(Definition(TypeAlias)),
@@ -319,31 +320,31 @@ pub type QualifiedName {
 }
 
 pub type TypeVarEnv =
-  env.Env(Ref, TypeVar)
+  Dict(Ref, TypeVar)
 
 pub type Context {
   Context(
     current_module: String,
-    module_alias_env: env.Env(String, String),
+    module_alias_env: Dict(String, String),
     type_vars: TypeVarEnv,
-    modules: env.Env(String, Module),
+    modules: Dict(String, Module),
     type_uid: Int,
     temp_uid: Int,
   )
 }
 
 pub type LocalEnv =
-  env.Env(String, Type)
+  Dict(String, Type)
 
 pub type TypeEnv =
-  env.Env(String, Type)
+  Dict(String, Type)
 
 pub fn new_context() -> Context {
   Context(
     current_module: "",
-    module_alias_env: env.new(),
-    type_vars: env.new(),
-    modules: env.new(),
+    module_alias_env: dict.new(),
+    type_vars: dict.new(),
+    modules: dict.new(),
     type_uid: 0,
     temp_uid: 0,
   )
@@ -354,10 +355,10 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
 
   // handle module imports
   let module_alias_env =
-    list.fold(module.imports, env.new(), fn(n, imp) {
+    list.fold(module.imports, dict.new(), fn(n, imp) {
       let name = imp.definition.module
       let assert Ok(alias) = list.last(string.split(name, "/"))
-      env.put(n, alias, name)
+      dict.insert(n, alias, name)
     })
 
   let c = Context(..c, module_alias_env:)
@@ -452,12 +453,12 @@ fn generalise(c: Context, typ: Type) {
 }
 
 fn get_module_context(c: Context, module: String) -> Module {
-  env.get(c.modules, module)
+  dict.get(c.modules, module)
   |> result.unwrap(
     Module(
       name: module,
-      type_env: env.new(),
-      value_env: env.new(),
+      type_env: dict.new(),
+      value_env: dict.new(),
       imports: [],
       custom_types: [],
       type_aliases: [],
@@ -470,7 +471,7 @@ fn get_module_context(c: Context, module: String) -> Module {
 fn update_module(c: Context, fun: fn(Module) -> Module) {
   let module = get_module_context(c, c.current_module)
   let module = fun(module)
-  let modules = env.put(c.modules, c.current_module, module)
+  let modules = dict.insert(c.modules, c.current_module, module)
   Context(..c, modules:)
 }
 
@@ -482,7 +483,7 @@ fn register_value(
   kind: ValueKind,
 ) -> Context {
   update_module(c, fn(module) {
-    let value_env = env.put(module.value_env, name, #(typ, labels, kind))
+    let value_env = dict.insert(module.value_env, name, #(typ, labels, kind))
     Module(..module, value_env:)
   })
 }
@@ -494,14 +495,14 @@ fn register_named_type(
   variants: List(Variant),
 ) -> Context {
   update_module(c, fn(module) {
-    let type_env = env.put(module.type_env, name, #(typ, variants))
+    let type_env = dict.insert(module.type_env, name, #(typ, variants))
     Module(..module, type_env:)
   })
 }
 
 fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
-  let attr_env = env.new()
-  let attr_env = env.put(attr_env, "c", nil_type)
+  let attr_env = dict.new()
+  let attr_env = dict.insert(attr_env, "c", nil_type)
 
   let #(c, attrs) =
     list.fold(attrs, #(c, []), fn(acc, attr) {
@@ -530,9 +531,9 @@ fn infer_function(c: Context, fun: g.Function) {
 
   // put params into local env
   let n =
-    list.fold(parameters, env.new(), fn(n, param) {
+    list.fold(parameters, dict.new(), fn(n, param) {
       case param.name {
-        Named(name) -> env.put(n, name, param.typ)
+        Named(name) -> dict.insert(n, name, param.typ)
         Discarded(_) -> n
       }
     })
@@ -581,7 +582,8 @@ fn infer_custom_type(c: Context, custom: g.CustomType) {
   let typ = NamedType(module:, name:, parameters: param_types)
 
   // create an env for param types
-  let n = list.fold(parameters, env.new(), fn(n, p) { env.put(n, p.0, p.1) })
+  let n =
+    list.fold(parameters, dict.new(), fn(n, p) { dict.insert(n, p.0, p.1) })
 
   // process each variant
   let #(c, variants) =
@@ -674,10 +676,10 @@ fn infer_function_parameters(
 
   // create an env for the type variables
   let #(c, type_env) =
-    list.fold(vars, #(c, env.new()), fn(acc, name) {
+    list.fold(vars, #(c, dict.new()), fn(acc, name) {
       let #(c, n) = acc
       let #(c, typ) = new_type_var_ref(c)
-      let n = env.put(n, name, typ)
+      let n = dict.insert(n, name, typ)
       #(c, n)
     })
 
@@ -768,7 +770,7 @@ fn do_infer_annotation(
       #(c, FunctionAnno(typ, params, ret))
     }
     g.VariableType(name) -> {
-      let assert Ok(typ) = env.get(n, name)
+      let assert Ok(typ) = dict.get(n, name)
       #(c, VariableAnno(typ, name))
     }
     g.HoleType(name) -> {
@@ -788,7 +790,7 @@ fn resolve_unqualified_name(
   n: LocalEnv,
   name: String,
 ) -> Result(ResolvedName, String) {
-  case env.get(n, name) {
+  case dict.get(n, name) {
     // try local env
     Ok(typ) -> Ok(LocalName(name, typ))
     Error(_) ->
@@ -820,7 +822,7 @@ fn resolve_aliased_name(
   c: Context,
   name: QualifiedName,
 ) -> Result(#(QualifiedName, Poly, List(Option(String)), ValueKind), String) {
-  case env.get(c.module_alias_env, name.module) {
+  case dict.get(c.module_alias_env, name.module) {
     Ok(module) -> resolve_global_name(c, module, name.name)
     Error(_) -> Error("Could not resolve module name " <> name.module)
   }
@@ -831,9 +833,9 @@ pub fn resolve_global_name(
   module_name: String,
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Option(String)), ValueKind), String) {
-  case env.get(c.modules, module_name) {
+  case dict.get(c.modules, module_name) {
     Ok(module) ->
-      case env.get(module.value_env, name) {
+      case dict.get(module.value_env, name) {
         Ok(#(typ, labels, kind)) ->
           Ok(#(QualifiedName(module_name, name), typ, labels, kind))
         Error(_) -> Error("Could not resolve name " <> name)
@@ -866,7 +868,7 @@ fn resolve_aliased_type_name(
   module: String,
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
-  case env.get(c.module_alias_env, module) {
+  case dict.get(c.module_alias_env, module) {
     Ok(module) -> resolve_global_type_name(c, module, name)
     Error(_) -> Error("Could not resolve module name " <> module)
   }
@@ -877,9 +879,9 @@ pub fn resolve_global_type_name(
   module: String,
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
-  case env.get(c.modules, module) {
+  case dict.get(c.modules, module) {
     Ok(c) ->
-      case env.get(c.type_env, name) {
+      case dict.get(c.type_env, name) {
         Ok(#(typ, variants)) ->
           Ok(#(QualifiedName(module, name), typ, variants))
         Error(_) -> Error("Could not resolve type " <> name)
@@ -908,7 +910,7 @@ fn new_temp_var(c: Context) -> #(Context, String) {
 
 fn new_type_var_ref(c: Context) {
   let ref = Ref(c.type_uid)
-  let type_vars = env.put(c.type_vars, ref, Unbound(c.type_uid))
+  let type_vars = dict.insert(c.type_vars, ref, Unbound(c.type_uid))
   let typ = VariableType(ref)
   #(Context(..c, type_vars: type_vars, type_uid: c.type_uid + 1), typ)
 }
@@ -929,7 +931,7 @@ fn infer_pattern(
     g.PatternVariable(name) -> {
       let #(c, typ) = new_type_var_ref(c)
       let pattern = PatternVariable(typ, name)
-      let n = env.put(n, name, typ)
+      let n = dict.insert(n, name, typ)
       #(c, n, pattern)
     }
     g.PatternTuple(elems) -> {
@@ -988,7 +990,7 @@ fn infer_pattern(
       let pattern = PatternAssignment(pattern.typ, pattern, name)
 
       // Add the name binding to the environment
-      let n = env.put(n, name, pattern.typ)
+      let n = dict.insert(n, name, pattern.typ)
 
       #(c, n, pattern)
     }
@@ -996,7 +998,7 @@ fn infer_pattern(
       // If it's not discarded, add right as a string variable
       let #(n, right) = case right {
         g.Named(name) -> {
-          let n = env.put(n, name, string_type)
+          let n = dict.insert(n, name, string_type)
           #(n, Named(name))
         }
         g.Discarded(name) -> #(n, Discarded(name))
@@ -1069,10 +1071,10 @@ fn infer_annotation(c: Context, typ: g.Type) -> #(Context, Annotation) {
     |> list.sort(string.compare)
 
   let #(c, type_env) =
-    list.fold(vars, #(c, env.new()), fn(acc, name) {
+    list.fold(vars, #(c, dict.new()), fn(acc, name) {
       let #(c, n) = acc
       let #(c, typ) = new_type_var_ref(c)
-      let n = env.put(n, name, typ)
+      let n = dict.insert(n, name, typ)
       #(c, n)
     })
 
@@ -1348,7 +1350,7 @@ fn infer_expression(
       let n =
         list.fold(parameters, n, fn(n, param) {
           case param.name {
-            Named(name) -> env.put(n, name, param.typ)
+            Named(name) -> dict.insert(n, name, param.typ)
             Discarded(_) -> n
           }
         })
@@ -1689,23 +1691,23 @@ fn tuple_index_type(c: Context, elements: List(Type), index: Int) {
 }
 
 type PolyEnv =
-  env.Env(Int, Type)
+  Dict(Int, Type)
 
 fn get_type_var(c: Context, var: Ref) {
-  let assert Ok(x) = env.get(c.type_vars, var)
+  let assert Ok(x) = dict.get(c.type_vars, var)
   x
 }
 
 fn set_type_var(c: Context, var: Ref, bind: TypeVar) {
-  Context(..c, type_vars: env.put(c.type_vars, var, bind))
+  Context(..c, type_vars: dict.insert(c.type_vars, var, bind))
 }
 
 fn instantiate(c: Context, poly: Poly) -> #(Context, Type) {
   let #(c, n) =
-    list.fold(poly.vars, #(c, env.new()), fn(acc, var) {
+    list.fold(poly.vars, #(c, dict.new()), fn(acc, var) {
       let #(c, n) = acc
       let #(c, new_var) = new_type_var_ref(c)
-      let n = env.put(n, var, new_var)
+      let n = dict.insert(n, var, new_var)
       #(c, n)
     })
   let typ = do_instantiate(c, n, poly.typ)
@@ -1731,7 +1733,7 @@ fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
       case get_type_var(c, ref) {
         Bound(x) -> do_instantiate(c, n, x)
         Unbound(x) ->
-          case env.get(n, x) {
+          case dict.get(n, x) {
             Ok(r) -> r
             Error(_) -> typ
           }
@@ -1845,7 +1847,7 @@ fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
 fn resolve_type(c: Context, typ: Type) {
   case typ {
     VariableType(x) -> {
-      let assert Ok(x) = env.get(c.type_vars, x)
+      let assert Ok(x) = dict.get(c.type_vars, x)
       case x {
         Bound(x) -> resolve_type(c, x)
         Unbound(..) -> typ

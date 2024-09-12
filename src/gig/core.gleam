@@ -1,6 +1,6 @@
-import gig/env
 import gig/gen_names.{get_id}
 import gig/typed_ast as t
+import gleam/dict.{type Dict}
 
 import glance as g
 
@@ -65,9 +65,9 @@ pub type External {
 
 pub type Context {
   Context(
-    types: env.Env(String, CustomType),
-    functions: env.Env(String, Function),
-    externals: env.Env(String, External),
+    types: Dict(String, CustomType),
+    functions: Dict(String, Function),
+    externals: Dict(String, External),
   )
 }
 
@@ -89,13 +89,13 @@ pub type Context {
 pub fn lower_context(c: t.Context) {
   // these need registered because they are converted to lieterals
   let externals =
-    env.new()
-    |> env.put("Nil", External(Poly([], nil_type), "Nil", False))
-    |> env.put("True", External(Poly([], bool_type), "True", False))
-    |> env.put("False", External(Poly([], bool_type), "False", False))
+    dict.new()
+    |> dict.insert("Nil", External(Poly([], nil_type), "Nil", False))
+    |> dict.insert("True", External(Poly([], bool_type), "True", False))
+    |> dict.insert("False", External(Poly([], bool_type), "False", False))
 
-  let acc = Context(types: env.new(), functions: env.new(), externals:)
-  env.fold(c.modules, acc, fn(acc, name, module) {
+  let acc = Context(types: dict.new(), functions: dict.new(), externals:)
+  dict.fold(c.modules, acc, fn(acc, name, module) {
     lower_module(c, acc, module)
   })
 }
@@ -134,7 +134,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
         [] -> acc
         _ -> {
           let custom = lower_custom_type(c, custom.definition)
-          Context(..acc, types: env.put(acc.types, custom.id, custom))
+          Context(..acc, types: dict.insert(acc.types, custom.id, custom))
         }
       }
     })
@@ -156,11 +156,14 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
           let internal_id = get_id(module, name)
           let mono = list.any(attrs, fn(x) { x.name == "monomorphise" })
           let fun = External(typ, external_id, mono)
-          Context(..acc, externals: env.put(acc.externals, internal_id, fun))
+          Context(
+            ..acc,
+            externals: dict.insert(acc.externals, internal_id, fun),
+          )
         }
         Error(_) -> {
           let fun = lower_function(c, fun)
-          Context(..acc, functions: env.put(acc.functions, fun.id, fun))
+          Context(..acc, functions: dict.insert(acc.functions, fun.id, fun))
         }
       }
     })
@@ -222,7 +225,7 @@ pub fn register_variant_functions(
     })
   let typ = map_poly(c, variant.typ)
   let fun = External(typ: typ, id: fun_id, mono: True)
-  let acc = Context(..acc, externals: env.put(acc.externals, fun.id, fun))
+  let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
 
   // variant check function
   let fun_id = gen_names.get_variant_check_name(variant_id)
@@ -230,7 +233,7 @@ pub fn register_variant_functions(
   let parameters = [Parameter(typ.typ, "val")]
   let typ = Poly(typ.vars, FunctionType([typ.typ], bool_type))
   let fun = External(typ: typ, id: fun_id, mono: True)
-  let acc = Context(..acc, externals: env.put(acc.externals, fun.id, fun))
+  let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
 
   // getter functions
   list.index_fold(variant.fields, acc, fn(acc, f, i) {
@@ -240,7 +243,7 @@ pub fn register_variant_functions(
     let parameters = [Parameter(typ.typ, "val")]
     let typ = Poly(typ.vars, FunctionType([typ.typ], field_typ))
     let fun = External(typ: typ, id: fun_id, mono: True)
-    Context(..acc, externals: env.put(acc.externals, fun.id, fun))
+    Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
   })
 }
 
@@ -762,7 +765,7 @@ fn map_type(c: t.Context, typ: t.Type) {
       TupleType(elements)
     }
     t.VariableType(ref) -> {
-      let assert Ok(x) = env.get(c.type_vars, ref)
+      let assert Ok(x) = dict.get(c.type_vars, ref)
       case x {
         t.Bound(x) -> map_type(c, x)
         t.Unbound(x) -> Unbound(x)

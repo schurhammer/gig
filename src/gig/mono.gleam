@@ -1,6 +1,6 @@
 import gig/core as t
-import gig/env
 import gig/gen_names
+import gleam/dict.{type Dict}
 
 import gleam/io
 import gleam/list
@@ -12,10 +12,10 @@ pub type Context {
 
 pub fn run(c: t.Context, main_name: String) {
   let oc =
-    t.Context(types: env.new(), functions: env.new(), externals: env.new())
+    t.Context(types: dict.new(), functions: dict.new(), externals: dict.new())
   let c = Context(in: c, out: oc)
 
-  let assert Ok(main) = env.get(c.in.functions, main_name)
+  let assert Ok(main) = dict.get(c.in.functions, main_name)
   let typ = sub_type(c, [], main.typ.typ)
   let #(c, main_name) = instantiate_function(c, main_name, typ)
   c
@@ -110,14 +110,14 @@ fn get_type_string(sub: List(#(Int, t.Type))) {
 fn instantiate_type(c: Context, typ: t.Type) {
   case typ {
     t.NamedType(name, _args) -> {
-      case env.get(c.in.types, name) {
+      case dict.get(c.in.types, name) {
         Ok(custom) -> {
           let mono = sub_type(c, [], typ)
           let sub = unify_poly(c, custom.typ, mono)
           let type_string = get_type_string(sub)
           let mono_name = custom.id <> type_string
 
-          case env.get(c.out.types, mono_name) {
+          case dict.get(c.out.types, mono_name) {
             Ok(_) -> c
             Error(_) -> {
               // instantiate variants
@@ -134,7 +134,7 @@ fn instantiate_type(c: Context, typ: t.Type) {
               let custom = t.CustomType(t.Poly([], mono), mono_name, variants)
 
               // add to module
-              let types = env.put(c.out.types, mono_name, custom)
+              let types = dict.insert(c.out.types, mono_name, custom)
               Context(..c, out: t.Context(..c.out, types:))
             }
           }
@@ -160,7 +160,8 @@ fn register_tuple(c: Context, typ: t.Type) {
 
       let variant = t.Variant(variant_typ, variant_id, element_types)
       let custom = t.CustomType(custom_typ, variant_id, [variant])
-      let cin = t.Context(..cin, types: env.put(cin.types, custom.id, custom))
+      let cin =
+        t.Context(..cin, types: dict.insert(cin.types, custom.id, custom))
 
       // TODO can we reuse the function from core to create constructor/getters?
 
@@ -168,7 +169,8 @@ fn register_tuple(c: Context, typ: t.Type) {
       let fun_id = gen_names.get_constructor_name(variant_id)
       let fun_typ = t.Poly(vars, t.FunctionType(element_types, custom_typ.typ))
       let fun = t.External(typ: fun_typ, id: fun_id, mono: True)
-      let cin = t.Context(..cin, externals: env.put(cin.externals, fun.id, fun))
+      let cin =
+        t.Context(..cin, externals: dict.insert(cin.externals, fun.id, fun))
 
       // create generic tuple getter functions
       let cin =
@@ -177,7 +179,7 @@ fn register_tuple(c: Context, typ: t.Type) {
           let fun_typ =
             t.Poly(vars, t.FunctionType([custom_typ.typ], field_type))
           let fun = t.External(typ: fun_typ, id: fun_id, mono: True)
-          t.Context(..cin, externals: env.put(cin.externals, fun.id, fun))
+          t.Context(..cin, externals: dict.insert(cin.externals, fun.id, fun))
         })
 
       // create instantiated custom type via rewriting to named type
@@ -191,17 +193,17 @@ fn register_tuple(c: Context, typ: t.Type) {
 }
 
 fn instantiate_function(c: Context, name: String, mono: t.Type) {
-  case env.get(c.in.functions, name) {
+  case dict.get(c.in.functions, name) {
     Ok(fun) -> {
       let sub = unify_poly(c, fun.typ, mono)
       let type_string = get_type_string(sub)
       let mono_name = fun.id <> type_string
 
-      case env.get(c.out.functions, mono_name) {
+      case dict.get(c.out.functions, mono_name) {
         Ok(_) -> #(c, mono_name)
         Error(_) -> {
           // add placeholder to prevent duplicate monomorphisation
-          let functions = env.put(c.out.functions, mono_name, fun)
+          let functions = dict.insert(c.out.functions, mono_name, fun)
           let c = Context(..c, out: t.Context(..c.out, functions:))
 
           // instantiate function
@@ -220,7 +222,7 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
             )
 
           // add to module
-          let functions = env.put(c.out.functions, mono_name, fun)
+          let functions = dict.insert(c.out.functions, mono_name, fun)
           let c = Context(..c, out: t.Context(..c.out, functions:))
 
           #(c, mono_name)
@@ -228,7 +230,7 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
       }
     }
     Error(_) ->
-      case env.get(c.in.externals, name) {
+      case dict.get(c.in.externals, name) {
         Ok(external) -> {
           let sub = unify_poly(c, external.typ, mono)
           let type_string = get_type_string(sub)
