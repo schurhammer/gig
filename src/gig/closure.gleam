@@ -1,7 +1,8 @@
-import env
 import gig/core as t
+import gig/env
 import gig/gen_names
 import gig/mono
+
 import gleam/int
 import gleam/list
 
@@ -14,12 +15,7 @@ pub type Module {
 }
 
 pub type CustomType {
-  CustomType(
-    name: String,
-    params: List(String),
-    variants: List(Variant),
-    pointer: Bool,
-  )
+  CustomType(name: String, variants: List(Variant), pointer: Bool)
 }
 
 pub type Variant {
@@ -73,12 +69,7 @@ pub fn cc_module(mod: mono.Context) {
         _ -> True
       }
       let custom =
-        CustomType(
-          name: custom.id,
-          params: custom.parameters,
-          variants: variants,
-          pointer: pointer,
-        )
+        CustomType(name: custom.id, variants: variants, pointer: pointer)
 
       let mod = Module(..c.mod, types: [custom, ..c.mod.types])
       CC(..c, mod: mod)
@@ -169,69 +160,84 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
 
       let closure_fields = fv(var_names, e)
 
-      // TODO check if closure is empty then create function without env
+      case closure_fields {
+        [] -> {
+          // create global function
+          let id = int.to_string(c.uid)
+          let fun_name = "Closure_" <> id
+          let funs = c.mod.functions
+          let fun = Function(fun_name, var_names, exp, typ)
+          let funs = [fun, ..funs]
+          let c = CC(Module(c.mod.types, funs), c.uid + 1)
 
-      // create global function
-      let id = int.to_string(c.uid)
-      let fun_name = "Closure_" <> id
-      let env_name = "ClosureEnv_" <> id
-      let env_type = t.NamedType(env_name, [])
+          // make a closure reference to the function
+          let val = Call(typ, Var(typ, "create_function"), [Var(typ, fun_name)])
+          #(c, val)
+        }
+        _ -> {
+          // create global function
+          let id = int.to_string(c.uid)
+          let fun_name = "Closure_" <> id
+          let env_name = "ClosureEnv_" <> id
+          let env_type = t.NamedType(env_name, [])
 
-      let fun_params = [env_name, ..var_names]
+          let fun_params = [env_name, ..var_names]
 
-      // add let bindings to unpack the closure
-      let fun_body =
-        closure_fields
-        |> list.fold(exp, fn(exp, field) {
-          let #(name, typ) = field
+          // add let bindings to unpack the closure
+          let fun_body =
+            closure_fields
+            |> list.index_fold(exp, fn(exp, field, i) {
+              let #(name, typ) = field
 
-          // function from env -> field
-          let extract_fun_name = env_name <> "_" <> name
-          let extract_fun_type = t.FunctionType([env_type], typ)
-          let extract_fun = Var(extract_fun_type, extract_fun_name)
+              // function from env -> field
+              let extract_fun_name = gen_names.get_getter_name(env_name, i)
+              let extract_fun_type = t.FunctionType([env_type], typ)
+              let extract_fun = Var(extract_fun_type, extract_fun_name)
 
-          Let(
-            exp.typ,
-            name,
-            Call(typ, extract_fun, [Var(env_type, env_name)]),
-            exp,
-          )
-        })
+              Let(
+                exp.typ,
+                name,
+                Call(typ, extract_fun, [Var(env_type, env_name)]),
+                exp,
+              )
+            })
 
-      let funs = c.mod.functions
-      let types = c.mod.types
+          let funs = c.mod.functions
+          let types = c.mod.types
 
-      // add cloure function to module
-      let fun_type = t.FunctionType([env_type, ..var_types], fun_body.typ)
-      let fun = Function(fun_name, fun_params, fun_body, fun_type)
-      let funs = [fun, ..funs]
+          // add cloure function to module
+          let fun_type = t.FunctionType([env_type, ..var_types], fun_body.typ)
+          let fun = Function(fun_name, fun_params, fun_body, fun_type)
+          let funs = [fun, ..funs]
 
-      // create the closure object
-      let fun_pointer = Var(typ, fun_name)
+          // create the closure object
+          let fun_pointer = Var(typ, fun_name)
 
-      let new_env_fun_name = gen_names.get_constructor_name(env_name)
-      let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
-      let new_env_fun_type = t.FunctionType(env_arg_types, env_type)
-      let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
+          let new_env_fun_name = gen_names.get_constructor_name(env_name)
+          let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
+          let new_env_fun_type = t.FunctionType(env_arg_types, env_type)
+          let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
 
-      let env_constructor_call =
-        Call(env_type, Var(new_env_fun_type, new_env_fun_name), env_args)
+          let env_constructor_call =
+            Call(env_type, Var(new_env_fun_type, new_env_fun_name), env_args)
 
-      let closure =
-        Call(typ, Var(typ, "create_closure"), [
-          fun_pointer,
-          env_constructor_call,
-        ])
+          let closure =
+            Call(typ, Var(typ, "create_closure"), [
+              fun_pointer,
+              env_constructor_call,
+            ])
 
-      let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
-      let variant = Variant(env_name, fields)
-      let typedef = CustomType(env_name, [], [variant], True)
+          let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
+          let variant = Variant(env_name, fields)
+          let typedef = CustomType(env_name, [variant], True)
 
-      let types = [typedef, ..types]
+          let types = [typedef, ..types]
 
-      let c = CC(Module(types, funs), c.uid + 1)
+          let c = CC(Module(types, funs), c.uid + 1)
 
-      #(c, closure)
+          #(c, closure)
+        }
+      }
     }
     t.Let(typ, var, val, exp) -> {
       let #(c, val) = cc(c, val)

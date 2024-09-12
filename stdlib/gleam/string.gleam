@@ -4,16 +4,16 @@
 import gleam
 import gleam/order
 
-@external(c, "", "append_String")
+@external(c, "", "append_string")
 pub fn append(a: String, b: String) -> String
 
-@external(c, "", "starts_with_String")
+@external(c, "", "starts_with_string")
 pub fn starts_with(string: String, with: String) -> Bool
 
-@external(c, "", "ends_with_String")
+@external(c, "", "ends_with_string")
 pub fn ends_with(string: String, with: String) -> Bool
 
-@external(c, "", "compare_String")
+@external(c, "", "compare_string")
 fn do_compare(a: String, b: String) -> Int
 
 pub fn compare(a: String, b: String) -> order.Order {

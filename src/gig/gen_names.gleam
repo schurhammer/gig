@@ -1,18 +1,25 @@
 import gig/typed_ast as t
 import gleam/int
-import gleam/list
 import gleam/string
 
 pub fn get_field_name(index: Int) {
   "f" <> int.to_string(index)
 }
 
+pub fn get_tuple_id(size: Int) {
+  "Tuple" <> int.to_string(size)
+}
+
 pub fn get_getter_name(variant: String, index: Int) {
-  variant <> "_" <> get_field_name(index)
+  get_field_name(index) <> "_" <> variant
 }
 
 pub fn get_constructor_name(variant: String) {
-  variant <> "_NEW"
+  "new_" <> variant
+}
+
+pub fn get_variant_check_name(variant: String) {
+  "isa_" <> variant
 }
 
 pub fn get_id(module: String, name: String) -> String {

@@ -1,5 +1,6 @@
+import gig/graph
 import gleam/list
-import graph
+import gleam/string
 
 type Graph =
   graph.Graph(String)
@@ -28,9 +29,20 @@ fn walk_field(g: Graph, t: CustomType, f: Field) -> Graph {
   walk_type(g, t, f.typ)
 }
 
+fn type_name(typ: core.Type) -> String {
+  case typ {
+    core.NamedType(name, args) ->
+      string.join([name, ..list.map(args, type_name)], "_")
+    core.FunctionType(..) -> "Closure"
+    core.TupleType(..) -> panic
+    core.Unbound(..) -> panic
+  }
+}
+
 fn walk_type(g: Graph, t: CustomType, f: core.Type) -> Graph {
   case f {
-    core.NamedType(name, args) -> {
+    core.NamedType(_, args) -> {
+      let name = type_name(f)
       let g = graph.insert_edge(g, t.name, name)
       list.fold(args, g, fn(g, arg) { walk_type(g, t, arg) })
     }
@@ -38,7 +50,7 @@ fn walk_type(g: Graph, t: CustomType, f: core.Type) -> Graph {
       let g = walk_type(g, t, ret)
       list.fold(args, g, fn(g, arg) { walk_type(g, t, arg) })
     }
-    core.TupleType(..) -> todo
+    core.TupleType(..) -> panic
     core.Unbound(..) -> panic
   }
 }

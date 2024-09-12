@@ -1,13 +1,12 @@
-import env
+import gig/env
 import gig/gen_names.{get_id}
 import gig/typed_ast as t
+
 import glance as g
+
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
-import pprint
 
 pub const builtin = t.builtin
 
@@ -27,6 +26,8 @@ pub type Parameter {
 }
 
 pub type LiteralKind {
+  NilVal
+  Bool(value: String)
   Int(value: String)
   Float(value: String)
   String(value: String)
@@ -46,12 +47,7 @@ pub type Exp {
 }
 
 pub type CustomType {
-  CustomType(
-    typ: Poly,
-    id: String,
-    parameters: List(String),
-    variants: List(Variant),
-  )
+  CustomType(typ: Poly, id: String, variants: List(Variant))
 }
 
 pub type Variant {
@@ -60,24 +56,22 @@ pub type Variant {
 }
 
 pub type Function {
-  Function(
-    typ: Poly,
-    id: String,
-    parameters: List(Parameter),
-    body: Exp,
-    external: Bool,
-    monomorphise: Bool,
-  )
+  Function(typ: Poly, id: String, parameters: List(Parameter), body: Exp)
+}
+
+pub type External {
+  External(typ: Poly, id: String, mono: Bool)
 }
 
 pub type Context {
   Context(
     types: env.Env(String, CustomType),
     functions: env.Env(String, Function),
+    externals: env.Env(String, External),
   )
 }
 
-// monadic form
+// TODO monadic form
 // pub type Value {
 //   Literal(value: String)
 //   Variable(name: String)
@@ -93,7 +87,14 @@ pub type Context {
 // }
 
 pub fn lower_context(c: t.Context) {
-  let acc = Context(env.new(), env.new())
+  // these need registered because they are converted to lieterals
+  let externals =
+    env.new()
+    |> env.put("Nil", External(Poly([], nil_type), "Nil", False))
+    |> env.put("True", External(Poly([], bool_type), "True", False))
+    |> env.put("False", External(Poly([], bool_type), "False", False))
+
+  let acc = Context(types: env.new(), functions: env.new(), externals:)
   env.fold(c.modules, acc, fn(acc, name, module) {
     lower_module(c, acc, module)
   })
@@ -102,8 +103,32 @@ pub fn lower_context(c: t.Context) {
 fn lower_module(c: t.Context, acc: Context, module: t.Module) {
   let c = t.Context(..c, current_module: module.name)
 
+  // create type related builtin functions
   let acc =
-    list.fold(module.custom_types, acc, fn(acc, custom) {
+    list.fold(module.custom_types, acc, fn(acc, def) {
+      let custom = def.definition
+      list.fold(custom.variants, acc, fn(acc, variant) {
+        register_variant_functions(c, acc, module.name, custom.typ, variant)
+      })
+    })
+
+  // remove some types that are replaced with builtins
+  let custom_types = case module.name == t.builtin {
+    True -> {
+      module.custom_types
+      |> list.filter(fn(c) {
+        case c.definition.name {
+          "Nil" -> False
+          "Bool" -> False
+          _ -> True
+        }
+      })
+    }
+    False -> module.custom_types
+  }
+
+  let acc =
+    list.fold(custom_types, acc, fn(acc, custom) {
       case custom.definition.variants {
         // no variants is considered external
         [] -> acc
@@ -116,8 +141,28 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
 
   let acc =
     list.fold(module.functions, acc, fn(acc, fun) {
-      let fun = lower_function(c, fun)
-      Context(..acc, functions: env.put(acc.functions, fun.id, fun))
+      let attrs = fun.attributes
+      let external = list.find(attrs, fn(x) { x.name == "external" })
+
+      case external {
+        Ok(external) -> {
+          let assert t.Attribute(
+            _,
+            [t.LocalVariable(_, "c"), _, t.String(_, external_id)],
+          ) = external
+          let typ = map_poly(c, fun.definition.typ)
+          let module = c.current_module
+          let name = fun.definition.name
+          let internal_id = get_id(module, name)
+          let mono = list.any(attrs, fn(x) { x.name == "monomorphise" })
+          let fun = External(typ, external_id, mono)
+          Context(..acc, externals: env.put(acc.externals, internal_id, fun))
+        }
+        Error(_) -> {
+          let fun = lower_function(c, fun)
+          Context(..acc, functions: env.put(acc.functions, fun.id, fun))
+        }
+      }
     })
   acc
 }
@@ -127,7 +172,6 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
   let module = c.current_module
   let name = custom.name
   let id = get_id(module, name)
-  let parameters = custom.parameters
   let variants =
     list.map(custom.variants, fn(variant) {
       let typ = map_poly(c, variant.typ)
@@ -136,7 +180,7 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
       let id = get_id(module, variant.name)
       Variant(typ, id, fields)
     })
-  CustomType(typ, id, parameters, variants)
+  CustomType(typ, id, variants)
 }
 
 fn lower_function(c: t.Context, def: t.Definition(t.Function)) {
@@ -147,13 +191,9 @@ fn lower_function(c: t.Context, def: t.Definition(t.Function)) {
   let id = get_id(module, name)
   let parameters = list.map(function.parameters, lower_parameter(c, _))
   let body = lower_body(c, function.body)
+  let #(_, _, body) = unshadow([], 1, body)
 
-  let external = list.any(def.attributes, fn(x) { x.name == "external" })
-  let monomorphise =
-    list.any(def.attributes, fn(x) { x.name == "monomorphise" })
-  let monomorphise = monomorphise || !external
-
-  Function(typ:, id:, parameters:, body:, external:, monomorphise:)
+  Function(typ:, id:, parameters:, body:)
 }
 
 fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
@@ -163,6 +203,45 @@ fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
     t.Discarded(name) -> "_" <> name
   }
   Parameter(typ, name)
+}
+
+pub fn register_variant_functions(
+  c: t.Context,
+  acc: Context,
+  module_name: String,
+  custom_typ: t.Poly,
+  variant: t.Variant,
+) {
+  // constructor function
+  let variant_id = get_id(module_name, variant.name)
+  let fun_id = gen_names.get_constructor_name(variant_id)
+  let parameters =
+    list.index_map(variant.fields, fn(f, i) {
+      let typ = map_type(c, f.item.typ)
+      Parameter(typ, gen_names.get_field_name(i))
+    })
+  let typ = map_poly(c, variant.typ)
+  let fun = External(typ: typ, id: fun_id, mono: True)
+  let acc = Context(..acc, externals: env.put(acc.externals, fun.id, fun))
+
+  // variant check function
+  let fun_id = gen_names.get_variant_check_name(variant_id)
+  let typ = map_poly(c, custom_typ)
+  let parameters = [Parameter(typ.typ, "val")]
+  let typ = Poly(typ.vars, FunctionType([typ.typ], bool_type))
+  let fun = External(typ: typ, id: fun_id, mono: True)
+  let acc = Context(..acc, externals: env.put(acc.externals, fun.id, fun))
+
+  // getter functions
+  list.index_fold(variant.fields, acc, fn(acc, f, i) {
+    let fun_id = gen_names.get_getter_name(variant_id, i)
+    let typ = map_poly(c, custom_typ)
+    let field_typ = map_type(c, f.item.typ)
+    let parameters = [Parameter(typ.typ, "val")]
+    let typ = Poly(typ.vars, FunctionType([typ.typ], field_typ))
+    let fun = External(typ: typ, id: fun_id, mono: True)
+    Context(..acc, externals: env.put(acc.externals, fun.id, fun))
+  })
 }
 
 fn lower_body(c: t.Context, body: List(t.Statement)) {
@@ -210,8 +289,29 @@ fn lower_pattern_bindings(
     t.PatternString(..) -> []
     t.PatternDiscard(..) -> []
     t.PatternVariable(typ, name) -> [#(name, subject)]
-    t.PatternTuple(typ, elems) -> todo
-    t.PatternList(typ, elements, tail) -> todo
+    t.PatternTuple(typ, elems) -> {
+      list.index_map(elems, fn(elem, i) {
+        let subject = t.TupleIndex(elem.typ, subject, i)
+        lower_pattern_bindings(c, elem, subject)
+      })
+      |> list.flatten
+    }
+    t.PatternList(typ, elements, tail) -> {
+      // rewrite to constructor pattern
+      let tail = case tail {
+        Some(tail) -> tail
+        None ->
+          t.PatternConstructor(typ, t.builtin, "Empty", [], [], True, False)
+      }
+      let elements = list.reverse(elements)
+      let list =
+        list.fold(elements, tail, fn(rest, x) {
+          let a = [t.Field(None, x), t.Field(None, rest)]
+          let o = [x, rest]
+          t.PatternConstructor(typ, t.builtin, "Cons", a, o, True, False)
+        })
+      lower_pattern_bindings(c, list, subject)
+    }
     t.PatternAssignment(typ, pattern, name) -> {
       let pattern = lower_pattern_bindings(c, pattern, subject)
       [#(name, subject), ..pattern]
@@ -227,7 +327,7 @@ fn lower_pattern_bindings(
       _,
       _,
     ) -> {
-      let elems: List(t.Pattern) = ordered_arguments
+      let elems = ordered_arguments
       list.index_map(elems, fn(elem, i) {
         let subject =
           t.FieldAccess(elem.typ, subject, module, constructor, "", i)
@@ -237,6 +337,8 @@ fn lower_pattern_bindings(
     }
   }
 }
+
+const nil_type = NamedType("Nil", [])
 
 const bool_type = NamedType("Bool", [])
 
@@ -286,8 +388,7 @@ fn lower_pattern_match(
     t.PatternDiscard(typ, name) -> true_value
     t.PatternVariable(typ, name) -> true_value
     t.PatternTuple(typ, elems) -> {
-      // rewrite to constructor pattern
-      // TODO check the order of boolean expression is correct
+      // TODO check if the order of boolean expression is correct i.e. left to right
       // maybe we need to reverse, swap params, fold_right etc
       list.index_fold(elems, true_value, fn(match, elem, i) {
         let subject = t.TupleIndex(elem.typ, subject, i)
@@ -323,13 +424,22 @@ fn lower_pattern_match(
       _,
       _,
     ) -> {
-      let elems: List(t.Pattern) = ordered_arguments
-      list.index_fold(elems, true_value, fn(match, elem, i) {
-        let subject =
-          t.FieldAccess(elem.typ, subject, module, constructor, "", i)
-        let elem_match = lower_pattern_match(c, elem, subject)
-        and_exp(elem_match, match)
-      })
+      let typ = map_type(c, typ)
+      let elems = ordered_arguments
+      let match =
+        list.index_fold(elems, true_value, fn(match, elem, i) {
+          let subject =
+            t.FieldAccess(elem.typ, subject, module, constructor, "", i)
+          let elem_match = lower_pattern_match(c, elem, subject)
+          and_exp(elem_match, match)
+        })
+      // TODO special case for single variant no need to check
+      let isa_name =
+        gen_names.get_variant_check_name(get_id(module, constructor))
+      let isa_typ = FunctionType([typ], bool_type)
+      let isa_ref = Global(isa_typ, isa_name)
+      let isa_match = Call(bool_type, isa_ref, [lower_expression(c, subject)])
+      and_exp(isa_match, match)
     }
   }
 }
@@ -341,17 +451,28 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.String(typ, value) -> Literal(map_type(c, typ), String(value))
     t.LocalVariable(typ, name) -> Local(map_type(c, typ), name)
     t.GlobalVariable(typ, module, name) -> {
-      let assert Ok(#(_, _, _, kind)) = t.resolve_global_name(c, module, name)
-
-      // rewrite function name if its a constructor function
-      // TODO maybe change type naming scheme so we can keep constructor names
-      let name = case kind {
-        t.ConstructorFunction -> gen_names.get_constructor_name(name)
-        _ -> name
-      }
-
       let typ = map_type(c, typ)
-      Global(typ, get_id(module, name))
+
+      case module, name {
+        // convert these to literals
+        "gleam", "Nil" -> Literal(typ, NilVal)
+        "gleam", "True" -> Literal(typ, Bool("True"))
+        "gleam", "False" -> Literal(typ, Bool("False"))
+        _, _ -> {
+          let assert Ok(#(_, _, _, kind)) =
+            t.resolve_global_name(c, module, name)
+
+          // rewrite function name if its a constructor function
+          // TODO maybe change type naming scheme so we can keep constructor names
+          case kind {
+            t.ConstructorFunction -> {
+              let name = gen_names.get_constructor_name(get_id(module, name))
+              Global(typ, name)
+            }
+            _ -> Global(typ, get_id(module, name))
+          }
+        }
+      }
     }
     t.NegateInt(typ, value) -> {
       let typ = map_type(c, typ)
@@ -383,24 +504,30 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Panic(typ, value)
     }
     t.Tuple(typ, elements) -> {
+      // TODO register tuple constructor and such if it doesnt exist
       let typ = map_type(c, typ)
       let elements = list.map(elements, lower_expression(c, _))
+      let element_types = list.map(elements, fn(e) { e.typ })
       let len = int.to_string(list.length(elements))
-      let fun = Global(FunctionType([typ], typ), "Tuple" <> len)
+      let fun =
+        Global(
+          FunctionType(element_types, typ),
+          gen_names.get_constructor_name("Tuple" <> len),
+        )
       Call(typ, fun, elements)
     }
     t.List(typ, elements, rest) -> {
       let list_typ = map_type(c, typ)
       let rest = case rest {
         Some(rest) -> lower_expression(c, rest)
-        None -> Global(list_typ, "Empty")
+        None -> Global(list_typ, gen_names.get_constructor_name("Empty"))
       }
       let elements = list.reverse(elements)
       list.fold(elements, rest, fn(rest, element) {
         let element = lower_expression(c, element)
         let args = [element, rest]
         let cons_typ = FunctionType([element.typ, list_typ], list_typ)
-        let cons = Global(cons_typ, "Cons")
+        let cons = Global(cons_typ, gen_names.get_constructor_name("Cons"))
         Call(list_typ, cons, args)
       })
     }
@@ -410,13 +537,38 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let body = lower_body(c, body)
       Fn(typ, parameters, body)
     }
-    t.RecordUpdate(typ, module, constructor, record, fields) -> todo
-    t.FieldAccess(typ, container, module, variant, label, index) -> {
+    t.RecordUpdate(typ, _, module, constructor, record, fields, ordered_fields) -> {
+      // bind record to subject
+      // for each field in variant either take the new field or default to field access on subject
+      // and call the constructor with that
+      let typ = map_type(c, typ)
+      let subject = Local(typ, "subject")
+      let constructor = gen_names.get_id(module, constructor)
+      let fields =
+        list.index_map(ordered_fields, fn(f, i) {
+          case f {
+            Ok(field) -> lower_expression(c, field)
+            Error(field_type) -> {
+              let getter_name = gen_names.get_getter_name(constructor, i)
+              let field_type = map_type(c, field_type)
+              let getter_typ = FunctionType([typ], field_type)
+              Call(field_type, Global(getter_typ, getter_name), [subject])
+            }
+          }
+        })
+      let record = lower_expression(c, record)
+      let constructor_name = gen_names.get_constructor_name(constructor)
+      let field_types = list.map(fields, fn(x) { x.typ })
+      let constructor_typ = FunctionType(field_types, typ)
+      let body = Call(typ, Global(constructor_typ, constructor_name), fields)
+      Let(typ, "subject", record, body)
+    }
+    t.FieldAccess(typ, container, module, variant, label, i) -> {
       let typ = map_type(c, typ)
       let container = lower_expression(c, container)
-      let getter_name = gen_names.get_getter_name(variant, index)
+      let getter_name = gen_names.get_getter_name(get_id(module, variant), i)
       let getter_typ = FunctionType([container.typ], typ)
-      let getter = Global(getter_typ, get_id(module, getter_name))
+      let getter = Global(getter_typ, getter_name)
       Call(typ, getter, [container])
     }
     t.Call(typ, function, _, ordered_arguments) -> {
@@ -615,6 +767,79 @@ fn map_type(c: t.Context, typ: t.Type) {
         t.Bound(x) -> map_type(c, x)
         t.Unbound(x) -> Unbound(x)
       }
+    }
+  }
+}
+
+fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
+  case e {
+    Literal(_, _) -> #(taken, i, e)
+    Local(_, _) -> #(taken, i, e)
+    Global(_, _) -> #(taken, i, e)
+    Call(typ, fun, args) -> {
+      let #(taken, i, fun) = unshadow(taken, i, fun)
+      let #(taken, i, args) =
+        list.fold(args, #(taken, i, []), fn(acc, arg) {
+          let #(taken, i, l) = acc
+          let #(taken, i, arg) = unshadow(taken, i, arg)
+          #(taken, i, [arg, ..l])
+        })
+      let args = list.reverse(args)
+      #(taken, i, Call(typ, fun, args))
+    }
+    Fn(typ, vars, exp) -> {
+      let #(taken, i, vars, exp) =
+        list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
+          let #(taken, i, vars, exp) = acc
+          case list.contains(taken, var.name) {
+            True -> {
+              let new_var = var.name <> "V" <> int.to_string(i)
+              let i = i + 1
+              let exp = replace_var(var.name, Local(typ, new_var), exp)
+              let taken = [new_var, ..taken]
+              let #(taken, i, exp) = unshadow(taken, i, exp)
+              let vars = [Parameter(var.typ, new_var), ..vars]
+              #(taken, i, vars, exp)
+            }
+            False -> {
+              let taken = [var.name, ..taken]
+              let #(taken, i, exp) = unshadow(taken, i, exp)
+              let vars = [var, ..vars]
+              #(taken, i, vars, exp)
+            }
+          }
+        })
+      let #(taken, i, exp) = unshadow(taken, i, exp)
+      let vars = list.reverse(vars)
+      #(taken, i, Fn(typ, vars, exp))
+    }
+    Let(typ, var, val, exp) ->
+      case list.contains(taken, var) {
+        True -> {
+          let new_var = var <> "V" <> int.to_string(i)
+          let taken = [new_var, ..taken]
+          let i = i + 1
+          let #(taken, i, val) = unshadow(taken, i, val)
+          let exp = replace_var(var, Local(typ, new_var), exp)
+          let #(taken, i, exp) = unshadow(taken, i, exp)
+          #(taken, i, Let(typ, new_var, val, exp))
+        }
+        False -> {
+          let taken = [var, ..taken]
+          let #(taken, i, val) = unshadow(taken, i, val)
+          let #(taken, i, exp) = unshadow(taken, i, exp)
+          #(taken, i, Let(typ, var, val, exp))
+        }
+      }
+    If(typ, cond, then_exp, else_exp) -> {
+      let #(taken, i, cond) = unshadow(taken, i, cond)
+      let #(taken, i, then_exp) = unshadow(taken, i, then_exp)
+      let #(taken, i, else_exp) = unshadow(taken, i, else_exp)
+      #(taken, i, If(typ, cond, then_exp, else_exp))
+    }
+    Panic(typ, val) -> {
+      let #(taken, i, val) = unshadow(taken, i, val)
+      #(taken, i, Panic(typ, val))
     }
   }
 }

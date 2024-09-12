@@ -1,6 +1,8 @@
-import compiler
+import gig/compiler
+
 import gleam/list
 import gleam/string
+
 import shellout
 import simplifile
 import startest.{describe, it, xit}

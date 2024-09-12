@@ -4,7 +4,6 @@ import gig/core
 import gig/mono
 import gig/typed_ast
 
-import env
 import glance
 import shellout
 import simplifile

@@ -1,5 +1,6 @@
-import call_graph
-import env
+import gig/call_graph
+import gig/env
+import gig/graph
 import glance as g
 import gleam/int
 import gleam/io
@@ -7,7 +8,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result.{try}
 import gleam/string
-import graph
 
 pub const builtin = "gleam"
 
@@ -41,6 +41,8 @@ pub type Attribute {
 pub type ValueKind {
   ConstructorFunction
   TopLevelFunction
+  // TODO is this still needed?
+  ExternalFunction(external_name: String)
 }
 
 // TODO it would probably be good to parameterise the Type
@@ -142,9 +144,11 @@ pub type Expression {
   RecordUpdate(
     typ: Type,
     module: Option(String),
+    resolved_module: String,
     constructor: String,
     record: Expression,
     fields: List(#(String, Expression)),
+    ordered_fields: List(Result(Expression, Type)),
   )
   FieldAccess(
     typ: Type,
@@ -346,7 +350,6 @@ pub fn new_context() -> Context {
 }
 
 pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
-  io.debug("infer module " <> name)
   let c = Context(..c, current_module: name)
 
   // handle module imports
@@ -385,8 +388,6 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
     call_graph.create(module)
     |> graph.strongly_connected_components()
 
-  // TODO handle external functions
-
   list.fold(rec_groups, c, fn(c, group) {
     // find the function definitions by name
     let assert Ok(group) =
@@ -396,12 +397,12 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
 
     // add functions to global env so they are available for recursion
     let c =
-      list.fold(group, c, fn(c, fun) {
+      list.fold(group, c, fn(c, def) {
         let #(c, typ) = new_type_var_ref(c)
-        let labels = list.map(fun.definition.parameters, fn(f) { f.label })
+        let labels = list.map(def.definition.parameters, fn(f) { f.label })
         register_value(
           c,
-          fun.definition.name,
+          def.definition.name,
           Poly([], typ),
           labels,
           TopLevelFunction,
@@ -422,7 +423,20 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
     list.fold(group, c, fn(c, def) {
       let fun = def.definition
       let labels = list.map(fun.parameters, fn(f) { f.label })
-      let c = register_value(c, fun.name, fun.typ, labels, TopLevelFunction)
+
+      let external =
+        list.find_map(def.attributes, fn(x) {
+          case x.name == "external" {
+            True -> Ok(x.arguments)
+            False -> Error(Nil)
+          }
+        })
+      let kind = case external {
+        Ok([_, _, String(_, n)]) -> ExternalFunction(n)
+        Ok(_) -> panic as "invalid external definition"
+        _ -> TopLevelFunction
+      }
+      let c = register_value(c, fun.name, fun.typ, labels, kind)
       update_module(c, fn(mod) {
         Module(..mod, functions: [def, ..mod.functions])
       })
@@ -612,6 +626,7 @@ fn infer_variant(c, n, typ: Type, variant: g.Variant) -> #(Context, Variant) {
     [] -> #(c, typ)
     _ -> #(c, FunctionType(types, typ))
   }
+
   let typ = generalise(c, typ)
 
   let c = register_value(c, variant.name, typ, labels, ConstructorFunction)
@@ -795,7 +810,7 @@ fn resolve_unqualified_global(
     Error(_) -> {
       case resolve_global_name(c, builtin, name) {
         Ok(#(name, typ, labels, _)) -> Ok(#(name, typ, labels))
-        Error(_) -> Error("could not resolve name " <> name)
+        Error(_) -> Error("Could not resolve name " <> name)
       }
     }
   }
@@ -886,6 +901,11 @@ fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
   }
 }
 
+fn new_temp_var(c: Context) -> #(Context, String) {
+  let id = "T" <> int.to_string(c.temp_uid)
+  #(Context(..c, temp_uid: c.temp_uid + 1), id)
+}
+
 fn new_type_var_ref(c: Context) {
   let ref = Ref(c.type_uid)
   let type_vars = env.put(c.type_vars, ref, Unbound(c.type_uid))
@@ -900,8 +920,8 @@ fn infer_pattern(
 ) -> #(Context, LocalEnv, Pattern) {
   case pattern {
     g.PatternInt(value) -> #(c, n, PatternInt(int_type, value))
-    g.PatternFloat(value) -> #(c, n, PatternInt(float_type, value))
-    g.PatternString(value) -> #(c, n, PatternInt(string_type, value))
+    g.PatternFloat(value) -> #(c, n, PatternFloat(float_type, value))
+    g.PatternString(value) -> #(c, n, PatternString(string_type, value))
     g.PatternDiscard(name) -> {
       let #(c, typ) = new_type_var_ref(c)
       #(c, n, PatternDiscard(typ, name))
@@ -1008,6 +1028,7 @@ fn infer_pattern(
           let #(c, n, arg2) = infer_pattern(c, n, arg.item)
           #(c, n, [Field(arg.label, arg2), ..arguments])
         })
+      let arguments = list.reverse(arguments)
 
       // handle labels
       let ordered_arguments = resolve_labels_ordered(arguments, labels)
@@ -1082,6 +1103,9 @@ fn infer_body(
           annotation: annotation,
           kind: kind,
         ) -> {
+          // infer value before binding the new variable
+          let assert Ok(#(c, value)) = infer_expression(c, n, value)
+
           // infer pattern, annotation, and value
           let #(c, n, pattern) = infer_pattern(c, n, pattern)
 
@@ -1094,8 +1118,6 @@ fn infer_body(
             }
             None -> #(c, None)
           }
-
-          let assert Ok(#(c, value)) = infer_expression(c, n, value)
 
           // the pattern must unify with both the annotation
           // and the assigned value
@@ -1167,6 +1189,21 @@ fn resolve_labels(args: List(Field(a)), params: List(Option(String))) {
       case list.pop(args, fn(a) { a.label == p }) {
         Ok(#(a, a_rest)) -> [a.item, ..resolve_labels(a_rest, p_rest)]
         Error(_) -> panic as { "no matching label" }
+      }
+  }
+}
+
+fn resolve_labels_optional(args: List(Field(a)), params: List(Option(String))) {
+  // find the labels in the order specified by parameters
+  case params {
+    [] -> []
+    [p, ..p_rest] ->
+      case list.pop(args, fn(a) { a.label == p }) {
+        Ok(#(a, a_rest)) -> [
+          Some(a.item),
+          ..resolve_labels_optional(a_rest, p_rest)
+        ]
+        Error(_) -> [None, ..resolve_labels_optional(args, p_rest)]
       }
   }
 }
@@ -1309,7 +1346,7 @@ fn infer_expression(
 
       // put params into local env
       let n =
-        list.fold(parameters, env.new(), fn(n, param) {
+        list.fold(parameters, n, fn(n, param) {
           case param.name {
             Named(name) -> env.put(n, name, param.typ)
             Discarded(_) -> n
@@ -1342,9 +1379,11 @@ fn infer_expression(
 
       // Instantiate the constructor type
       let #(c, constructor_type) = instantiate(c, poly)
+      let assert FunctionType(constructor_args, constructor_ret) =
+        constructor_type
 
       // Unify the base expression type with the constructor type
-      let c = unify(c, base_expr.typ, constructor_type)
+      let c = unify(c, base_expr.typ, constructor_ret)
 
       // Infer types for all updated fields
       use #(c, updated_fields) <- try(
@@ -1356,41 +1395,56 @@ fn infer_expression(
       )
       let updated_fields = list.reverse(updated_fields)
 
+      let fields = list.map(updated_fields, fn(x) { Field(Some(x.0), x.1) })
+      let ordered_fields = resolve_labels_optional(fields, labels)
+      let assert Ok(ordered_fields) =
+        list.strict_zip(ordered_fields, constructor_args)
+      let #(c, ordered_fields) =
+        ordered_fields
+        |> list.fold_right(#(c, []), fn(acc, x) {
+          let #(c, fields) = acc
+          let #(given, expected) = x
+          let #(c, result) = case given {
+            Some(e) -> {
+              let c = unify(c, e.typ, expected)
+              #(c, Ok(e))
+            }
+            None -> #(c, Error(expected))
+          }
+          #(c, [result, ..fields])
+        })
+
       // The result type is the same as the constructor type
-      let typ = constructor_type
+      let typ = constructor_ret
 
       // Create the RecordUpdate expression
       let record_update =
         RecordUpdate(
           typ: typ,
           module: module,
+          resolved_module: qualified_name.module,
           constructor: constructor,
           record: base_expr,
           fields: updated_fields,
+          ordered_fields: ordered_fields,
         )
 
       Ok(#(c, record_update))
     }
     g.FieldAccess(container, label) -> {
-      // TODO module access:
-      // if it succeeds as the regular field access
-      //   return as field access
-      // else
-      //   try to resolve module acccess
       let field_access = case infer_expression(c, n, container) {
         Ok(#(c, container)) -> {
           case resolve_type(c, container.typ) {
             NamedType(name, module, params) -> {
               let assert Ok(#(_, _, variants)) =
-                resolve_aliased_type_name(c, module, name)
+                resolve_global_type_name(c, module, name)
               case variants {
                 [v] ->
                   v.fields
                   |> list.index_map(fn(x, i) { #(x, i) })
                   |> list.find_map(fn(field) {
                     case { field.0 }.label == Some(label) {
-                      True ->
-                        Ok(#(c, container, module, v.name, field.0, field.1))
+                      True -> Ok(#(c, container, module, v, field.0, field.1))
                       False -> Error(Nil)
                     }
                   })
@@ -1404,12 +1458,20 @@ fn infer_expression(
       }
       case field_access {
         Ok(#(c, container, module, variant, field, index)) -> {
-          // TODO need to instantiate this type somehow
-          // using the container's type to fill in variables
-          // (the field comes straight from the type definition)
-          let typ = field.item.typ
+          // variant is a function that returns the custom type
+          let assert FunctionType(_args, custom) = variant.typ.typ
+
+          // we create a fake "getter" function
+          let getter = FunctionType([custom], field.item.typ)
+          let getter = Poly(variant.typ.vars, getter)
+          let #(c, getter) = instantiate(c, getter)
+
+          // we unify the fake getter as if we're calling it on the container
+          let #(c, typ) = new_type_var_ref(c)
+          let c = unify(c, getter, FunctionType([container.typ], typ))
+
           let field_access =
-            FieldAccess(typ, container, module, variant, label, index)
+            FieldAccess(typ, container, module, variant.name, label, index)
           Ok(#(c, field_access))
         }
         Error(_) -> {
@@ -1462,7 +1524,7 @@ fn infer_expression(
     }
     g.TupleIndex(tuple, index) -> {
       use #(c, tuple) <- try(infer_expression(c, n, tuple))
-      case tuple.typ {
+      case resolve_type(c, tuple.typ) {
         TupleType(elements) -> {
           let typ = tuple_index_type(c, elements, index)
           Ok(#(c, TupleIndex(typ, tuple, index)))
@@ -1471,11 +1533,12 @@ fn infer_expression(
       }
     }
     g.FnCapture(label, fun, before, after) -> {
-      // 1. infer function
-      // 2. infer args
-      // 3. new type var for blank
-      // 4. unify function with args and blank
-      todo as "FnCapture"
+      let #(c, x) = new_temp_var(c)
+      let arg = g.Field(label, g.Variable(x))
+      let args = list.concat([before, [arg], after])
+      let param = g.FnParameter(g.Named(x), None)
+      let abs = g.Fn([param], None, [g.Expression(g.Call(fun, args))])
+      infer_expression(c, n, abs)
     }
     g.BitString(segs) -> {
       todo as "BitString"
@@ -1501,14 +1564,13 @@ fn infer_expression(
           // the inner list has a pattern to match each subject
           // the outer list has alternatives that have the same body
           let #(c, n, patterns) =
-            list.fold(clause.patterns, #(c, n, []), fn(acc, pat) {
+            list.fold_right(clause.patterns, #(c, n, []), fn(acc, pat) {
               let #(c, n, pats) = acc
 
               // each pattern has a corresponding subject
               let assert Ok(sub_pats) = list.strict_zip(subjects, pat)
-
               let #(c, n, pat) =
-                list.fold(sub_pats, #(c, n, []), fn(acc, sub_pat) {
+                list.fold_right(sub_pats, #(c, n, []), fn(acc, sub_pat) {
                   let #(c, n, pats) = acc
                   let #(sub, pat) = sub_pat
                   let #(c, n, pat) = infer_pattern(c, n, pat)
@@ -1525,7 +1587,6 @@ fn infer_expression(
 
               #(c, n, [pat, ..pats])
             })
-          let patterns = list.reverse(patterns)
 
           // if the guard exists ensure it has a boolean result
           use #(c, guard) <- try(case clause.guard {
@@ -1550,6 +1611,18 @@ fn infer_expression(
 
       Ok(#(c, Case(typ:, subjects:, clauses:)))
     }
+    g.BinaryOperator(g.Pipe, left, right) -> {
+      // TODO return a not-desugared version
+      case right {
+        g.Call(fun, args) ->
+          infer_expression(c, n, g.Call(fun, [g.Field(None, left), ..args]))
+        g.Variable(_name) ->
+          infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
+        g.FieldAccess(_value, _field) ->
+          infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
+        _ -> panic as "pipe to unexpected expression"
+      }
+    }
     g.BinaryOperator(name, left, right) -> {
       let #(c, fun_typ) = case name {
         // Boolean logic
@@ -1573,8 +1646,7 @@ fn infer_expression(
         )
 
         // Functions
-        // TODO handle pipe in a seperate BinaryOperator case
-        g.Pipe -> todo as "Pipe"
+        g.Pipe -> panic as "pipe should be handeled elsewhere"
 
         // Maths
         g.AddInt | g.SubInt | g.MultInt | g.DivInt | g.RemainderInt -> #(

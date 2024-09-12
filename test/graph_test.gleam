@@ -1,4 +1,4 @@
-import graph.{insert_edge, insert_node, new, strongly_connected_components}
+import gig/graph.{insert_edge, insert_node, new, strongly_connected_components}
 import startest/expect
 
 pub fn conencted_components_test() {

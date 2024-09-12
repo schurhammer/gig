@@ -98,7 +98,7 @@ pub fn div_float(a: Float, b: Float) -> Float
 
 // String Operators
 
-@external(c, "", "append_String")
+@external(c, "", "append_string")
 pub fn append_string(a: String, b: String) -> String
 
 @monomorphise()
