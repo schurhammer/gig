@@ -15,17 +15,14 @@ import gleam/list
 import gleam/string
 
 fn hit_target(target: String, with: String) {
-  case with {
-    "panic_exit()" -> "panic_exit();\n"
-    _ ->
-      case target {
-        "" -> with
-        // TODO not sure if this is always valid
-        // TODO could do something similar with "ignored" targets? e.g. _xyz
-        // TODO this causes warnings about functions not having return
-        "RETURN" -> "return " <> with <> ";\n"
-        target -> target <> " = " <> with <> ";\n"
-      }
+  case target {
+    // no target means it is part of an expression
+    "" -> with
+    // discarded, no need to set the target
+    "_" <> _ -> with <> ";\n"
+    // TODO this causes warnings about functions not having return
+    "RETURN" -> "return " <> with <> ";\n"
+    target -> target <> " = " <> with <> ";\n"
   }
 }
 
@@ -107,12 +104,20 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
       hit_target(target, ternary(cond, exp_env, exp_no_env))
     }
     Let(typ, var, val, exp) ->
-      type_name(val.typ)
-      <> " "
-      <> var
-      <> ";\n"
-      <> texp(val, var, id)
-      <> texp(exp, target, id)
+      case var {
+        "_" <> _ -> {
+          // discarded, no need to make a variable
+          texp(val, var, id) <> texp(exp, target, id)
+        }
+        _ -> {
+          type_name(val.typ)
+          <> " "
+          <> var
+          <> ";\n"
+          <> texp(val, var, id)
+          <> texp(exp, target, id)
+        }
+      }
     If(typ, cond, then_exp, else_exp) ->
       "if ("
       <> texp(cond, "", id)
@@ -140,6 +145,8 @@ fn function(fun: Function) -> String {
   })
   |> string.join(", ")
   <> ") {\n"
+  // TODO this RETURN isn't needed becase we detect returns using hit_target
+  // but sometimes I get c compiler warnings without it
   <> type_name(ret)
   <> " RETURN;\n"
   <> texp(body, "RETURN", 1)
