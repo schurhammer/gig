@@ -2,7 +2,10 @@ pub type Nil {
   Nil
 }
 
-pub type Bool
+pub type Bool {
+  False
+  True
+}
 
 pub type Int
 
@@ -30,6 +33,10 @@ pub fn or_bool(a: Bool, b: Bool) -> Bool
 
 @external(c, "", "negate_bool")
 pub fn negate_bool(b: Bool) -> Bool
+
+@monomorphise()
+@external(c, "", "eq")
+pub fn eq(a: a, b: a) -> Bool
 
 // Int Operators
 
@@ -91,8 +98,12 @@ pub fn div_float(a: Float, b: Float) -> Float
 
 // String Operators
 
-@external(c, "", "append_String")
+@external(c, "", "append_string")
 pub fn append_string(a: String, b: String) -> String
+
+@monomorphise()
+@external(c, "", "inspect")
+pub fn inspect(a: a) -> String
 
 // Other Functions
 

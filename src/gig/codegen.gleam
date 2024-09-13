@@ -1,28 +1,18 @@
-import closure_conversion.{
-  type Exp, type Function, type Module, Call, CallClosure, If, Let, Literal,
-  Module, Var,
+import gig/closure.{
+  type CustomType, type Exp, type Function, type Module, Call, CallClosure,
+  CustomType, Field, If, Let, Literal, Module, Panic, Var,
 }
-import monomorphise.{
-  type CustomType, type Mono, CustomType, Field, MonoApp, MonoFun,
-} as mono
-import typed.{Float, Int, String}
+import gig/core.{Float, Int, String}
+import gig/gen_names
+import gig/mono.{type_name}
+import gig/type_graph
 
-import graph
-import type_graph
+import gig/graph
 
 import gleam/bool
 import gleam/int
 import gleam/list
 import gleam/string
-
-fn type_name(typ: Mono) -> String {
-  case typ {
-    MonoApp(name, args) -> string.join([name, ..list.map(args, type_name)], "_")
-    MonoFun(..) -> {
-      "Closure"
-    }
-  }
-}
 
 fn hit_target(target: String, with: String) {
   case with {
@@ -55,7 +45,9 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
   case arg {
     Literal(_, val) ->
       case val {
-        Int(val) -> hit_target(target, val)
+        core.NilVal -> hit_target(target, "0")
+        core.Bool(val) -> hit_target(target, val)
+        Int(val) -> hit_target(target, string.replace(val, "_", ""))
         Float(val) -> hit_target(target, val <> "L")
         String(val) -> hit_target(target, string_lit(val))
       }
@@ -129,13 +121,14 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
       <> "} else {\n"
       <> texp(else_exp, target, id + 1)
       <> "}\n"
+    Panic(typ, val) -> "panic_exit();\n"
   }
 }
 
 fn function(fun: Function) -> String {
   let params = fun.params
   let body = fun.body
-  let assert MonoFun(ret, param_types) = fun.typ
+  let assert core.FunctionType(param_types, ret) = fun.typ
   type_name(ret)
   <> " "
   <> fun.name
@@ -156,7 +149,7 @@ fn function(fun: Function) -> String {
 
 fn function_forward(fun: Function) -> String {
   let params = fun.params
-  let assert MonoFun(ret, param_types) = fun.typ
+  let assert core.FunctionType(param_types, ret) = fun.typ
   type_name(ret)
   <> " "
   <> fun.name
@@ -173,7 +166,7 @@ fn function_forward(fun: Function) -> String {
 fn custom_type_forward(t: CustomType) {
   let equal =
     "Bool"
-    <> " equal_"
+    <> " eq_"
     <> t.name
     <> "("
     <> t.name
@@ -189,7 +182,7 @@ fn custom_type_forward(t: CustomType) {
         _ -> panic as "unexpected struct type with multiple variants"
       }
   }
-  let inspect = "String gleam_inspect_" <> t.name <> "(" <> t.name <> " a);\n"
+  let inspect = "String inspect_" <> t.name <> "(" <> t.name <> " a);\n"
   typedef <> equal <> inspect
 }
 
@@ -224,7 +217,7 @@ fn custom_type(t: CustomType) {
 
   let equal =
     "Bool"
-    <> " equal_"
+    <> " eq_"
     <> t.name
     <> "("
     <> t.name
@@ -237,7 +230,7 @@ fn custom_type(t: CustomType) {
     <> case t.variants {
       [v] ->
         list.map(v.fields, fn(f) {
-          let field_equal = "equal" <> mono.type_name(f.typ)
+          let field_equal = "eq_" <> type_name(f.typ)
           case t.pointer {
             True ->
               "{ struct "
@@ -282,7 +275,7 @@ fn custom_type(t: CustomType) {
           <> v.name
           <> "* b = b_ptr;\n"
           <> list.map(v.fields, fn(f) {
-            let field_equal = "equal" <> mono.type_name(f.typ)
+            let field_equal = "eq_" <> type_name(f.typ)
             "if(!"
             <> field_equal
             <> "(a"
@@ -302,7 +295,7 @@ fn custom_type(t: CustomType) {
     <> "}\n"
 
   let inspect =
-    "String gleam_inspect_"
+    "String inspect_"
     <> t.name
     <> "("
     <> t.name
@@ -317,10 +310,10 @@ fn custom_type(t: CustomType) {
         <> case v.fields {
           [] -> "return " <> string_lit(v.name) <> ";\n"
           _ ->
-            "return append_String("
+            "return append_string("
             <> v.fields
             |> list.map(fn(f) {
-              "gleam_inspect_"
+              "inspect_"
               <> type_name(f.typ)
               <> "(a"
               <> access_op
@@ -329,7 +322,7 @@ fn custom_type(t: CustomType) {
             })
             |> list.intersperse(string_lit(", "))
             |> list.fold(string_lit(v.name <> "("), fn(a, f) {
-              "append_String(" <> a <> ", " <> f <> ")"
+              "append_string(" <> a <> ", " <> f <> ")"
             })
             <> ", "
             <> string_lit(")")
@@ -350,10 +343,10 @@ fn custom_type(t: CustomType) {
           <> case v.fields {
             [] -> "return " <> string_lit(v.name) <> ";\n"
             _ ->
-              "return append_String("
+              "return append_string("
               <> v.fields
               |> list.map(fn(f) {
-                "gleam_inspect_"
+                "inspect_"
                 <> type_name(f.typ)
                 <> "(a"
                 <> access_op
@@ -362,7 +355,7 @@ fn custom_type(t: CustomType) {
               })
               |> list.intersperse(string_lit(", "))
               |> list.fold(string_lit(v.name <> "("), fn(a, f) {
-                "append_String(" <> a <> ", " <> f <> ")"
+                "append_string(" <> a <> ", " <> f <> ")"
               })
               <> ", "
               <> string_lit(")")
@@ -382,7 +375,7 @@ fn custom_type(t: CustomType) {
       let tag = int.to_string(i)
       // put in a placeholder field in empty structs
       let fields = case v.fields {
-        [] -> [Field("placeholder", MonoApp("Int", []))]
+        [] -> [Field("placeholder", core.NamedType("Int", []))]
         x -> x
       }
       let fields =
@@ -391,52 +384,57 @@ fn custom_type(t: CustomType) {
 
       let struct = "struct " <> v.name <> "{\n" <> fields <> "};\n"
 
-      let constructor =
-        t.name
-        <> " "
-        <> v.name
-        <> "_NEW"
-        <> "("
-        <> v.fields
-        |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
-        |> string.join(", ")
-        <> ") {\n"
-        <> case t.pointer {
-          True ->
-            "struct "
-            <> v.name
-            <> "* _ptr = "
-            <> case v.fields {
-              [] -> "0;\n"
-              _ -> "malloc(sizeof(struct " <> v.name <> "));\n"
-            }
-            <> "uint16_t _tag = "
-            <> tag
-            <> ";\n"
-          _ -> t.name <> " _value;\n"
-        }
-        <> v.fields
-        |> list.map(fn(p) {
-          case t.pointer {
-            True -> "_ptr"
-            False -> "_value"
+      let constructor = case v.fields {
+        [] ->
+          "const Pointer new_"
+          <> v.name
+          <> " = encode_pointer(0, "
+          <> tag
+          <> ");\n"
+        _ ->
+          t.name
+          <> " new_"
+          <> v.name
+          <> "("
+          <> v.fields
+          |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
+          |> string.join(", ")
+          <> ") {\n"
+          <> case t.pointer {
+            True ->
+              "struct "
+              <> v.name
+              <> "* _ptr = malloc(sizeof(struct "
+              <> v.name
+              <> "));\n"
+              <> "uint16_t _tag = "
+              <> tag
+              <> ";\n"
+            _ -> t.name <> " _value;\n"
           }
-          <> access_op
-          <> p.name
-          <> " = "
-          <> p.name
-          <> ";\n"
-        })
-        |> string.join("")
-        <> case t.pointer {
-          True -> "return encode_pointer(_ptr, _tag);\n"
-          False -> "return _value;\n"
-        }
-        <> "}\n"
+          <> v.fields
+          |> list.map(fn(p) {
+            case t.pointer {
+              True -> "_ptr"
+              False -> "_value"
+            }
+            <> access_op
+            <> p.name
+            <> " = "
+            <> p.name
+            <> ";\n"
+          })
+          |> string.join("")
+          <> case t.pointer {
+            True -> "return encode_pointer(_ptr, _tag);\n"
+            False -> "return _value;\n"
+          }
+          <> "}\n"
+      }
+
       let isa =
         "Bool "
-        <> v.name
-        <> "_IS"
+        <> gen_names.get_variant_check_name(v.name)
         <> "("
         <> t.name
         <> " a) {\n"
@@ -446,13 +444,14 @@ fn custom_type(t: CustomType) {
         }
         <> "}\n"
       let getters =
-        list.map(v.fields, fn(f) {
+        list.index_map(v.fields, fn(f, i) {
           // TODO getters probably broken for record types
           type_name(f.typ)
           <> " "
-          <> v.name
-          <> "_"
-          <> f.name
+          <> gen_names.get_getter_name(v.name, i)
+          // <> v.name
+          // <> "_"
+          // <> f.name
           <> "("
           <> t.name
           <> " value) {"

@@ -1,9 +1,9 @@
 import gleam/string
 
-@external(c, "", "print_String")
+@external(c, "", "print_string")
 fn do_print(s: String) -> Int
 
-@external(c, "", "gets_String")
+@external(c, "", "gets_string")
 fn do_get_line(length: Int) -> String
 
 // Read a line from stdin.

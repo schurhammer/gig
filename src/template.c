@@ -16,13 +16,8 @@ struct Pointer
 
 typedef struct Pointer Pointer;
 
-Pointer encode_pointer(void *ptr, uint16_t tag)
-{
-  Pointer point;
-  point.tag = tag;
-  point.ptr = ptr;
-  return point;
-}
+#define encode_pointer(ptr, tag) \
+    ((Pointer){.ptr = (ptr), .tag = (tag)})
 
 void *decode_pointer(Pointer ptr)
 {
@@ -43,11 +38,8 @@ uint16_t decode_tag(Pointer ptr)
 
 typedef uintptr_t Pointer;
 
-Pointer encode_pointer(void *ptr, uint16_t tag)
-{
-  Pointer tagged_ptr = ((uintptr_t)ptr & 0x0000FFFFFFFFFFFF) | ((uintptr_t)tag << 48);
-  return tagged_ptr;
-}
+#define encode_pointer(ptr, tag) \
+    (((uintptr_t)ptr & 0x0000FFFFFFFFFFFF) | ((uintptr_t)tag << 48))
 
 void *decode_pointer(Pointer ptr)
 {
@@ -109,6 +101,7 @@ void *arena_malloc(size_t size)
 
 /// builtin
 
+#define Nil int
 #define True true
 #define False false
 #define Int int64_t
@@ -137,12 +130,14 @@ struct Closure
 
 void panic_exit() { exit(1); }
 
-Bool equal_Bool(Bool x, Bool y) { return x == y; }
+#define eq_Nil(a, b) True
+
+Bool eq_Bool(Bool x, Bool y) { return x == y; }
 Bool negate_bool(Bool x) { return !x; }
 Bool isa_True(Bool x) { return x == True; }
 Bool isa_False(Bool x) { return x == False; }
 
-Bool equal_Int(Int x, Int y) { return x == y; }
+Bool eq_Int(Int x, Int y) { return x == y; }
 Bool lt_int(Int x, Int y) { return x < y; }
 Bool gt_int(Int x, Int y) { return x > y; }
 Bool lte_int(Int x, Int y) { return x <= y; }
@@ -154,7 +149,7 @@ Int div_int(Int x, Int y) { return x / y; }
 Int rem_int(Int x, Int y) { return x % y; }
 Int negate_int(Int x) { return -x; }
 
-Bool equal_Float(Float x, Float y) { return x == y; }
+Bool eq_Float(Float x, Float y) { return x == y; }
 Bool lt_float(Float x, Float y) { return x < y; }
 Bool gt_float(Float x, Float y) { return x > y; }
 Bool lte_float(Float x, Float y) { return x <= y; }
@@ -177,7 +172,7 @@ String String_LIT(char *bytes, int byte_length)
   return str;
 }
 
-Bool equal_String(String a, String b)
+Bool eq_String(String a, String b)
 {
   if (a.byte_length != b.byte_length)
   {
@@ -186,7 +181,7 @@ Bool equal_String(String a, String b)
   return strncmp(a.bytes, b.bytes, a.byte_length) == 0;
 }
 
-String append_String(String a, String b)
+String append_string(String a, String b)
 {
   if (a.byte_length == 0)
   {
@@ -205,7 +200,7 @@ String append_String(String a, String b)
   return str;
 }
 
-Bool starts_with_String(String string, String with)
+Bool starts_with_string(String string, String with)
 {
   if (string.byte_length < with.byte_length)
   {
@@ -221,7 +216,7 @@ Bool starts_with_String(String string, String with)
   return True;
 }
 
-Bool ends_with_String(String string, String with)
+Bool ends_with_string(String string, String with)
 {
   if (string.byte_length < with.byte_length)
   {
@@ -239,14 +234,14 @@ Bool ends_with_String(String string, String with)
   return True;
 }
 
-Int compare_String(struct String str1, struct String str2) {
+Int compare_string(struct String str1, struct String str2) {
     if (str1.byte_length != str2.byte_length) {
         return str1.byte_length - str2.byte_length;
     }
     return memcmp(str1.bytes, str2.bytes, str1.byte_length);
 }
 
-String cstring_to_String(char *bytes)
+String cstring_to_string(char *bytes)
 {
   String str;
   str.byte_length = strlen(bytes);
@@ -255,20 +250,20 @@ String cstring_to_String(char *bytes)
   return str;
 }
 
-Int print_String(String a)
+Int print_string(String a)
 {
   printf("%.*s", a.byte_length, a.bytes);
   return 0;
 }
 
-String gets_String(Int max_length)
+String gets_string(Int max_length)
 {
   // extra space for null terminator
   max_length += 1;
   char buffer[max_length];
   if (fgets(buffer, max_length, stdin) != NULL)
   {
-    return cstring_to_String(buffer);
+    return cstring_to_string(buffer);
   }
   else
   {
@@ -279,7 +274,12 @@ String gets_String(Int max_length)
   }
 }
 
-String gleam_inspect_Bool(Bool b)
+String inspect_Nil(Nil value)
+{
+    return String_LIT("Nil", 3);
+}
+
+String inspect_Bool(Bool b)
 {
   if (b)
     return String_LIT("True", 4);
@@ -287,7 +287,7 @@ String gleam_inspect_Bool(Bool b)
     return String_LIT("False", 5);
 }
 
-String gleam_inspect_Int(Int value)
+String inspect_Int(Int value)
 {
   char buffer[32];
   snprintf(buffer, sizeof(buffer), "%ld", value);
@@ -301,7 +301,7 @@ String gleam_inspect_Int(Int value)
   return result;
 }
 
-String gleam_inspect_Float(Float value)
+String inspect_Float(Float value)
 {
   char buffer[32];
   snprintf(buffer, sizeof(buffer), "%g", value);
@@ -315,7 +315,7 @@ String gleam_inspect_Float(Float value)
   return result;
 }
 
-String gleam_inspect_String(String s)
+String inspect_String(String s)
 {
   // escape special characters
   char ooh[256] = {0};
@@ -346,10 +346,10 @@ String gleam_inspect_String(String s)
   }
   buffer[bp++] = '"';
   buffer[bp] = 0;
-  return cstring_to_String(buffer);
+  return cstring_to_string(buffer);
 }
 
-String gleam_inspect_Closure(Closure c)
+String inspect_Closure(Closure c)
 {
   return String_LIT("Closure", 7);
 }
@@ -375,7 +375,7 @@ Bool is_closure(Closure c)
   return decode_tag(c.env) != 65535;
 }
 
-Bool equal_Closure(Closure a, Closure b)
+Bool eq_Closure(Closure a, Closure b)
 {
   return False;
 }

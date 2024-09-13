@@ -1,10 +1,10 @@
-import closure_conversion
-import codegen
-import glance
-import monomorphise
-import typed as t
+import gig/closure
+import gig/codegen
+import gig/core
+import gig/mono
+import gig/typed_ast
 
-import env
+import glance
 import shellout
 import simplifile
 
@@ -48,6 +48,8 @@ pub fn compile(
 ) {
   let split = string.split(gleam_file_name, "/")
   let assert Ok(file) = list.last(split)
+  let module_name = string.replace(file, ".gleam", "")
+
   let path =
     all_but_last(split)
     |> string.join("/")
@@ -67,22 +69,22 @@ pub fn compile(
   // process the prelude
   let prelude = read_file("stdlib/gleam.gleam")
   let assert Ok(prelude) = glance.module(prelude)
-  let c = t.prelude_context()
-  let c = t.infer_module(c, prelude)
+  let c = typed_ast.new_context()
+  let c = typed_ast.infer_module(c, prelude, "gleam")
 
   // parse and typecheck input (recursively)
   let #(typed, _done) = infer_file(c, ["gleam.gleam"], path, file)
 
   // generate code
-  let mono = monomorphise.run(typed)
-  let cc = closure_conversion.cc_module(mono)
+  let core = core.lower_context(typed)
+  let #(mono, main_name) = mono.run(core, module_name <> "_" <> "main")
+  let cc = closure.cc_module(mono)
   let code = codegen.module(cc)
 
   // insert the generated code into the template
   let template = read_file("./src/template.c")
 
-  let module_name = string.replace(file, ".gleam", "")
-  let main_call = "F_" <> module_name <> "_main();\n"
+  let main_call = main_name <> "();\n"
 
   let template = case gc {
     True -> {
@@ -139,11 +141,11 @@ pub fn compile(
 }
 
 fn infer_file(
-  c: t.Context,
+  c: typed_ast.Context,
   d: List(String),
   path: String,
   file: String,
-) -> #(t.Context, List(String)) {
+) -> #(typed_ast.Context, List(String)) {
   io.println("Compiling " <> file)
   // add file to "done" list
   let d = [file, ..d]
@@ -158,21 +160,17 @@ fn infer_file(
   let module_name = string.replace(file, ".gleam", "")
 
   // infer imports
-  let #(c, d, module_names) =
-    list.fold(module.imports, #(c, d, env.new()), fn(acc, i) {
-      let #(c, d, module_names) = acc
+  let #(c, d) =
+    list.fold(module.imports, #(c, d), fn(acc, i) {
+      let #(c, d) = acc
       let name = i.definition.module
       let file = name <> ".gleam"
-      let assert Ok(alias) = list.last(string.split(name, "/"))
-      let module_names = env.put(module_names, alias, name)
       let #(c, d) = infer_file(c, d, path, file)
-      #(c, d, module_names)
+      #(c, d)
     })
 
-  let c = t.Context(..c, name: module_name, module_names: module_names)
-
   // infer this file
-  let c = t.infer_module(c, module)
+  let c = typed_ast.infer_module(c, module, module_name)
 
   #(c, d)
 }

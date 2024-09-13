@@ -1,4 +1,4 @@
-import graph
+import gig/graph
 
 import glance as g
 

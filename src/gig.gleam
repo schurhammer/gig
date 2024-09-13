@@ -1,5 +1,6 @@
+import gig/compiler
+
 import argv
-import compiler
 import glint
 
 fn gc_flag() -> glint.Flag(Bool) {
