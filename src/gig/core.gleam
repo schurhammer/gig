@@ -217,20 +217,14 @@ pub fn register_variant_functions(
 ) {
   // constructor function
   let variant_id = get_id(module_name, variant.name)
-  let fun_id = gen_names.get_constructor_name(variant_id)
-  let parameters =
-    list.index_map(variant.fields, fn(f, i) {
-      let typ = map_type(c, f.item.typ)
-      Parameter(typ, gen_names.get_field_name(i))
-    })
   let typ = map_poly(c, variant.typ)
-  let fun = External(typ: typ, id: fun_id, mono: True)
-  let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
+  let fun = External(typ: typ, id: "new_" <> variant_id, mono: True)
+  let acc =
+    Context(..acc, externals: dict.insert(acc.externals, variant_id, fun))
 
   // variant check function
   let fun_id = gen_names.get_variant_check_name(variant_id)
   let typ = map_poly(c, custom_typ)
-  let parameters = [Parameter(typ.typ, "val")]
   let typ = Poly(typ.vars, FunctionType([typ.typ], bool_type))
   let fun = External(typ: typ, id: fun_id, mono: True)
   let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
@@ -240,7 +234,6 @@ pub fn register_variant_functions(
     let fun_id = gen_names.get_getter_name(variant_id, i)
     let typ = map_poly(c, custom_typ)
     let field_typ = map_type(c, f.item.typ)
-    let parameters = [Parameter(typ.typ, "val")]
     let typ = Poly(typ.vars, FunctionType([typ.typ], field_typ))
     let fun = External(typ: typ, id: fun_id, mono: True)
     Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
@@ -345,7 +338,7 @@ const nil_type = NamedType("Nil", [])
 
 const bool_type = NamedType("Bool", [])
 
-const true_value = Global(bool_type, "True")
+const true_value = Literal(bool_type, Bool("True"))
 
 fn and_exp(first: Exp, second: Exp) {
   case first, second {
@@ -462,18 +455,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         "gleam", "True" -> Literal(typ, Bool("True"))
         "gleam", "False" -> Literal(typ, Bool("False"))
         _, _ -> {
-          let assert Ok(#(_, _, _, kind)) =
-            t.resolve_global_name(c, module, name)
-
-          // rewrite function name if its a constructor function
-          // TODO maybe change type naming scheme so we can keep constructor names
-          case kind {
-            t.ConstructorFunction -> {
-              let name = gen_names.get_constructor_name(get_id(module, name))
-              Global(typ, name)
-            }
-            _ -> Global(typ, get_id(module, name))
-          }
+          Global(typ, get_id(module, name))
         }
       }
     }
@@ -512,25 +494,21 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let elements = list.map(elements, lower_expression(c, _))
       let element_types = list.map(elements, fn(e) { e.typ })
       let len = int.to_string(list.length(elements))
-      let fun =
-        Global(
-          FunctionType(element_types, typ),
-          gen_names.get_constructor_name("Tuple" <> len),
-        )
+      let fun = Global(FunctionType(element_types, typ), "Tuple" <> len)
       Call(typ, fun, elements)
     }
     t.List(typ, elements, rest) -> {
       let list_typ = map_type(c, typ)
       let rest = case rest {
         Some(rest) -> lower_expression(c, rest)
-        None -> Global(list_typ, gen_names.get_constructor_name("Empty"))
+        None -> Global(list_typ, "Empty")
       }
       let elements = list.reverse(elements)
       list.fold(elements, rest, fn(rest, element) {
         let element = lower_expression(c, element)
         let args = [element, rest]
         let cons_typ = FunctionType([element.typ, list_typ], list_typ)
-        let cons = Global(cons_typ, gen_names.get_constructor_name("Cons"))
+        let cons = Global(cons_typ, "Cons")
         Call(list_typ, cons, args)
       })
     }
@@ -560,10 +538,9 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
           }
         })
       let record = lower_expression(c, record)
-      let constructor_name = gen_names.get_constructor_name(constructor)
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
-      let body = Call(typ, Global(constructor_typ, constructor_name), fields)
+      let body = Call(typ, Global(constructor_typ, constructor), fields)
       Let(typ, "subject", record, body)
     }
     t.FieldAccess(typ, container, module, variant, label, i) -> {

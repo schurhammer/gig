@@ -39,13 +39,6 @@ pub type Attribute {
   Attribute(name: String, arguments: List(Expression))
 }
 
-pub type ValueKind {
-  ConstructorFunction
-  TopLevelFunction
-  // TODO is this still needed?
-  ExternalFunction(external_name: String)
-}
-
 // TODO it would probably be good to parameterise the Type
 // then we can offer an ast with resolved types and also library users
 // can add their own info
@@ -53,8 +46,9 @@ pub type Module {
   Module(
     name: String,
     // TODO move these into context instead of module?
+    // TODO put more info into the envs
     type_env: Dict(String, #(Poly, List(Variant))),
-    value_env: Dict(String, #(Poly, List(Option(String)), ValueKind)),
+    value_env: Dict(String, #(Poly, List(Option(String)))),
     imports: List(Definition(Import)),
     custom_types: List(Definition(CustomType)),
     type_aliases: List(Definition(TypeAlias)),
@@ -401,13 +395,7 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
       list.fold(group, c, fn(c, def) {
         let #(c, typ) = new_type_var_ref(c)
         let labels = list.map(def.definition.parameters, fn(f) { f.label })
-        register_value(
-          c,
-          def.definition.name,
-          Poly([], typ),
-          labels,
-          TopLevelFunction,
-        )
+        register_value(c, def.definition.name, Poly([], typ), labels)
       })
 
     // infer types for each function
@@ -424,20 +412,7 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
     list.fold(group, c, fn(c, def) {
       let fun = def.definition
       let labels = list.map(fun.parameters, fn(f) { f.label })
-
-      let external =
-        list.find_map(def.attributes, fn(x) {
-          case x.name == "external" {
-            True -> Ok(x.arguments)
-            False -> Error(Nil)
-          }
-        })
-      let kind = case external {
-        Ok([_, _, String(_, n)]) -> ExternalFunction(n)
-        Ok(_) -> panic as "invalid external definition"
-        _ -> TopLevelFunction
-      }
-      let c = register_value(c, fun.name, fun.typ, labels, kind)
+      let c = register_value(c, fun.name, fun.typ, labels)
       update_module(c, fn(mod) {
         Module(..mod, functions: [def, ..mod.functions])
       })
@@ -480,10 +455,9 @@ fn register_value(
   name: String,
   typ: Poly,
   labels: List(Option(String)),
-  kind: ValueKind,
 ) -> Context {
   update_module(c, fn(module) {
-    let value_env = dict.insert(module.value_env, name, #(typ, labels, kind))
+    let value_env = dict.insert(module.value_env, name, #(typ, labels))
     Module(..module, value_env:)
   })
 }
@@ -504,7 +478,7 @@ fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
   let attr_env = dict.new()
   let attr_env = dict.insert(attr_env, "c", nil_type)
 
-  let #(c, attrs) =
+  let #(_, attrs) =
     list.fold(attrs, #(c, []), fn(acc, attr) {
       let #(c, attrs) = acc
       let #(c, exprs) =
@@ -631,7 +605,7 @@ fn infer_variant(c, n, typ: Type, variant: g.Variant) -> #(Context, Variant) {
 
   let typ = generalise(c, typ)
 
-  let c = register_value(c, variant.name, typ, labels, ConstructorFunction)
+  let c = register_value(c, variant.name, typ, labels)
 
   #(c, Variant(typ, variant.name, fields))
 }
@@ -807,11 +781,11 @@ fn resolve_unqualified_global(
 ) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
   // try global env
   case resolve_global_name(c, c.current_module, name) {
-    Ok(#(name, typ, labels, _)) -> Ok(#(name, typ, labels))
+    Ok(#(name, typ, labels)) -> Ok(#(name, typ, labels))
     // try prelude
     Error(_) -> {
       case resolve_global_name(c, builtin, name) {
-        Ok(#(name, typ, labels, _)) -> Ok(#(name, typ, labels))
+        Ok(#(name, typ, labels)) -> Ok(#(name, typ, labels))
         Error(_) -> Error("Could not resolve name " <> name)
       }
     }
@@ -821,7 +795,7 @@ fn resolve_unqualified_global(
 fn resolve_aliased_name(
   c: Context,
   name: QualifiedName,
-) -> Result(#(QualifiedName, Poly, List(Option(String)), ValueKind), String) {
+) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
   case dict.get(c.module_alias_env, name.module) {
     Ok(module) -> resolve_global_name(c, module, name.name)
     Error(_) -> Error("Could not resolve module name " <> name.module)
@@ -832,12 +806,12 @@ pub fn resolve_global_name(
   c: Context,
   module_name: String,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Option(String)), ValueKind), String) {
+) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
   case dict.get(c.modules, module_name) {
     Ok(module) ->
       case dict.get(module.value_env, name) {
-        Ok(#(typ, labels, kind)) ->
-          Ok(#(QualifiedName(module_name, name), typ, labels, kind))
+        Ok(#(typ, labels)) ->
+          Ok(#(QualifiedName(module_name, name), typ, labels))
         Error(_) -> Error("Could not resolve name " <> name)
       }
     Error(_) -> Error("Missing module " <> module_name)
@@ -1433,61 +1407,64 @@ fn infer_expression(
 
       Ok(#(c, record_update))
     }
-    g.FieldAccess(container, label) -> {
-      let field_access = case infer_expression(c, n, container) {
-        Ok(#(c, container)) -> {
-          case resolve_type(c, container.typ) {
-            NamedType(name, module, params) -> {
-              let assert Ok(#(_, _, variants)) =
-                resolve_global_type_name(c, module, name)
-              case variants {
-                [v] ->
-                  v.fields
-                  |> list.index_map(fn(x, i) { #(x, i) })
-                  |> list.find_map(fn(field) {
-                    case { field.0 }.label == Some(label) {
-                      True -> Ok(#(c, container, module, v, field.0, field.1))
-                      False -> Error(Nil)
-                    }
-                  })
-                _ -> Error(Nil)
-              }
-            }
-            _ -> Error(Nil)
-          }
+    g.FieldAccess(value, label) -> {
+      let field_access = {
+        // try to infer the value, otherwise it might be a module access
+        use #(c, value) <- try(infer_expression(c, n, value))
+
+        // field access must be on a named type
+        let value_typ = case resolve_type(c, value.typ) {
+          NamedType(type_name, module, _) -> Ok(#(type_name, module))
+          _ -> Error("Field access attempted on invalid type.")
         }
-        Error(_) -> Error(Nil)
+        use #(type_name, module) <- try(value_typ)
+
+        // find the custom type definition
+        let assert Ok(mod) = dict.get(c.modules, module)
+        let assert Ok(custom) =
+          list.find(mod.custom_types, fn(x) { x.definition.name == type_name })
+
+        // access only works with one variant
+        let variant = case custom.definition.variants {
+          [variant] -> Ok(variant)
+          _ -> Error("Field access attempted on type with multiple variants.")
+        }
+        use variant <- try(variant)
+
+        // find the matching field and index
+        let field =
+          variant.fields
+          |> list.index_map(fn(x, i) { #(x, i) })
+          |> list.find(fn(x) { { x.0 }.label == Some(label) })
+          |> result.replace_error("Variant does not have a matching field.")
+        use #(field, index) <- try(field)
+
+        // create a getter function type
+        let getter = FunctionType([custom.definition.typ.typ], field.item.typ)
+        let getter = Poly(custom.definition.typ.vars, getter)
+        let #(c, getter) = instantiate(c, getter)
+
+        // unify the getter as if we're calling it on the value
+        let #(c, typ) = new_type_var_ref(c)
+        let c = unify(c, getter, FunctionType([value.typ], typ))
+
+        Ok(#(c, FieldAccess(typ, value, module, variant.name, label, index)))
       }
       case field_access {
-        Ok(#(c, container, module, variant, field, index)) -> {
-          // variant is a function that returns the custom type
-          let assert FunctionType(_args, custom) = variant.typ.typ
-
-          // we create a fake "getter" function
-          let getter = FunctionType([custom], field.item.typ)
-          let getter = Poly(variant.typ.vars, getter)
-          let #(c, getter) = instantiate(c, getter)
-
-          // we unify the fake getter as if we're calling it on the container
-          let #(c, typ) = new_type_var_ref(c)
-          let c = unify(c, getter, FunctionType([container.typ], typ))
-
-          let field_access =
-            FieldAccess(typ, container, module, variant.name, label, index)
-          Ok(#(c, field_access))
-        }
-        Error(_) -> {
-          case container {
+        Ok(access) -> Ok(access)
+        Error(e) -> {
+          // try a module access instead
+          case value {
             g.Variable(module) -> {
               case resolve_aliased_name(c, QualifiedName(module, label)) {
-                Ok(#(name, poly, _labels, _)) -> {
+                Ok(#(name, poly, _labels)) -> {
                   let #(c, typ) = instantiate(c, poly)
                   Ok(#(c, GlobalVariable(typ, name.module, name.name)))
                 }
-                Error(s) -> Error(s)
+                Error(e) -> Error(e)
               }
             }
-            _ -> Error("invalid field access")
+            _ -> Error(e)
           }
         }
       }
@@ -1509,7 +1486,7 @@ fn infer_expression(
       // handle labels
       let labels = case fun {
         GlobalVariable(_typ, module, name) -> {
-          let assert Ok(#(_name, _poly, labels, _)) =
+          let assert Ok(#(_name, _poly, labels)) =
             resolve_global_name(c, module, name)
           labels
         }
@@ -1535,6 +1512,7 @@ fn infer_expression(
       }
     }
     g.FnCapture(label, fun, before, after) -> {
+      // TODO return non-desugared version
       let #(c, x) = new_temp_var(c)
       let arg = g.Field(label, g.Variable(x))
       let args = list.concat([before, [arg], after])

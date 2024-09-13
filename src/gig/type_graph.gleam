@@ -1,6 +1,6 @@
 import gig/graph
+import gig/mono.{type_name}
 import gleam/list
-import gleam/string
 
 type Graph =
   graph.Graph(String)
@@ -27,16 +27,6 @@ fn walk_varaint(g: Graph, t: CustomType, v: Variant) -> Graph {
 
 fn walk_field(g: Graph, t: CustomType, f: Field) -> Graph {
   walk_type(g, t, f.typ)
-}
-
-fn type_name(typ: core.Type) -> String {
-  case typ {
-    core.NamedType(name, args) ->
-      string.join([name, ..list.map(args, type_name)], "_")
-    core.FunctionType(..) -> "Closure"
-    core.TupleType(..) -> panic
-    core.Unbound(..) -> panic
-  }
 }
 
 fn walk_type(g: Graph, t: CustomType, f: core.Type) -> Graph {

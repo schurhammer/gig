@@ -77,14 +77,14 @@ pub fn compile(
 
   // generate code
   let core = core.lower_context(typed)
-  let mono = mono.run(core, module_name <> "_" <> "main")
+  let #(mono, main_name) = mono.run(core, module_name <> "_" <> "main")
   let cc = closure.cc_module(mono)
   let code = codegen.module(cc)
 
   // insert the generated code into the template
   let template = read_file("./src/template.c")
 
-  let main_call = module_name <> "_main();\n"
+  let main_call = main_name <> "();\n"
 
   let template = case gc {
     True -> {

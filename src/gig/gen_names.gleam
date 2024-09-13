@@ -14,10 +14,6 @@ pub fn get_getter_name(variant: String, index: Int) {
   get_field_name(index) <> "_" <> variant
 }
 
-pub fn get_constructor_name(variant: String) {
-  "new_" <> variant
-}
-
 pub fn get_variant_check_name(variant: String) {
   "isa_" <> variant
 }

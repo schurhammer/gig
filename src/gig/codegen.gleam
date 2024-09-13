@@ -4,7 +4,7 @@ import gig/closure.{
 }
 import gig/core.{Float, Int, String}
 import gig/gen_names
-import gig/mono
+import gig/mono.{type_name}
 import gig/type_graph
 
 import gig/graph
@@ -13,16 +13,6 @@ import gleam/bool
 import gleam/int
 import gleam/list
 import gleam/string
-
-fn type_name(typ: core.Type) -> String {
-  case typ {
-    core.NamedType(name, args) ->
-      string.join([name, ..list.map(args, type_name)], "_")
-    core.FunctionType(..) -> "Closure"
-    core.TupleType(..) -> panic
-    core.Unbound(..) -> panic
-  }
-}
 
 fn hit_target(target: String, with: String) {
   case with {
@@ -240,7 +230,7 @@ fn custom_type(t: CustomType) {
     <> case t.variants {
       [v] ->
         list.map(v.fields, fn(f) {
-          let field_equal = "eq" <> mono.type_name(f.typ)
+          let field_equal = "eq_" <> type_name(f.typ)
           case t.pointer {
             True ->
               "{ struct "
@@ -285,7 +275,7 @@ fn custom_type(t: CustomType) {
           <> v.name
           <> "* b = b_ptr;\n"
           <> list.map(v.fields, fn(f) {
-            let field_equal = "eq" <> mono.type_name(f.typ)
+            let field_equal = "eq_" <> type_name(f.typ)
             "if(!"
             <> field_equal
             <> "(a"
@@ -396,15 +386,15 @@ fn custom_type(t: CustomType) {
 
       let constructor = case v.fields {
         [] ->
-          "const Pointer "
-          <> gen_names.get_constructor_name(v.name)
+          "const Pointer new_"
+          <> v.name
           <> " = encode_pointer(0, "
           <> tag
           <> ");\n"
         _ ->
           t.name
-          <> " "
-          <> gen_names.get_constructor_name(v.name)
+          <> " new_"
+          <> v.name
           <> "("
           <> v.fields
           |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })

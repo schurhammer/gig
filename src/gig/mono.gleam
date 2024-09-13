@@ -18,7 +18,7 @@ pub fn run(c: t.Context, main_name: String) {
   let assert Ok(main) = dict.get(c.in.functions, main_name)
   let typ = sub_type(c, [], main.typ.typ)
   let #(c, main_name) = instantiate_function(c, main_name, typ)
-  c
+  #(c, main_name)
 }
 
 fn sub_type(c: Context, sub: List(#(Int, t.Type)), typ: t.Type) -> t.Type {
@@ -88,22 +88,19 @@ fn unify_type(c: Context, poly: t.Type, mono: t.Type) -> List(#(Int, t.Type)) {
   }
 }
 
-pub fn type_name(mono: t.Type) -> String {
-  case mono {
+pub fn type_name(typ: t.Type) -> String {
+  case typ {
+    t.NamedType(name, []) -> name
     t.NamedType(name, args) ->
-      "_"
-      <> name
-      <> args
-      |> list.map(type_name)
-      |> string.concat()
-    t.FunctionType(ret, args) -> "_Closure"
-    t.TupleType(args) -> panic as "tuple"
-    t.Unbound(_) -> panic as "unbound"
+      string.join([name, ..list.map(args, type_name)], "_")
+    t.FunctionType(..) -> "Closure"
+    t.TupleType(..) -> panic
+    t.Unbound(..) -> panic
   }
 }
 
 fn get_type_string(sub: List(#(Int, t.Type))) {
-  list.map(sub, fn(s) { type_name(s.1) })
+  list.map(sub, fn(s) { "_" <> type_name(s.1) })
   |> string.concat()
 }
 
@@ -166,11 +163,10 @@ fn register_tuple(c: Context, typ: t.Type) {
       // TODO can we reuse the function from core to create constructor/getters?
 
       // create generic tuple constructor
-      let fun_id = gen_names.get_constructor_name(variant_id)
       let fun_typ = t.Poly(vars, t.FunctionType(element_types, custom_typ.typ))
-      let fun = t.External(typ: fun_typ, id: fun_id, mono: True)
+      let fun = t.External(typ: fun_typ, id: "new_" <> variant_id, mono: True)
       let cin =
-        t.Context(..cin, externals: dict.insert(cin.externals, fun.id, fun))
+        t.Context(..cin, externals: dict.insert(cin.externals, variant_id, fun))
 
       // create generic tuple getter functions
       let cin =
@@ -197,7 +193,7 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
     Ok(fun) -> {
       let sub = unify_poly(c, fun.typ, mono)
       let type_string = get_type_string(sub)
-      let mono_name = fun.id <> type_string
+      let mono_name = "F_" <> fun.id <> type_string
 
       case dict.get(c.out.functions, mono_name) {
         Ok(_) -> #(c, mono_name)
@@ -233,10 +229,8 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
       case dict.get(c.in.externals, name) {
         Ok(external) -> {
           let sub = unify_poly(c, external.typ, mono)
-          let type_string = get_type_string(sub)
-          let mono_name = external.id <> type_string
           case external.mono {
-            True -> #(c, mono_name)
+            True -> #(c, external.id <> get_type_string(sub))
             False -> #(c, external.id)
           }
         }

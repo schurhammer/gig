@@ -1,7 +1,7 @@
 import gig/core as t
 import gig/gen_names
 import gig/mono
-import gleam/dict.{type Dict}
+import gleam/dict
 
 import gleam/int
 import gleam/list
@@ -213,13 +213,12 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
           // create the closure object
           let fun_pointer = Var(typ, fun_name)
 
-          let new_env_fun_name = gen_names.get_constructor_name(env_name)
           let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
           let new_env_fun_type = t.FunctionType(env_arg_types, env_type)
           let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
 
           let env_constructor_call =
-            Call(env_type, Var(new_env_fun_type, new_env_fun_name), env_args)
+            Call(env_type, Var(new_env_fun_type, "new_" <> env_name), env_args)
 
           let closure =
             Call(typ, Var(typ, "create_closure"), [
