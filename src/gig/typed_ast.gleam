@@ -22,6 +22,8 @@ pub const float_type = NamedType("Float", builtin, [])
 
 pub const string_type = NamedType("String", builtin, [])
 
+pub const bit_array_type = NamedType("BitArray", builtin, [])
+
 pub type Ref {
   Ref(id: Int)
 }
@@ -983,7 +985,44 @@ fn infer_pattern(
 
       #(c, n, pattern)
     }
-    g.PatternBitString(segs) -> todo
+    g.PatternBitString(segs) -> {
+      let #(c, n, segs) =
+        list.fold(segs, #(c, n, []), fn(acc, seg) {
+          let #(c, n, segs) = acc
+          // TODO handle options
+          // TODO unify type of pattern according to options
+          let #(pattern, options) = seg
+          let options = []
+          let #(c, n, pattern) = infer_pattern(c, n, pattern)
+          #(c, n, [#(pattern, options), ..segs])
+        })
+      let segs = list.reverse(segs)
+      #(c, n, PatternBitString(bit_array_type, segs))
+      // case opt {
+      //   g.SizeOption(size) -> Ok(#(c, [SizeOption(size), ..opts]))
+      //   g.UnitOption(unit) -> Ok(#(c, [UnitOption(unit), ..opts]))
+      //   g.SizeValueOption(e) -> {
+      //     use #(c, e) <- try(infer_expression(c, n, e))
+      //     let c = unify(c, e.typ, int_type)
+      //     Ok(#(c, [SizeValueOption(e), ..opts]))
+      //   }
+      //   g.BinaryOption -> Ok(#(c, [BinaryOption, ..opts]))
+      //   g.IntOption -> Ok(#(c, [IntOption, ..opts]))
+      //   g.FloatOption -> Ok(#(c, [FloatOption, ..opts]))
+      //   g.BitStringOption -> Ok(#(c, [BitStringOption, ..opts]))
+      //   g.Utf8Option -> Ok(#(c, [Utf8Option, ..opts]))
+      //   g.Utf16Option -> Ok(#(c, [Utf16Option, ..opts]))
+      //   g.Utf32Option -> Ok(#(c, [Utf32Option, ..opts]))
+      //   g.Utf8CodepointOption -> Ok(#(c, [Utf8CodepointOption, ..opts]))
+      //   g.Utf16CodepointOption -> Ok(#(c, [Utf16CodepointOption, ..opts]))
+      //   g.Utf32CodepointOption -> Ok(#(c, [Utf32CodepointOption, ..opts]))
+      //   g.SignedOption -> Ok(#(c, [SignedOption, ..opts]))
+      //   g.UnsignedOption -> Ok(#(c, [UnsignedOption, ..opts]))
+      //   g.BigOption -> Ok(#(c, [BigOption, ..opts]))
+      //   g.LittleOption -> Ok(#(c, [LittleOption, ..opts]))
+      //   g.NativeOption -> Ok(#(c, [NativeOption, ..opts]))
+      // }
+    }
     g.PatternConstructor(module, constructor, arguments, with_spread) -> {
       // resolve the constructor function
       let assert Ok(#(name, poly, labels)) =
@@ -1521,7 +1560,19 @@ fn infer_expression(
       infer_expression(c, n, abs)
     }
     g.BitString(segs) -> {
-      todo as "BitString"
+      use #(c, segs) <- try(
+        list.try_fold(segs, #(c, []), fn(acc, seg) {
+          let #(c, segs) = acc
+          // TODO handle options
+          // TODO unify type of pattern according to options
+          let #(expression, options) = seg
+          let options = []
+          use #(c, expression) <- try(infer_expression(c, n, expression))
+          Ok(#(c, [#(expression, options), ..segs]))
+        }),
+      )
+      let segs = list.reverse(segs)
+      Ok(#(c, BitString(bit_array_type, segs)))
     }
     g.Case(subjects, clauses) -> {
       use #(c, subjects) <- try(

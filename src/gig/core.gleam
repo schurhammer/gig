@@ -1,6 +1,7 @@
 import gig/gen_names.{get_id}
 import gig/typed_ast as t
 import gleam/dict.{type Dict}
+import gleam/io
 
 import glance as g
 
@@ -31,6 +32,7 @@ pub type LiteralKind {
   Int(value: String)
   Float(value: String)
   String(value: String)
+  BitArray(values: List(String))
 }
 
 pub type Exp {
@@ -313,7 +315,31 @@ fn lower_pattern_bindings(
       [#(name, subject), ..pattern]
     }
     t.PatternConcatenate(typ, left, right) -> todo
-    t.PatternBitString(typ, segs) -> todo
+    t.PatternBitString(typ, segs) -> {
+      list.index_map(segs, fn(seg, i) {
+        let #(pattern, options) = seg
+        let subject =
+          t.Call(
+            t.int_type,
+            t.GlobalVariable(
+              t.FunctionType(
+                [t.bit_array_type, t.int_type, t.int_type],
+                t.int_type,
+              ),
+              t.builtin,
+              "index_bit_array_int",
+            ),
+            [t.Field(None, subject)],
+            [
+              subject,
+              t.Int(t.int_type, int.to_string(i * 8)),
+              t.Int(t.int_type, int.to_string(8)),
+            ],
+          )
+        lower_pattern_bindings(c, pattern, subject)
+      })
+      |> list.flatten
+    }
     t.PatternConstructor(
       typ,
       module,
@@ -342,8 +368,8 @@ const true_value = Literal(bool_type, Bool("True"))
 
 fn and_exp(first: Exp, second: Exp) {
   case first, second {
-    Global(_, "True"), _ -> second
-    _, Global(_, "True") -> first
+    Literal(_, Bool("True")), _ -> second
+    _, Literal(_, Bool("True")) -> first
     _, _ -> {
       let fun_typ = FunctionType([bool_type, bool_type], bool_type)
       let fun = Global(fun_typ, "and_bool")
@@ -410,7 +436,53 @@ fn lower_pattern_match(
     }
     t.PatternAssignment(typ, pattern, name) -> true_value
     t.PatternConcatenate(typ, left, right) -> todo as "PatternConcatenate"
-    t.PatternBitString(typ, segs) -> todo as "PatternBitString"
+    t.PatternBitString(typ, segs) -> {
+      let data_match =
+        list.index_fold(segs, true_value, fn(match, seg, i) {
+          let #(pattern, options) = seg
+          let inner_subject =
+            t.Call(
+              t.int_type,
+              t.GlobalVariable(
+                t.FunctionType(
+                  [t.bit_array_type, t.int_type, t.int_type],
+                  t.int_type,
+                ),
+                t.builtin,
+                "index_bit_array_int",
+              ),
+              [t.Field(None, subject)],
+              [
+                subject,
+                t.Int(t.int_type, int.to_string(i * 8)),
+                t.Int(t.int_type, int.to_string(8)),
+              ],
+            )
+          let seg_match = lower_pattern_match(c, pattern, inner_subject)
+          and_exp(seg_match, match)
+        })
+      let length = int.to_string(list.length(segs) * 8)
+      let length_subject =
+        t.Call(
+          t.int_type,
+          t.GlobalVariable(
+            t.FunctionType([t.bit_array_type], t.int_type),
+            t.builtin,
+            "length_bit_array",
+          ),
+          [t.Field(None, subject)],
+          [subject],
+        )
+      let length_match =
+        t.BinaryOperator(
+          t.bool_type,
+          g.Eq,
+          length_subject,
+          t.Int(t.int_type, length),
+        )
+      let length_match = lower_expression(c, length_match)
+      and_exp(length_match, data_match)
+    }
     t.PatternConstructor(
       typ,
       module,
@@ -567,7 +639,19 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Call(typ, getter, [tuple])
     }
     t.FnCapture(typ, label, function, arguments_before, arguments_after) -> todo
-    t.BitString(typ, segs) -> todo
+    t.BitString(typ, segs) -> {
+      let segs =
+        list.index_map(segs, fn(seg, index) {
+          // TODO handle options
+          let #(exp, options) = seg
+          let name = "value_" <> int.to_string(index)
+          #(name, lower_expression(c, exp))
+        })
+      let vars = list.map(segs, fn(x) { x.0 })
+      let typ = map_type(c, typ)
+      let literal = Literal(typ, BitArray(vars))
+      list.fold(segs, literal, fn(exp, seg) { Let(exp.typ, seg.0, seg.1, exp) })
+    }
     t.Case(typ, subjects, clauses) -> {
       let typ = map_type(c, typ)
       let else_body =

@@ -73,6 +73,8 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
         _ -> x
       }
     }
+    g.PatternBitString(segs) ->
+      list.flat_map(segs, fn(seg) { pattern_bindings(seg.0) })
     g.PatternConstructor(_mod, _cons, args, _spread) ->
       list.flat_map(args, fn(x) { pattern_bindings(x.item) })
     _ -> {
@@ -163,6 +165,8 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
       let g = walk_expression(g, n, r, record)
       list.fold(fields, g, fn(g, f) { walk_expression(g, n, r, f.1) })
     }
+    g.BitString(segs) ->
+      list.fold(segs, g, fn(g, seg) { walk_expression(g, n, r, seg.0) })
     _ -> {
       io.debug(e)
       todo

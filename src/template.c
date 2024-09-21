@@ -109,13 +109,19 @@ void *arena_malloc(size_t size)
 #define Bool bool
 
 typedef struct String String;
+typedef struct BitArray BitArray;
 typedef struct Closure Closure;
 
-// NOTE: Strings might not be null terminated
 struct String
 {
   int byte_length;
   char *bytes;
+};
+
+struct BitArray {
+  uint8_t *bytes;
+  size_t offset;
+  size_t len;
 };
 
 struct Closure
@@ -159,13 +165,56 @@ Float sub_float(Float x, Float y) { return x - y; }
 Float mul_float(Float x, Float y) { return x * y; }
 Float div_float(Float x, Float y) { return x / y; }
 
+BitArray new_bit_array(size_t len, uint8_t* data) {
+  size_t byte_size = (len + 8 - 1) / 8;
+
+  struct BitArray ba;
+  ba.bytes = malloc(byte_size);
+  ba.offset = 0;
+  ba.len = len;
+
+  memcpy(ba.bytes, data, byte_size);
+
+  return ba;
+}
+
+Int index_bit_array_int(BitArray ba, size_t offset, int len) {
+
+    size_t start_bit = ba.offset + offset;
+    size_t start_byte = start_bit / 8;
+    size_t len_byte = (len + 8 - 1) / 8;
+
+    if (start_bit % 8 != 0 || len % 8 != 0) {
+        printf("%s %ld %ld %d", "unaligned access not supported", ba.offset, offset, len);
+        panic_exit();
+    }
+
+    uint64_t result = 0;
+    memcpy(&result, ba.bytes + start_byte, len_byte);
+    // result = result >> (64 - len);
+
+    return result;
+}
+
+BitArray slice_bit_array(BitArray ba, size_t offset, size_t len) {
+  struct BitArray view;
+
+  view.bytes = ba.bytes;
+  view.offset = ba.offset + offset;
+  view.len = len;
+
+  return view;
+}
+
+Int length_bit_array(BitArray ba) { return ba.len; }
+
 String String_LIT(char *bytes, int byte_length)
 {
   if (byte_length < 0)
   {
     byte_length = strlen(bytes);
   }
-  String str;
+  struct String str;
   str.byte_length = byte_length;
   str.bytes = bytes;
 
@@ -191,7 +240,7 @@ String append_string(String a, String b)
   {
     return a;
   }
-  String str;
+  struct String str;
   int byte_length = a.byte_length + b.byte_length;
   str.bytes = malloc(byte_length);
   str.byte_length = byte_length;
@@ -243,7 +292,7 @@ Int compare_string(struct String str1, struct String str2) {
 
 String cstring_to_string(char *bytes)
 {
-  String str;
+  struct String str;
   str.byte_length = strlen(bytes);
   str.bytes = malloc(str.byte_length);
   memcpy(str.bytes, bytes, str.byte_length);
@@ -356,7 +405,7 @@ String inspect_Closure(Closure c)
 
 Closure create_closure(void *fun, Pointer env)
 {
-  Closure RETURN;
+  struct Closure RETURN;
   RETURN.fun = fun;
   RETURN.env = env;
   return RETURN;
@@ -364,7 +413,7 @@ Closure create_closure(void *fun, Pointer env)
 
 Closure create_function(void *fun)
 {
-  Closure RETURN;
+  struct Closure RETURN;
   RETURN.fun = fun;
   RETURN.env = encode_pointer(0, 65535);
   return RETURN;

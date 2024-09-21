@@ -2,7 +2,7 @@ import gig/closure.{
   type CustomType, type Exp, type Function, type Module, Call, CallClosure,
   CustomType, Field, If, Let, Literal, Module, Panic, Var,
 }
-import gig/core.{Float, Int, String}
+import gig/core.{BitArray, Float, Int, String}
 import gig/gen_names
 import gig/mono.{type_name}
 import gig/type_graph
@@ -47,6 +47,15 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
         Int(val) -> hit_target(target, string.replace(val, "_", ""))
         Float(val) -> hit_target(target, val <> "L")
         String(val) -> hit_target(target, string_lit(val))
+        BitArray(vals) -> {
+          let value =
+            "new_bit_array("
+            <> int.to_string(list.length(vals) * 8)
+            <> ", (uint8_t[]){"
+            <> string.join(vals, ", ")
+            <> "})"
+          hit_target(target, value)
+        }
       }
 
     Var(_, val) -> hit_target(target, val)

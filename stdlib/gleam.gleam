@@ -13,6 +13,8 @@ pub type Float
 
 pub type String
 
+pub type BitArray
+
 pub type Result(a, b) {
   Ok(value: a)
   Error(value: b)
@@ -104,6 +106,17 @@ pub fn append_string(a: String, b: String) -> String
 @monomorphise()
 @external(c, "", "inspect")
 pub fn inspect(a: a) -> String
+
+// BitArray Operators
+
+@external(c, "", "index_bit_array_int")
+pub fn index_bit_array_int(a: BitArray, offset: Int, length: Int) -> Int
+
+@external(c, "", "slice_bit_array")
+pub fn slice_bit_array(a: BitArray, offset: Int, length: Int) -> Int
+
+@external(c, "", "length_bit_array")
+pub fn length_bit_array(a: BitArray) -> Int
 
 // Other Functions
 

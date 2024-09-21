@@ -36,7 +36,7 @@ the current state of the type checker.
   - Ref is just a wrapper for a unique integer, used to look up reference cells
   - TypeVar is either Bound with a type or Unbound with a type variable id
   - A Type is either a VariableType or a concrete type. A VariableType holds a
-    Ref. We change the value corresponding to a Ref to simulate mutating a
+    Ref. We update the map entry corresponding to the Ref to simulate mutating a
     mutable reference.
 3. The modules map
   - This lets you look up modules by name. Inside the modules is information
@@ -62,6 +62,11 @@ function to be used with multiple different types.
 
 Mutually recursive functions need to be type checked as a group. The call graph
 helps us figoure out what these groups are.
+
+## Constructors
+
+Constructors are considered external functions in the core language. This is
+because the implementation is not defined in gleam, only the type signature.
 
 ## Dynamic
 
@@ -97,9 +102,9 @@ more efficiently (if we encode the type name at all).
 
 ## Bit Arrays
 
-Bit arrays are composed of a byte array and an offset and length in bits.
+Bit arrays are composed of a byte array and an offset and a length in bits.
 
-When created bit array are byte aligned. You can then create a window into them
+When created bit arrays are byte aligned. You can then create a window into them
 that may or may not be byte aligned.
 
 Appending bit arrays copies the data into a new byte alligned bit array.
