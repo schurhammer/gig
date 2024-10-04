@@ -39,6 +39,7 @@ fn string_lit(val: String) {
 }
 
 fn texp(arg: Exp, target: String, id: Int) -> String {
+  // TODO is "id" used?
   case arg {
     Literal(_, val) ->
       case val {
@@ -47,13 +48,8 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
         Int(val) -> hit_target(target, string.replace(val, "_", ""))
         Float(val) -> hit_target(target, val <> "L")
         String(val) -> hit_target(target, string_lit(val))
-        BitArray(vals) -> {
-          let value =
-            "new_bit_array("
-            <> int.to_string(list.length(vals) * 8)
-            <> ", (uint8_t[]){"
-            <> string.join(vals, ", ")
-            <> "})"
+        BitArray(size) -> {
+          let value = "new_bit_array(" <> size <> ")"
           hit_target(target, value)
         }
       }

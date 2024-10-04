@@ -3,6 +3,7 @@ import gig/codegen
 import gig/core
 import gig/mono
 import gig/typed_ast
+import gleam/int
 
 import glance
 import shellout
@@ -140,6 +141,27 @@ pub fn compile(
   file_name
 }
 
+fn offset_to_line_col(text: String, offset: Int) {
+  let memes = string.to_graphemes(text)
+  let lines =
+    memes
+    |> list.take(offset)
+    |> string.concat()
+    |> string.split("\n")
+
+  let assert Ok(last_line) = list.last(lines)
+  let line = list.length(lines)
+  let pos = string.length(last_line)
+  int.to_string(line)
+  <> ":"
+  <> int.to_string(pos)
+  <> "\n\n"
+  <> string.to_graphemes(text)
+  |> list.drop(offset - 50)
+  |> list.take(200)
+  |> string.concat()
+}
+
 fn infer_file(
   c: typed_ast.Context,
   d: List(String),
@@ -154,7 +176,26 @@ fn infer_file(
   let input = read_source_file(path, file)
   let module = case glance.module(input) {
     Ok(mod) -> mod
-    _ -> panic as { "Failed to parse " <> file }
+    Error(e) ->
+      case e {
+        glance.UnexpectedEndOfInput ->
+          panic as {
+            "Failed to parse " <> file <> ". Unexpected end of input."
+          }
+        glance.UnexpectedToken(t, p) ->
+          panic as {
+            "Failed to parse "
+            <> file
+            <> ". Unexpected token "
+            <> string.inspect(t)
+            <> "\n\nat "
+            <> path
+            <> "/"
+            <> file
+            <> ":"
+            <> offset_to_line_col(input, p.byte_offset)
+          }
+      }
   }
 
   let module_name = string.replace(file, ".gleam", "")

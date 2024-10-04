@@ -191,10 +191,10 @@ pub type Clause {
 }
 
 pub type BitStringSegmentOption(t) {
-  BinaryOption
+  BytesOption
   IntOption
   FloatOption
-  BitStringOption
+  BitsOption
   Utf8Option
   Utf16Option
   Utf32Option
@@ -992,36 +992,50 @@ fn infer_pattern(
           // TODO handle options
           // TODO unify type of pattern according to options
           let #(pattern, options) = seg
-          let options = []
+
+          let #(c, n, options, typ) =
+            list.fold(options, #(c, n, [], None), fn(acc, option) {
+              let #(c, n, options, typ) = acc
+              // TODO handle all options
+              let #(c, n, option, option_type) = case option {
+                g.BigOption -> todo
+                g.BytesOption -> #(c, n, BytesOption, Some(bit_array_type))
+                g.BitsOption -> #(c, n, BitsOption, Some(bit_array_type))
+                g.FloatOption -> todo
+                g.IntOption -> todo
+                g.LittleOption -> todo
+                g.NativeOption -> todo
+                g.SignedOption -> todo
+                g.SizeOption(size) -> #(c, n, SizeOption(size), None)
+                g.SizeValueOption(e) -> {
+                  // TODO should this be infer_expression???
+                  let #(c, n, e) = infer_pattern(c, n, e)
+                  let c = unify(c, e.typ, int_type)
+                  #(c, n, SizeValueOption(e), None)
+                }
+                g.UnitOption(_) -> todo
+                g.UnsignedOption -> todo
+                g.Utf16CodepointOption -> todo
+                g.Utf16Option -> todo
+                g.Utf32CodepointOption -> todo
+                g.Utf32Option -> todo
+                g.Utf8CodepointOption -> todo
+                g.Utf8Option -> todo
+              }
+              let typ = case typ, option_type {
+                Some(_), Some(_) -> panic as "type set twice"
+                Some(_), None -> typ
+                _, _ -> option_type
+              }
+              #(c, n, [option, ..options], typ)
+            })
+          let options = list.reverse(options)
+
           let #(c, n, pattern) = infer_pattern(c, n, pattern)
           #(c, n, [#(pattern, options), ..segs])
         })
       let segs = list.reverse(segs)
       #(c, n, PatternBitString(bit_array_type, segs))
-      // case opt {
-      //   g.SizeOption(size) -> Ok(#(c, [SizeOption(size), ..opts]))
-      //   g.UnitOption(unit) -> Ok(#(c, [UnitOption(unit), ..opts]))
-      //   g.SizeValueOption(e) -> {
-      //     use #(c, e) <- try(infer_expression(c, n, e))
-      //     let c = unify(c, e.typ, int_type)
-      //     Ok(#(c, [SizeValueOption(e), ..opts]))
-      //   }
-      //   g.BinaryOption -> Ok(#(c, [BinaryOption, ..opts]))
-      //   g.IntOption -> Ok(#(c, [IntOption, ..opts]))
-      //   g.FloatOption -> Ok(#(c, [FloatOption, ..opts]))
-      //   g.BitStringOption -> Ok(#(c, [BitStringOption, ..opts]))
-      //   g.Utf8Option -> Ok(#(c, [Utf8Option, ..opts]))
-      //   g.Utf16Option -> Ok(#(c, [Utf16Option, ..opts]))
-      //   g.Utf32Option -> Ok(#(c, [Utf32Option, ..opts]))
-      //   g.Utf8CodepointOption -> Ok(#(c, [Utf8CodepointOption, ..opts]))
-      //   g.Utf16CodepointOption -> Ok(#(c, [Utf16CodepointOption, ..opts]))
-      //   g.Utf32CodepointOption -> Ok(#(c, [Utf32CodepointOption, ..opts]))
-      //   g.SignedOption -> Ok(#(c, [SignedOption, ..opts]))
-      //   g.UnsignedOption -> Ok(#(c, [UnsignedOption, ..opts]))
-      //   g.BigOption -> Ok(#(c, [BigOption, ..opts]))
-      //   g.LittleOption -> Ok(#(c, [LittleOption, ..opts]))
-      //   g.NativeOption -> Ok(#(c, [NativeOption, ..opts]))
-      // }
     }
     g.PatternConstructor(module, constructor, arguments, with_spread) -> {
       // resolve the constructor function
@@ -1563,11 +1577,49 @@ fn infer_expression(
       use #(c, segs) <- try(
         list.try_fold(segs, #(c, []), fn(acc, seg) {
           let #(c, segs) = acc
-          // TODO handle options
-          // TODO unify type of pattern according to options
           let #(expression, options) = seg
-          let options = []
+          let #(c, options, typ) =
+            list.fold(options, #(c, [], None), fn(acc, option) {
+              let #(c, options, typ) = acc
+              // TODO handle all options
+              let #(c, option, option_type) = case option {
+                g.BigOption -> todo
+                g.BytesOption -> #(c, BytesOption, Some(bit_array_type))
+                g.BitsOption -> #(c, BitsOption, Some(bit_array_type))
+                g.FloatOption -> todo
+                g.IntOption -> todo
+                g.LittleOption -> todo
+                g.NativeOption -> todo
+                g.SignedOption -> todo
+                g.SizeOption(size) -> #(c, SizeOption(size), None)
+                g.SizeValueOption(e) -> {
+                  let assert Ok(#(c, e)) = infer_expression(c, n, e)
+                  let c = unify(c, e.typ, int_type)
+                  #(c, SizeValueOption(e), None)
+                }
+                g.UnitOption(_) -> todo
+                g.UnsignedOption -> todo
+                g.Utf16CodepointOption -> todo
+                g.Utf16Option -> todo
+                g.Utf32CodepointOption -> todo
+                g.Utf32Option -> todo
+                g.Utf8CodepointOption -> todo
+                g.Utf8Option -> todo
+              }
+              let typ = case typ, option_type {
+                Some(_), Some(_) -> panic as "type set twice"
+                Some(_), None -> typ
+                _, _ -> option_type
+              }
+              #(c, [option, ..options], typ)
+            })
+          let options = list.reverse(options)
+          let typ = case typ {
+            Some(typ) -> typ
+            None -> int_type
+          }
           use #(c, expression) <- try(infer_expression(c, n, expression))
+          let c = unify(c, expression.typ, typ)
           Ok(#(c, [#(expression, options), ..segs]))
         }),
       )

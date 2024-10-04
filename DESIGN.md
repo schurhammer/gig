@@ -70,6 +70,8 @@ because the implementation is not defined in gleam, only the type signature.
 
 ## Dynamic
 
+(Not yet implemented.)
+
 To support dynamic types we have a `Dynamic` custom type with variants for each
 basic type in gleam.
 
@@ -91,7 +93,7 @@ type Cat {
   Cat(name: String, age: Int)
 }
 
-// this will be auto generated
+// this function will be auto generated
 fn dynamic_from_Cat(cat: Cat) -> Dynamic {
   Tuple([String("Cat"), String(cat.name), Int(cat.age)])
 }
@@ -102,6 +104,8 @@ more efficiently (if we encode the type name at all).
 
 ## Bit Arrays
 
+(Work in progress.)
+
 Bit arrays are composed of a byte array and an offset and a length in bits.
 
 When created bit arrays are byte aligned. You can then create a window into them
@@ -110,10 +114,20 @@ that may or may not be byte aligned.
 Appending bit arrays copies the data into a new byte alligned bit array.
 
 ```
-Algorithm for copying unaligned data (untested):
+Algorithm for copying unaligned  into an aligned buffer (untested):
 
 for each i starting from offset/8 until (offset+length)/8
   read 2 bytes at position i
   bit shift them to byte-align
   write the first byte to the output
 ```
+
+## Polyfill System
+
+(Not yet implemented.)
+
+Since gig is a third party project, most gleam libraries in the wild are
+unlikely to support it. For these situations we have a polyfill system that
+lets you override some modules that would otherwise not work. To do this simply
+create a module called `x.polyfill.gleam` where `x` is the name of the module
+you wish to patch.

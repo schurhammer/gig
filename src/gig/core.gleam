@@ -32,7 +32,7 @@ pub type LiteralKind {
   Int(value: String)
   Float(value: String)
   String(value: String)
-  BitArray(values: List(String))
+  BitArray(size: String)
 }
 
 pub type Exp {
@@ -276,6 +276,79 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
   }
 }
 
+fn index_bit_array(options, subject, offset) {
+  let #(size, bits) =
+    list.fold(options, #(-1, False), fn(acc, option) {
+      let #(size, bits) = acc
+      case option {
+        t.BytesOption | t.BitsOption -> #(size, True)
+        t.SizeOption(size) -> #(size, bits)
+        t.SizeValueOption(e) -> {
+          case e {
+            t.PatternInt(_, size) -> {
+              let assert Ok(size) = int.parse(size)
+              #(size, bits)
+            }
+            _ -> todo
+          }
+        }
+        _ -> todo
+      }
+    })
+
+  case bits {
+    True -> {
+      // slice_bit_array knows how to handle -1
+      // it is interpreted as "to the end"
+      // so we only set the size afterwards
+      let inner_subject =
+        t.Call(
+          t.bit_array_type,
+          t.GlobalVariable(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type],
+              t.bit_array_type,
+            ),
+            t.builtin,
+            "slice_bit_array",
+          ),
+          [t.Field(None, subject)],
+          [
+            subject,
+            t.Int(t.int_type, int.to_string(offset)),
+            t.Int(t.int_type, int.to_string(size)),
+          ],
+        )
+      #(size, inner_subject)
+    }
+    False -> {
+      let size = case size {
+        -1 -> 8
+        _ -> size
+      }
+      let inner_subject =
+        t.Call(
+          t.int_type,
+          t.GlobalVariable(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type],
+              t.int_type,
+            ),
+            t.builtin,
+            "index_bit_array_int",
+          ),
+          [t.Field(None, subject)],
+          [
+            subject,
+            t.Int(t.int_type, int.to_string(offset)),
+            t.Int(t.int_type, int.to_string(size)),
+          ],
+        )
+      #(size, inner_subject)
+    }
+  }
+}
+
 fn lower_pattern_bindings(
   c: t.Context,
   pattern: t.Pattern,
@@ -316,29 +389,23 @@ fn lower_pattern_bindings(
     }
     t.PatternConcatenate(typ, left, right) -> todo
     t.PatternBitString(typ, segs) -> {
-      list.index_map(segs, fn(seg, i) {
-        let #(pattern, options) = seg
-        let subject =
-          t.Call(
-            t.int_type,
-            t.GlobalVariable(
-              t.FunctionType(
-                [t.bit_array_type, t.int_type, t.int_type],
-                t.int_type,
-              ),
-              t.builtin,
-              "index_bit_array_int",
-            ),
-            [t.Field(None, subject)],
-            [
-              subject,
-              t.Int(t.int_type, int.to_string(i * 8)),
-              t.Int(t.int_type, int.to_string(8)),
-            ],
-          )
-        lower_pattern_bindings(c, pattern, subject)
-      })
-      |> list.flatten
+      let #(total_size, segs) =
+        list.fold(segs, #(0, []), fn(acc, seg) {
+          let #(offset, bindings) = acc
+          let #(pattern, options) = seg
+
+          let #(size, inner_subject) = index_bit_array(options, subject, offset)
+
+          let size = case size {
+            -1 -> 0
+            _ -> size
+          }
+
+          let offset = offset + size
+          let new_binding = lower_pattern_bindings(c, pattern, inner_subject)
+          #(offset, list.append(bindings, new_binding))
+        })
+      segs
     }
     t.PatternConstructor(
       typ,
@@ -364,6 +431,8 @@ const nil_type = NamedType("Nil", [])
 
 const bool_type = NamedType("Bool", [])
 
+const int_type = NamedType("Int", [])
+
 const true_value = Literal(bool_type, Bool("True"))
 
 fn and_exp(first: Exp, second: Exp) {
@@ -375,6 +444,19 @@ fn and_exp(first: Exp, second: Exp) {
       let fun = Global(fun_typ, "and_bool")
       let args = [first, second]
       Call(bool_type, fun, args)
+    }
+  }
+}
+
+fn add_exp(first: Exp, second: Exp) {
+  case first, second {
+    Literal(_, Int("0")), _ -> second
+    _, Literal(_, Int("0")) -> first
+    _, _ -> {
+      let fun_typ = FunctionType([int_type, int_type], int_type)
+      let fun = Global(fun_typ, "add_int")
+      let args = [first, second]
+      Call(int_type, fun, args)
     }
   }
 }
@@ -437,31 +519,30 @@ fn lower_pattern_match(
     t.PatternAssignment(typ, pattern, name) -> true_value
     t.PatternConcatenate(typ, left, right) -> todo as "PatternConcatenate"
     t.PatternBitString(typ, segs) -> {
-      let data_match =
-        list.index_fold(segs, true_value, fn(match, seg, i) {
+      let #(total_size, rest, data_match) =
+        list.fold(segs, #(0, False, true_value), fn(acc, seg) {
+          let #(offset, rest, match) = acc
           let #(pattern, options) = seg
-          let inner_subject =
-            t.Call(
-              t.int_type,
-              t.GlobalVariable(
-                t.FunctionType(
-                  [t.bit_array_type, t.int_type, t.int_type],
-                  t.int_type,
-                ),
-                t.builtin,
-                "index_bit_array_int",
-              ),
-              [t.Field(None, subject)],
-              [
-                subject,
-                t.Int(t.int_type, int.to_string(i * 8)),
-                t.Int(t.int_type, int.to_string(8)),
-              ],
-            )
+
+          let #(size, inner_subject) = index_bit_array(options, subject, offset)
+
+          let rest = case size {
+            -1 -> True
+            _ -> rest
+          }
+          let size = case size {
+            -1 -> 0
+            _ -> size
+          }
+
+          let offset = offset + size
+
           let seg_match = lower_pattern_match(c, pattern, inner_subject)
-          and_exp(seg_match, match)
+          let match = and_exp(seg_match, match)
+
+          #(offset, rest, match)
         })
-      let length = int.to_string(list.length(segs) * 8)
+
       let length_subject =
         t.Call(
           t.int_type,
@@ -473,14 +554,20 @@ fn lower_pattern_match(
           [t.Field(None, subject)],
           [subject],
         )
+
+      let length_match_op = case rest {
+        True -> g.GtEqInt
+        False -> g.Eq
+      }
       let length_match =
         t.BinaryOperator(
           t.bool_type,
-          g.Eq,
+          length_match_op,
           length_subject,
-          t.Int(t.int_type, length),
+          t.Int(t.int_type, int.to_string(total_size)),
         )
       let length_match = lower_expression(c, length_match)
+
       and_exp(length_match, data_match)
     }
     t.PatternConstructor(
@@ -509,6 +596,30 @@ fn lower_pattern_match(
       let isa_match = Call(bool_type, isa_ref, [lower_expression(c, subject)])
       and_exp(isa_match, match)
     }
+  }
+}
+
+type OptionState(a) {
+  OptionUnset
+  OptionOpen(exp: a)
+  OptionClosed(exp: a)
+}
+
+fn update_option(old: OptionState(a), new: OptionState(a)) {
+  case old {
+    OptionUnset -> new
+    OptionOpen(_) ->
+      case new {
+        OptionClosed(_) -> new
+        OptionOpen(_) -> new
+        OptionUnset -> old
+      }
+    OptionClosed(_) ->
+      case new {
+        OptionClosed(_) -> panic as "option set twice"
+        OptionOpen(_) -> old
+        OptionUnset -> old
+      }
   }
 }
 
@@ -640,17 +751,90 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     }
     t.FnCapture(typ, label, function, arguments_before, arguments_after) -> todo
     t.BitString(typ, segs) -> {
-      let segs =
-        list.index_map(segs, fn(seg, index) {
-          // TODO handle options
-          let #(exp, options) = seg
-          let name = "value_" <> int.to_string(index)
-          #(name, lower_expression(c, exp))
-        })
-      let vars = list.map(segs, fn(x) { x.0 })
       let typ = map_type(c, typ)
-      let literal = Literal(typ, BitArray(vars))
-      list.fold(segs, literal, fn(exp, seg) { Let(exp.typ, seg.0, seg.1, exp) })
+
+      let segs =
+        list.map(segs, fn(seg) {
+          let #(exp, options) = seg
+          let exp = lower_expression(c, exp)
+          let #(size) =
+            list.fold(options, #(OptionUnset), fn(acc, option) {
+              let #(size_option) = acc
+              let #(size) = case option {
+                t.BigOption -> todo
+                t.BytesOption | t.BitsOption -> {
+                  let fun_type = FunctionType([typ], int_type)
+                  let fun = Global(fun_type, "length_bit_array")
+                  let size = Call(int_type, fun, [exp])
+                  let size_option = update_option(size_option, OptionOpen(size))
+                  #(size_option)
+                }
+                t.FloatOption -> todo
+                t.IntOption -> todo
+                t.LittleOption -> todo
+                t.NativeOption -> todo
+                t.SignedOption -> todo
+                t.SizeOption(size) -> {
+                  let size = Literal(int_type, Int(int.to_string(size)))
+                  let size_option =
+                    update_option(size_option, OptionClosed(size))
+                  #(size_option)
+                }
+                t.SizeValueOption(e) -> {
+                  let size = lower_expression(c, e)
+                  let size_option =
+                    update_option(size_option, OptionClosed(size))
+                  #(size_option)
+                }
+                t.UnitOption(_) -> todo
+                t.UnsignedOption -> todo
+                t.Utf16CodepointOption -> todo
+                t.Utf16Option -> todo
+                t.Utf32CodepointOption -> todo
+                t.Utf32Option -> todo
+                t.Utf8CodepointOption -> todo
+                t.Utf8Option -> todo
+              }
+              #(size)
+            })
+          let size = case size {
+            OptionClosed(x) -> x
+            OptionOpen(x) -> x
+            OptionUnset -> Literal(int_type, Int("8"))
+          }
+          #(exp, size)
+        })
+      let total_size =
+        list.map(segs, fn(x) { x.1 })
+        |> list.fold_right(Literal(int_type, Int("0")), add_exp)
+      let body =
+        list.fold_right(segs, Local(typ, "bit_array"), fn(exp, seg) {
+          let #(seg_value, seg_size) = seg
+          let target = Local(typ, "bit_array")
+          let offset = Local(int_type, "offset")
+          let write_call = case seg_value.typ {
+            NamedType("Int", []) -> {
+              let write_typ =
+                FunctionType([int_type, typ, int_type, int_type], nil_type)
+              let write_fun = Global(write_typ, "write_bit_array_int")
+              Call(nil_type, write_fun, [seg_value, target, offset, seg_size])
+            }
+            NamedType("BitArray", []) -> {
+              let write_typ =
+                FunctionType([typ, typ, int_type, int_type], nil_type)
+              let write_fun = Global(write_typ, "write_bit_array")
+              Call(nil_type, write_fun, [seg_value, target, offset, seg_size])
+            }
+            _ -> panic as "unsupported segment type"
+          }
+          let new_offset = add_exp(Local(int_type, "offset"), seg_size)
+          let update_offset = Let(typ, "offset", new_offset, exp)
+          Let(typ, "_", write_call, update_offset)
+        })
+      let body = Let(typ, "offset", Literal(int_type, Int("0")), body)
+      let body =
+        Let(typ, "bit_array", Literal(typ, BitArray("total_size")), body)
+      Let(typ, "total_size", total_size, body)
     }
     t.Case(typ, subjects, clauses) -> {
       let typ = map_type(c, typ)
@@ -767,7 +951,15 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
 
 fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
   case in {
-    Literal(_, _) -> in
+    Literal(typ, val) ->
+      case val {
+        BitArray(var) if var == replace ->
+          case with {
+            Local(_, x) -> Literal(typ, BitArray(x))
+            _ -> panic as "invalid replacement"
+          }
+        _ -> Literal(typ, val)
+      }
     Global(_, _) -> in
     Local(_typ, var) ->
       case var == replace {
