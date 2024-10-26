@@ -1,3 +1,6 @@
 build
 samples/*
 !samples/*.gleam
+!samples/nested
+samples/nested/*
+!samples/nested/*.gleam
