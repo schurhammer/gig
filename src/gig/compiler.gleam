@@ -3,7 +3,9 @@ import gig/codegen
 import gig/core
 import gig/mono
 import gig/typed_ast
+import gleam/dict
 import gleam/int
+import pprint
 
 import glance
 import shellout
@@ -78,6 +80,7 @@ pub fn compile(
 
   // generate code
   let core = core.lower_context(typed)
+  // pprint.debug(core.functions |> dict.get("string_example_main"))
   let #(mono, main_name) = mono.run(core, module_name <> "_" <> "main")
   let cc = closure.cc_module(mono)
   let code = codegen.module(cc)

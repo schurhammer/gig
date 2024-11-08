@@ -1,10 +1,13 @@
 import gig/closure.{
-  type CustomType, type Exp, type Function, type Module, Call, CallClosure,
-  CustomType, Field, If, Let, Literal, Module, Panic, Var,
+  type CustomType, type Function, type Module, CustomType, Field, Module,
 }
 import gig/core.{BitArray, Float, Int, String}
 import gig/gen_names
 import gig/mono.{type_name}
+import gig/normalise.{
+  type Term, type Value, Call, CallClosure, If, Let, Literal, Panic, Term, Value,
+  Variable,
+}
 import gig/type_graph
 
 import gig/graph
@@ -38,8 +41,7 @@ fn string_lit(val: String) {
   "String_LIT(\"" <> val <> "\", " <> size <> ")"
 }
 
-fn texp(arg: Exp, target: String, id: Int) -> String {
-  // TODO is "id" used?
+fn gen_value(arg: Value, target: String, id: Int) {
   case arg {
     Literal(_, val) ->
       case val {
@@ -54,23 +56,32 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
         }
       }
 
-    Var(_, val) -> hit_target(target, val)
+    Variable(_, val) -> hit_target(target, val)
+
+    Term(_, term) -> gen_term(term, target, id)
+  }
+}
+
+fn gen_term(arg: Term, target: String, id: Int) -> String {
+  // TODO is "id" used?
+  case arg {
+    Value(typ, value) -> gen_value(value, target, id)
     Call(typ, fun, args) -> {
       hit_target(
         target,
-        texp(fun, "", id)
+        gen_value(fun, "", id)
           <> "("
-          <> list.map(args, texp(_, "", id)) |> string.join(", ")
+          <> list.map(args, gen_value(_, "", id)) |> string.join(", ")
           <> ")",
       )
     }
     CallClosure(typ, fun, args) -> {
-      let closure = texp(fun, "", id)
+      let closure = gen_value(fun, "", id)
       let param_types = list.map(args, fn(x) { type_name(x.typ) })
 
       let fun = closure <> ".fun"
       let env_param = closure <> ".env"
-      let params = list.map(args, texp(_, "", id))
+      let params = list.map(args, gen_value(_, "", id))
 
       // the closure may or may not have an env parameter
       // determined by if env is a null pointer
@@ -108,36 +119,36 @@ fn texp(arg: Exp, target: String, id: Int) -> String {
 
       hit_target(target, ternary(cond, exp_env, exp_no_env))
     }
+    Panic(typ, val) -> "panic_exit();\n"
     Let(typ, var, val, exp) ->
       case var {
         "_" <> _ -> {
           // discarded, no need to make a variable
-          texp(val, var, id) <> texp(exp, target, id)
+          gen_term(val, var, id) <> gen_term(exp, target, id)
         }
         _ -> {
           type_name(val.typ)
           <> " "
           <> var
           <> ";\n"
-          <> texp(val, var, id)
-          <> texp(exp, target, id)
+          <> gen_term(val, var, id)
+          <> gen_term(exp, target, id)
         }
       }
     If(typ, cond, then_exp, else_exp) ->
       "if ("
-      <> texp(cond, "", id)
+      <> gen_value(cond, "", id)
       <> ") {\n"
-      <> texp(then_exp, target, id + 1)
+      <> gen_term(then_exp, target, id + 1)
       <> "} else {\n"
-      <> texp(else_exp, target, id + 1)
+      <> gen_term(else_exp, target, id + 1)
       <> "}\n"
-    Panic(typ, val) -> "panic_exit();\n"
   }
 }
 
 fn function(fun: Function) -> String {
   let params = fun.params
-  let body = fun.body
+  let body = normalise.normalise_exp(fun.body, 0)
   let assert core.FunctionType(param_types, ret) = fun.typ
   type_name(ret)
   <> " "
@@ -154,7 +165,7 @@ fn function(fun: Function) -> String {
   // but sometimes I get c compiler warnings without it
   <> type_name(ret)
   <> " RETURN;\n"
-  <> texp(body, "RETURN", 1)
+  <> gen_term(body, "RETURN", 1)
   <> "return RETURN;\n"
   <> "}"
 }

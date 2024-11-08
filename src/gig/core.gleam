@@ -2,6 +2,7 @@ import gig/gen_names.{get_id}
 import gig/typed_ast as t
 import gleam/dict.{type Dict}
 import gleam/io
+import pprint
 
 import glance as g
 
@@ -256,7 +257,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
         t.Expression(_, value) -> {
           let value = lower_expression(c, value)
           let body = lower_body(c, body)
-          Let(value.typ, "_", value, body)
+          Let(body.typ, "_", value, body)
         }
         t.Assignment(_, _, pattern, _, value) -> {
           let subject = t.LocalVariable(value.typ, "subject")
@@ -269,7 +270,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
               let value = lower_expression(c, subject)
               Let(body.typ, name, value, body)
             })
-          Let(value.typ, "subject", value, body)
+          Let(body.typ, "subject", value, body)
         }
         t.Use(..) -> todo
       }
@@ -724,7 +725,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
       let body = Call(typ, Global(constructor_typ, constructor), fields)
-      Let(typ, "subject", record, body)
+      Let(body.typ, "subject", record, body)
     }
     t.FieldAccess(typ, container, module, variant, label, i) -> {
       let typ = map_type(c, typ)
@@ -829,12 +830,12 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
           }
           let new_offset = add_exp(Local(int_type, "offset"), seg_size)
           let update_offset = Let(typ, "offset", new_offset, exp)
-          Let(typ, "_", write_call, update_offset)
+          Let(update_offset.typ, "_", write_call, update_offset)
         })
-      let body = Let(typ, "offset", Literal(int_type, Int("0")), body)
+      let body = Let(body.typ, "offset", Literal(int_type, Int("0")), body)
       let body =
-        Let(typ, "bit_array", Literal(typ, BitArray("total_size")), body)
-      Let(typ, "total_size", total_size, body)
+        Let(body.typ, "bit_array", Literal(typ, BitArray("total_size")), body)
+      Let(body.typ, "total_size", total_size, body)
     }
     t.Case(typ, subjects, clauses) -> {
       let typ = map_type(c, typ)
@@ -910,7 +911,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       // Wrap the case body with let expressions for subject bindings
       list.fold_right(subject_vars, case_body, fn(acc, subject_var) {
         let #(name, _, value) = subject_var
-        Let(typ, name, value, acc)
+        Let(acc.typ, name, value, acc)
       })
     }
     t.BinaryOperator(typ, name, left, right) -> {
@@ -1076,7 +1077,7 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
           let taken = [new_var, ..taken]
           let i = i + 1
           let #(taken, i, val) = unshadow(taken, i, val)
-          let exp = replace_var(var, Local(typ, new_var), exp)
+          let exp = replace_var(var, Local(val.typ, new_var), exp)
           let #(taken, i, exp) = unshadow(taken, i, exp)
           #(taken, i, Let(typ, new_var, val, exp))
         }

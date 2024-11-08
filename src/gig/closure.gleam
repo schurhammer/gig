@@ -122,7 +122,10 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
     t.Local(typ, var) -> #(c, Var(typ, var))
 
     t.Global(t.FunctionType(..) as typ, var) -> {
-      let val = Call(typ, Var(typ, "create_function"), [Var(typ, var)])
+      let val =
+        Call(typ, Var(typ, "create_function"), [
+          Var(t.NamedType("void*", []), var),
+        ])
       #(c, val)
     }
     t.Global(typ, var) -> {
@@ -171,17 +174,20 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
           let c = CC(Module(c.mod.types, funs), c.uid + 1)
 
           // make a closure reference to the function
-          let val = Call(typ, Var(typ, "create_function"), [Var(typ, fun_name)])
+          let val =
+            Call(typ, Var(typ, "create_function"), [
+              Var(t.NamedType("void*", []), fun_name),
+            ])
           #(c, val)
         }
         _ -> {
           // create global function
           let id = int.to_string(c.uid)
           let fun_name = "Closure_" <> id
-          let env_name = "ClosureEnv_" <> id
-          let env_type = t.NamedType(env_name, [])
+          let env_type_name = "ClosureEnv_" <> id
+          let env_type = t.NamedType(env_type_name, [])
 
-          let fun_params = [env_name, ..var_names]
+          let fun_params = ["ENV", ..var_names]
 
           // add let bindings to unpack the closure
           let fun_body =
@@ -190,14 +196,14 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
               let #(name, typ) = field
 
               // function from env -> field
-              let extract_fun_name = gen_names.get_getter_name(env_name, i)
+              let extract_fun_name = gen_names.get_getter_name(env_type_name, i)
               let extract_fun_type = t.FunctionType([env_type], typ)
               let extract_fun = Var(extract_fun_type, extract_fun_name)
 
               Let(
                 exp.typ,
                 name,
-                Call(typ, extract_fun, [Var(env_type, env_name)]),
+                Call(typ, extract_fun, [Var(env_type, "ENV")]),
                 exp,
               )
             })
@@ -211,14 +217,18 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
           let funs = [fun, ..funs]
 
           // create the closure object
-          let fun_pointer = Var(typ, fun_name)
+          let fun_pointer = Var(t.NamedType("void*", []), fun_name)
 
           let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
           let new_env_fun_type = t.FunctionType(env_arg_types, env_type)
           let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
 
           let env_constructor_call =
-            Call(env_type, Var(new_env_fun_type, "new_" <> env_name), env_args)
+            Call(
+              env_type,
+              Var(new_env_fun_type, "new_" <> env_type_name),
+              env_args,
+            )
 
           let closure =
             Call(typ, Var(typ, "create_closure"), [
@@ -227,8 +237,8 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
             ])
 
           let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
-          let variant = Variant(env_name, fields)
-          let typedef = CustomType(env_name, [variant], True)
+          let variant = Variant(env_type_name, fields)
+          let typedef = CustomType(env_type_name, [variant], True)
 
           let types = [typedef, ..types]
 
