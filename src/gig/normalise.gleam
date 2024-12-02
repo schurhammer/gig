@@ -7,8 +7,6 @@ import gleam/list
 pub type Value {
   Literal(typ: Type, val: LiteralKind)
   Variable(typ: Type, var: String)
-  // TODO hack to fix if condition that rely on short circuiting &&
-  Term(typ: Type, val: Term)
 }
 
 pub type Term {
@@ -24,24 +22,6 @@ fn exp_to_val(exp: closure.Exp) {
   case exp {
     closure.Literal(typ, val) -> Literal(typ, val)
     closure.Var(typ, val) -> Variable(typ, val)
-    _ -> panic
-  }
-}
-
-fn cond_to_term(exp: closure.Exp) -> Value {
-  case exp {
-    closure.Literal(typ, val) -> Literal(typ, val)
-    closure.Var(typ, val) -> Variable(typ, val)
-    closure.Call(typ, fun, args) -> {
-      let fun = cond_to_term(fun)
-      let args = list.map(args, cond_to_term)
-      Term(typ, Call(typ, fun, args))
-    }
-    closure.CallClosure(typ, fun, args) -> {
-      let fun = cond_to_term(fun)
-      let args = list.map(args, cond_to_term)
-      Term(typ, Call(typ, fun, args))
-    }
     _ -> panic
   }
 }
@@ -69,7 +49,14 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
       // get a list of references to those variables
       let arg_refs =
         args
-        |> list.map(fn(arg) { Variable({ arg.1 }.typ, arg.0) })
+        |> list.map(fn(arg) {
+          // values are inlined
+          case arg.1 {
+            Value(_, Literal(typ, x)) -> Literal(typ, x)
+            Value(_, Variable(typ, x)) -> Variable(typ, x)
+            _ -> Variable({ arg.1 }.typ, arg.0)
+          }
+        })
         |> list.reverse()
 
       // build the call using the variables instead of expressions arguments
@@ -79,7 +66,11 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
       let call =
         list.fold(args, call, fn(acc, arg) {
           let #(name, val) = arg
-          Let(typ, name, val, acc)
+          // values are inlined
+          case val {
+            Value(_, _) -> acc
+            _ -> Let(typ, name, val, acc)
+          }
         })
       #(uid, call)
     }
@@ -122,21 +113,24 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
       #(uid, Let(typ, name, val, body))
     }
     closure.If(typ, cond, then_exp, else_exp) -> {
-      // TODO cond currently relies on short circuiting expressions
-      // which means we can't split it up like normal code
-      let cond = cond_to_term(cond)
-
-      let cond_name = "C" <> int.to_string(uid)
-      let uid = uid + 1
-
+      let #(uid, cond) = do_exp(uid, cond)
       let #(uid, then_exp) = do_exp(uid, then_exp)
       let #(uid, else_exp) = do_exp(uid, else_exp)
 
-      // use the cond variable instead of the expression
-      let exp = If(typ, Variable(cond.typ, cond_name), then_exp, else_exp)
-      let exp = Let(cond.typ, cond_name, Value(cond.typ, cond), exp)
-
-      #(uid, exp)
+      // ensure condition is a value
+      case cond {
+        Value(_, cond) -> {
+          let exp = If(typ, cond, then_exp, else_exp)
+          #(uid, exp)
+        }
+        cond -> {
+          let cond_name = "C" <> int.to_string(uid)
+          let uid = uid + 1
+          let exp = If(typ, Variable(cond.typ, cond_name), then_exp, else_exp)
+          let exp = Let(cond.typ, cond_name, cond, exp)
+          #(uid, exp)
+        }
+      }
     }
     closure.Panic(typ, val) -> {
       let val_name = "P" <> int.to_string(uid)

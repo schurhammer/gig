@@ -436,15 +436,36 @@ const int_type = NamedType("Int", [])
 
 const true_value = Literal(bool_type, Bool("True"))
 
+fn if_exp(cond: Exp, then: Exp, els: Exp) -> Exp {
+  case cond {
+    Literal(_, Bool("True")) -> then
+    Literal(_, Bool("False")) -> els
+    _ -> {
+      If(then.typ, cond, then, els)
+    }
+  }
+}
+
 fn and_exp(first: Exp, second: Exp) {
   case first, second {
     Literal(_, Bool("True")), _ -> second
     _, Literal(_, Bool("True")) -> first
     _, _ -> {
-      let fun_typ = FunctionType([bool_type, bool_type], bool_type)
-      let fun = Global(fun_typ, "and_bool")
-      let args = [first, second]
-      Call(bool_type, fun, args)
+      let subject = Local(first.typ, "B")
+      let body = if_exp(subject, second, subject)
+      Let(body.typ, "B", first, body)
+    }
+  }
+}
+
+fn or_exp(first: Exp, second: Exp) {
+  case first, second {
+    Literal(_, Bool("False")), _ -> second
+    _, Literal(_, Bool("False")) -> first
+    _, _ -> {
+      let subject = Local(first.typ, "B")
+      let body = if_exp(subject, subject, second)
+      Let(body.typ, "B", first, body)
     }
   }
 }
@@ -913,6 +934,16 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         let #(name, _, value) = subject_var
         Let(acc.typ, name, value, acc)
       })
+    }
+    t.BinaryOperator(typ, g.And, left, right) -> {
+      let left = lower_expression(c, left)
+      let right = lower_expression(c, right)
+      and_exp(left, right)
+    }
+    t.BinaryOperator(typ, g.Or, left, right) -> {
+      let left = lower_expression(c, left)
+      let right = lower_expression(c, right)
+      or_exp(left, right)
     }
     t.BinaryOperator(typ, name, left, right) -> {
       let typ = map_type(c, typ)

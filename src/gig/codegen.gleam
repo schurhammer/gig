@@ -5,7 +5,7 @@ import gig/core.{BitArray, Float, Int, String}
 import gig/gen_names
 import gig/mono.{type_name}
 import gig/normalise.{
-  type Term, type Value, Call, CallClosure, If, Let, Literal, Panic, Term, Value,
+  type Term, type Value, Call, CallClosure, If, Let, Literal, Panic, Value,
   Variable,
 }
 import gig/type_graph
@@ -57,8 +57,6 @@ fn gen_value(arg: Value, target: String, id: Int) {
       }
 
     Variable(_, val) -> hit_target(target, val)
-
-    Term(_, term) -> gen_term(term, target, id)
   }
 }
 
@@ -121,12 +119,23 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
     }
     Panic(typ, val) -> "panic_exit();\n"
     Let(typ, var, val, exp) ->
-      case var {
-        "_" <> _ -> {
+      case var, val {
+        "_" <> _, _ -> {
           // discarded, no need to make a variable
           gen_term(val, var, id) <> gen_term(exp, target, id)
         }
-        _ -> {
+        _, Value(typ, val) -> {
+          // inline value
+          type_name(val.typ)
+          <> " "
+          <> var
+          <> " = "
+          <> gen_value(val, "", id)
+          <> ";\n"
+          <> gen_term(exp, target, id)
+        }
+        _, _ -> {
+          // complex expression
           type_name(val.typ)
           <> " "
           <> var

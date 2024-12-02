@@ -12,10 +12,10 @@ pub fn main() {
   let y = 2
   let a = <<x, y, 0:4, 3:4>>
   case a {
-    <<_, 2>> -> io.debug(2)
-    <<3, 2, 1>> -> io.debug(2)
+    <<_, 2>> -> io.debug(3)
+    <<3, 2, 1>> -> io.debug(4)
     <<a, 2, 3>> -> io.debug(a)
-    _ -> io.debug(2)
+    _ -> io.debug(5)
   }
   let b = <<1, a:16-bits, a:bits>>
   case b {
