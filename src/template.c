@@ -110,15 +110,13 @@ struct Closure {
   Pointer env;
 };
 
-// these must be short-circuiting
-#define and_bool(x, y) (x && y)
-#define or_bool(x, y) (x || y)
-
 void panic_exit() { exit(1); }
 
 #define eq_Nil(a, b) True
 
 Bool eq_Bool(Bool x, Bool y) { return x == y; }
+Bool and_bool(Bool x, Bool y) { return x && y; }
+Bool or_bool(Bool x, Bool y) { return x || y; }
 Bool negate_bool(Bool x) { return !x; }
 Bool isa_True(Bool x) { return x == True; }
 Bool isa_False(Bool x) { return x == False; }
