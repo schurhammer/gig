@@ -110,7 +110,10 @@ struct Closure {
   Pointer env;
 };
 
-void panic_exit() { exit(1); }
+void panic_exit() {
+    printf("panic\n");
+    exit(1);
+}
 
 #define eq_Nil(a, b) True
 
