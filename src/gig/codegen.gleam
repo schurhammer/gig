@@ -9,6 +9,7 @@ import gig/normalise.{
   Variable,
 }
 import gig/type_graph
+import gleam/io
 
 import gig/graph
 
@@ -180,6 +181,7 @@ fn function(fun: Function) -> String {
 }
 
 fn function_forward(fun: Function) -> String {
+  // io.debug(fun)
   let params = fun.params
   let assert core.FunctionType(param_types, ret) = fun.typ
   type_name(ret)

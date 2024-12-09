@@ -171,7 +171,7 @@ fn infer_file(
   path: String,
   file: String,
 ) -> #(typed_ast.Context, List(String)) {
-  io.println("Compiling " <> file)
+  io.println("Read  " <> file)
   // add file to "done" list
   let d = [file, ..d]
 
@@ -214,6 +214,7 @@ fn infer_file(
     })
 
   // infer this file
+  io.println("Check " <> file)
   let c = typed_ast.infer_module(c, module, module_name)
 
   #(c, d)

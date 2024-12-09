@@ -189,7 +189,7 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
   CustomType(typ, id, variants)
 }
 
-fn lower_function(c: t.Context, def: t.Definition(t.Function)) {
+fn lower_function(c: t.Context, def: t.Definition(t.FunctionDefinition)) {
   let function = def.definition
   let typ = map_poly(c, function.typ)
   let module = c.current_module
@@ -305,13 +305,14 @@ fn index_bit_array(options, subject, offset) {
       let inner_subject =
         t.Call(
           t.bit_array_type,
-          t.GlobalVariable(
+          t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type],
               t.bit_array_type,
             ),
             t.builtin,
             "slice_bit_array",
+            [],
           ),
           [t.Field(None, subject)],
           [
@@ -330,13 +331,14 @@ fn index_bit_array(options, subject, offset) {
       let inner_subject =
         t.Call(
           t.int_type,
-          t.GlobalVariable(
+          t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type],
               t.int_type,
             ),
             t.builtin,
             "index_bit_array_int",
+            [],
           ),
           [t.Field(None, subject)],
           [
@@ -568,10 +570,11 @@ fn lower_pattern_match(
       let length_subject =
         t.Call(
           t.int_type,
-          t.GlobalVariable(
+          t.Function(
             t.FunctionType([t.bit_array_type], t.int_type),
             t.builtin,
             "length_bit_array",
+            [],
           ),
           [t.Field(None, subject)],
           [subject],
@@ -651,7 +654,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.Float(typ, value) -> Literal(map_type(c, typ), Float(value))
     t.String(typ, value) -> Literal(map_type(c, typ), String(value))
     t.LocalVariable(typ, name) -> Local(map_type(c, typ), name)
-    t.GlobalVariable(typ, module, name) -> {
+    t.Function(typ, module, name, labels) -> {
       let typ = map_type(c, typ)
 
       case module, name {
@@ -663,6 +666,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
           Global(typ, get_id(module, name))
         }
       }
+    }
+    t.Constant(value:, ..) -> {
+      // inline the constant
+      lower_expression(c, value)
     }
     t.NegateInt(typ, value) -> {
       let typ = map_type(c, typ)
@@ -1076,7 +1083,7 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       #(taken, i, Call(typ, fun, args))
     }
     Fn(typ, vars, exp) -> {
-      let #(taken, i, vars, exp) =
+      let #(_, i, vars, exp) =
         list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
           let #(taken, i, vars, exp) = acc
           case list.contains(taken, var.name) {

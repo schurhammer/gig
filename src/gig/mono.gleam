@@ -132,12 +132,24 @@ fn instantiate_type(c: Context, typ: t.Type) {
 
               // add to module
               let types = dict.insert(c.out.types, mono_name, custom)
-              Context(..c, out: t.Context(..c.out, types:))
+
+              let c = Context(..c, out: t.Context(..c.out, types:))
+
+              // also instantiate any types referenced by this type
+              list.fold(variants, c, fn(c, variant) {
+                list.fold(variant.fields, c, fn(c, field) {
+                  instantiate_type(c, field)
+                })
+              })
             }
           }
         }
         Error(_) -> c
       }
+    }
+    t.FunctionType(args, ret) -> {
+      let c = list.fold(args, c, instantiate_type)
+      instantiate_type(c, ret)
     }
     _ -> c
   }
@@ -246,6 +258,8 @@ fn typed_to_mono_exp(
   sub: List(#(Int, t.Type)),
   e: t.Exp,
 ) -> #(Context, t.Exp) {
+  let c = register_tuple(c, e.typ)
+  let c = instantiate_type(c, sub_type(c, sub, e.typ))
   case e {
     t.Literal(typ, v) -> #(c, t.Literal(sub_type(c, sub, typ), v))
     t.Local(typ, name) -> {
@@ -253,15 +267,16 @@ fn typed_to_mono_exp(
       #(c, t.Local(typ, name))
     }
     t.Global(typ, name) -> {
-      let c = case typ {
-        t.FunctionType(_, ret) -> register_tuple(c, ret)
-        _ -> register_tuple(c, typ)
-      }
+      // // constructors are globals so this should capture all used types
+      // let c = case typ {
+      //   t.FunctionType(_, ret) -> register_tuple(c, ret)
+      //   _ -> register_tuple(c, typ)
+      // }
       let typ = sub_type(c, sub, typ)
-      let c = case typ {
-        t.FunctionType(_, ret) -> instantiate_type(c, ret)
-        _ -> instantiate_type(c, typ)
-      }
+      // let c = case typ {
+      //   t.FunctionType(_, ret) -> instantiate_type(c, ret)
+      //   _ -> instantiate_type(c, typ)
+      // }
       let #(c, name) = instantiate_function(c, name, typ)
       #(c, t.Global(typ, name))
     }
@@ -277,10 +292,15 @@ fn typed_to_mono_exp(
       let typ = sub_type(c, sub, typ)
       #(c, t.Call(typ, fun, args))
     }
-    t.Fn(typ, vars, exp) -> {
-      let #(c, exp) = typed_to_mono_exp(c, sub, exp)
+    t.Fn(typ, params, exp) -> {
       let typ = sub_type(c, sub, typ)
-      #(c, t.Fn(typ, vars, exp))
+      let #(c, exp) = typed_to_mono_exp(c, sub, exp)
+      let params =
+        list.map(params, fn(p) {
+          let typ = sub_type(c, sub, p.typ)
+          t.Parameter(typ, p.name)
+        })
+      #(c, t.Fn(typ, params, exp))
     }
     t.Let(typ, var, val, exp) -> {
       let #(c, val) = typed_to_mono_exp(c, sub, val)

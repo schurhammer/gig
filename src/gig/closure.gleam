@@ -2,6 +2,7 @@ import gig/core as t
 import gig/gen_names
 import gig/mono
 import gleam/dict
+import pprint
 
 import gleam/int
 import gleam/list
@@ -103,8 +104,7 @@ fn fv(n: List(String), e: t.Exp) -> List(#(String, t.Type)) {
     }
     t.Let(typ, var, val, exp) -> {
       let n = [var, ..n]
-      let v = fv(n, exp)
-      // TODO fv val?
+      let v = fv(n, val)
       combine(v, fv(n, exp))
     }
     t.If(typ, cond, then_e, else_e) -> {

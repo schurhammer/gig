@@ -50,17 +50,17 @@ pub type Module {
     // TODO move these into context instead of module?
     // TODO put more info into the envs
     type_env: Dict(String, #(Poly, List(Variant))),
-    value_env: Dict(String, #(Poly, List(Option(String)))),
+    value_env: Dict(String, ResolvedGlobal),
     imports: List(Definition(Import)),
     custom_types: List(Definition(CustomType)),
     type_aliases: List(Definition(TypeAlias)),
-    constants: List(Definition(Constant)),
-    functions: List(Definition(Function)),
+    constants: List(Definition(ConstantDefinition)),
+    functions: List(Definition(FunctionDefinition)),
   )
 }
 
-pub type Function {
-  Function(
+pub type FunctionDefinition {
+  FunctionDefinition(
     typ: Poly,
     name: String,
     publicity: Publicity,
@@ -123,8 +123,13 @@ pub type Expression {
   Float(typ: Type, value: String)
   String(typ: Type, value: String)
   LocalVariable(typ: Type, name: String)
-  // TODO GlobalVariable and ModuleAccess is very similar
-  GlobalVariable(typ: Type, module: String, name: String)
+  Function(
+    typ: Type,
+    module: String,
+    name: String,
+    labels: List(Option(String)),
+  )
+  Constant(typ: Type, module: String, name: String, value: Expression)
   NegateInt(typ: Type, value: Expression)
   NegateBool(typ: Type, value: Expression)
   Block(typ: Type, statements: List(Statement))
@@ -234,11 +239,11 @@ pub type Import {
   )
 }
 
-pub type Constant {
-  Constant(
+pub type ConstantDefinition {
+  ConstantDefinition(
     name: String,
     publicity: Publicity,
-    annotation: Option(Type),
+    annotation: Option(Annotation),
     value: Expression,
   )
 }
@@ -257,7 +262,7 @@ pub type TypeAlias {
     name: String,
     publicity: Publicity,
     parameters: List(String),
-    aliased: Type,
+    aliased: Annotation,
   )
 }
 
@@ -365,14 +370,23 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
       // TODO instead of type var, we can figure out the type just from the
       // header (i.e. name + params), without inferring the constructors
       let #(c, typ) = new_type_var_ref(c)
-      register_named_type(c, def.definition.name, Poly([], typ), [])
+      register_type(c, def.definition.name, Poly([], typ), [])
+    })
+
+  // add types aliases to env so they can reference eachother and themselves
+  let c =
+    list.fold(module.type_aliases, c, fn(c, def) {
+      // TODO instead of type var, we can figure out the type just from the
+      // header (i.e. name + params), without inferring the constructors
+      let #(c, typ) = new_type_var_ref(c)
+      register_type(c, def.definition.name, Poly([], typ), [])
     })
 
   // now infer custom types fr fr
   let c =
     list.fold(module.custom_types, c, fn(c, def) {
       let #(c, custom) = infer_custom_type(c, def.definition)
-      let c = register_named_type(c, custom.name, custom.typ, custom.variants)
+      let c = register_type(c, custom.name, custom.typ, custom.variants)
       let attrs = infer_attributes(c, def.attributes)
       let def = Definition(attrs, custom)
       update_module(c, fn(mod) {
@@ -380,7 +394,34 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
       })
     })
 
+  // infer type aliases fr fr
+  let c =
+    list.fold(module.type_aliases, c, fn(c, def) {
+      let #(c, alias) = infer_alias_type(c, def.definition)
+      let poly = generalise(c, alias.aliased.typ)
+      let c = register_type(c, alias.name, poly, [])
+      let attrs = infer_attributes(c, def.attributes)
+      let def = Definition(attrs, alias)
+      update_module(c, fn(mod) {
+        Module(..mod, type_aliases: [def, ..mod.type_aliases])
+      })
+    })
+
+  // infer constant expressions
+  let c =
+    list.fold(module.constants, c, fn(c, def) {
+      let #(c, constant) = infer_constant(c, def.definition)
+      let poly = generalise(c, constant.value.typ)
+      let c = register_constant(c, constant.name, poly, constant.value)
+      let attrs = infer_attributes(c, def.attributes)
+      let def = Definition(attrs, constant)
+      update_module(c, fn(mod) {
+        Module(..mod, constants: [def, ..mod.constants])
+      })
+    })
+
   // create a function call graph to group mutually recursive functions
+  // these will be type checked/inferred together as a group
   let rec_groups =
     call_graph.create(module)
     |> graph.strongly_connected_components()
@@ -397,7 +438,7 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
       list.fold(group, c, fn(c, def) {
         let #(c, typ) = new_type_var_ref(c)
         let labels = list.map(def.definition.parameters, fn(f) { f.label })
-        register_value(c, def.definition.name, Poly([], typ), labels)
+        register_function(c, def.definition.name, Poly([], typ), labels)
       })
 
     // infer types for each function
@@ -414,7 +455,7 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
     list.fold(group, c, fn(c, def) {
       let fun = def.definition
       let labels = list.map(fun.parameters, fn(f) { f.label })
-      let c = register_value(c, fun.name, fun.typ, labels)
+      let c = register_function(c, fun.name, fun.typ, labels)
       update_module(c, fn(mod) {
         Module(..mod, functions: [def, ..mod.functions])
       })
@@ -452,19 +493,41 @@ fn update_module(c: Context, fun: fn(Module) -> Module) {
   Context(..c, modules:)
 }
 
-fn register_value(
+fn register_function(
   c: Context,
   name: String,
   typ: Poly,
   labels: List(Option(String)),
 ) -> Context {
   update_module(c, fn(module) {
-    let value_env = dict.insert(module.value_env, name, #(typ, labels))
+    let value_env =
+      dict.insert(
+        module.value_env,
+        name,
+        FunctionGlobal(c.current_module, name, typ, labels),
+      )
     Module(..module, value_env:)
   })
 }
 
-fn register_named_type(
+fn register_constant(
+  c: Context,
+  name: String,
+  typ: Poly,
+  value: Expression,
+) -> Context {
+  update_module(c, fn(module) {
+    let value_env =
+      dict.insert(
+        module.value_env,
+        name,
+        ConstantGlobal(c.current_module, name, typ, value),
+      )
+    Module(..module, value_env:)
+  })
+}
+
+fn register_type(
   c: Context,
   name: String,
   typ: Poly,
@@ -496,7 +559,28 @@ fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
   list.reverse(attrs)
 }
 
-fn infer_function(c: Context, fun: g.Function) {
+fn infer_constant(c: Context, con: g.Constant) -> #(Context, ConstantDefinition) {
+  let assert Ok(#(c, value)) = infer_expression(c, dict.new(), con.value)
+
+  let publicity = case con.publicity {
+    g.Public -> Public
+    g.Private -> Private
+  }
+
+  let #(c, annotation) = case con.annotation {
+    Some(anno) -> {
+      let #(c, anno) = do_infer_annotation(c, dict.new(), anno)
+      #(c, Some(anno))
+    }
+    None -> #(c, None)
+  }
+
+  let constant = ConstantDefinition(con.name, publicity, annotation, value)
+
+  #(c, constant)
+}
+
+fn infer_function(c: Context, fun: g.Function) -> #(Context, FunctionDefinition) {
   let #(c, parameters, return) =
     infer_function_parameters(c, fun.parameters, fun.return)
 
@@ -528,17 +612,50 @@ fn infer_function(c: Context, fun: g.Function) {
   }
 
   let name = fun.name
+
   let publicity = case fun.publicity {
     g.Public -> Public
     g.Private -> Private
   }
+
   let location = Span(fun.location.start, fun.location.end)
 
   let typ = generalise(c, typ)
 
   let fun =
-    Function(typ:, name:, publicity:, parameters:, return:, body:, location:)
+    FunctionDefinition(
+      typ:,
+      name:,
+      publicity:,
+      parameters:,
+      return:,
+      body:,
+      location:,
+    )
   #(c, fun)
+}
+
+fn infer_alias_type(c: Context, alias: g.TypeAlias) -> #(Context, TypeAlias) {
+  let publicity = case alias.publicity {
+    g.Public -> Public
+    g.Private -> Private
+  }
+
+  let parameters = alias.parameters
+
+  // create an env for the type variables
+  let #(c, type_env) =
+    list.fold(parameters, #(c, dict.new()), fn(acc, name) {
+      let #(c, n) = acc
+      let #(c, typ) = new_type_var_ref(c)
+      let n = dict.insert(n, name, typ)
+      #(c, n)
+    })
+  let #(c, aliased) = do_infer_annotation(c, type_env, alias.aliased)
+
+  let alias = TypeAlias(alias.name, publicity, parameters, aliased)
+
+  #(c, alias)
 }
 
 fn infer_custom_type(c: Context, custom: g.CustomType) {
@@ -607,7 +724,7 @@ fn infer_variant(c, n, typ: Type, variant: g.Variant) -> #(Context, Variant) {
 
   let typ = generalise(c, typ)
 
-  let c = register_value(c, variant.name, typ, labels)
+  let c = register_function(c, variant.name, typ, labels)
 
   #(c, Variant(typ, variant.name, fields))
 }
@@ -715,8 +832,9 @@ fn do_infer_annotation(
         })
       let params = list.reverse(params)
 
-      let assert Ok(#(QualifiedName(module, name), _poly, _variants)) =
+      let assert Ok(#(QualifiedName(module, name), poly, _variants)) =
         resolve_type_name(c, anno_module, name)
+
       // TODO check correct type params were used (match with poly?)
 
       let typ = NamedType(name, module, list.map(params, fn(x) { x.typ }))
@@ -756,22 +874,32 @@ fn do_infer_annotation(
   }
 }
 
-type ResolvedName {
-  LocalName(name: String, typ: Type)
-  GlobalName(name: QualifiedName, typ: Poly, labels: List(Option(String)))
+pub type ResolvedGlobal {
+  FunctionGlobal(
+    module: String,
+    name: String,
+    typ: Poly,
+    labels: List(Option(String)),
+  )
+  ConstantGlobal(module: String, name: String, typ: Poly, value: Expression)
+}
+
+type ResolvedVariable {
+  ResolvedLocal(name: String, typ: Type)
+  ResolvedGlobal(global: ResolvedGlobal)
 }
 
 fn resolve_unqualified_name(
   c: Context,
   n: LocalEnv,
   name: String,
-) -> Result(ResolvedName, String) {
+) -> Result(ResolvedVariable, String) {
   case dict.get(n, name) {
     // try local env
-    Ok(typ) -> Ok(LocalName(name, typ))
+    Ok(typ) -> Ok(ResolvedLocal(name, typ))
     Error(_) ->
       case resolve_unqualified_global(c, name) {
-        Ok(#(name, typ, labels)) -> Ok(GlobalName(name, typ, labels))
+        Ok(value) -> Ok(ResolvedGlobal(value))
         Error(e) -> Error(e)
       }
   }
@@ -780,14 +908,14 @@ fn resolve_unqualified_name(
 fn resolve_unqualified_global(
   c: Context,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
+) -> Result(ResolvedGlobal, String) {
   // try global env
   case resolve_global_name(c, c.current_module, name) {
-    Ok(#(name, typ, labels)) -> Ok(#(name, typ, labels))
+    Ok(value) -> Ok(value)
     // try prelude
     Error(_) -> {
       case resolve_global_name(c, builtin, name) {
-        Ok(#(name, typ, labels)) -> Ok(#(name, typ, labels))
+        Ok(value) -> Ok(value)
         Error(_) -> Error("Could not resolve name " <> name)
       }
     }
@@ -797,7 +925,7 @@ fn resolve_unqualified_global(
 fn resolve_aliased_name(
   c: Context,
   name: QualifiedName,
-) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
+) -> Result(ResolvedGlobal, String) {
   case dict.get(c.module_alias_env, name.module) {
     Ok(module) -> resolve_global_name(c, module, name.name)
     Error(_) -> Error("Could not resolve module name " <> name.module)
@@ -808,12 +936,11 @@ pub fn resolve_global_name(
   c: Context,
   module_name: String,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Option(String))), String) {
+) -> Result(ResolvedGlobal, String) {
   case dict.get(c.modules, module_name) {
     Ok(module) ->
       case dict.get(module.value_env, name) {
-        Ok(#(typ, labels)) ->
-          Ok(#(QualifiedName(module_name, name), typ, labels))
+        Ok(value) -> Ok(value)
         Error(_) -> Error("Could not resolve name " <> name)
       }
     Error(_) -> Error("Missing module " <> module_name)
@@ -871,7 +998,6 @@ fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
     Some(mod) -> {
       let q_name = QualifiedName(mod, name)
       resolve_aliased_name(c, q_name)
-      |> result.map(fn(global) { #(global.0, global.1, global.2) })
     }
     None -> {
       resolve_unqualified_global(c, name)
@@ -1038,17 +1164,15 @@ fn infer_pattern(
       #(c, n, PatternBitString(bit_array_type, segs))
     }
     g.PatternConstructor(module, constructor, arguments, with_spread) -> {
-      // resolve the constructor function
-      let assert Ok(#(name, poly, labels)) =
-        resolve_constructor_name(c, module, constructor)
-
+      // was a module name provided
       let with_module = case module {
         Some(_) -> True
         None -> False
       }
 
-      let module = name.module
-      let constructor = name.name
+      // resolve the constructor function
+      let assert Ok(FunctionGlobal(module, constructor, poly, labels)) =
+        resolve_constructor_name(c, module, constructor)
 
       // infer the type of all arguments
       let #(c, n, arguments) =
@@ -1249,11 +1373,18 @@ fn infer_expression(
     g.Variable(s) -> {
       let name = resolve_unqualified_name(c, n, s)
       case name {
-        Ok(GlobalName(name, typ, labels)) -> {
-          let #(c, typ) = instantiate(c, typ)
-          Ok(#(c, GlobalVariable(typ, name.module, name.name)))
-        }
-        Ok(LocalName(name, typ)) -> {
+        Ok(ResolvedGlobal(global)) ->
+          case global {
+            FunctionGlobal(module, name, typ, labels) -> {
+              let #(c, typ) = instantiate(c, typ)
+              Ok(#(c, Function(typ, module, name, labels)))
+            }
+            ConstantGlobal(module, name, typ, value) -> {
+              let #(c, typ) = instantiate(c, typ)
+              Ok(#(c, Constant(typ, module, name, value)))
+            }
+          }
+        Ok(ResolvedLocal(name, typ)) -> {
           Ok(#(c, LocalVariable(typ, name)))
         }
         Error(s) -> Error(s)
@@ -1403,7 +1534,7 @@ fn infer_expression(
       use #(c, base_expr) <- try(infer_expression(c, n, expression))
 
       // Resolve the constructor type
-      let assert Ok(#(qualified_name, poly, labels)) =
+      let assert Ok(FunctionGlobal(res_module, constructor, poly, labels)) =
         resolve_constructor_name(c, module, constructor)
 
       // Instantiate the constructor type
@@ -1451,7 +1582,7 @@ fn infer_expression(
         RecordUpdate(
           typ: typ,
           module: module,
-          resolved_module: qualified_name.module,
+          resolved_module: res_module,
           constructor: constructor,
           record: base_expr,
           fields: updated_fields,
@@ -1510,9 +1641,13 @@ fn infer_expression(
           case value {
             g.Variable(module) -> {
               case resolve_aliased_name(c, QualifiedName(module, label)) {
-                Ok(#(name, poly, _labels)) -> {
+                Ok(FunctionGlobal(module, name, poly, labels)) -> {
                   let #(c, typ) = instantiate(c, poly)
-                  Ok(#(c, GlobalVariable(typ, name.module, name.name)))
+                  Ok(#(c, Function(typ, module, name, labels)))
+                }
+                Ok(ConstantGlobal(module, name, poly, value)) -> {
+                  let #(c, typ) = instantiate(c, poly)
+                  Ok(#(c, Constant(typ, module, name, value)))
                 }
                 Error(e) -> Error(e)
               }
@@ -1538,11 +1673,7 @@ fn infer_expression(
 
       // handle labels
       let labels = case fun {
-        GlobalVariable(_typ, module, name) -> {
-          let assert Ok(#(_name, _poly, labels)) =
-            resolve_global_name(c, module, name)
-          labels
-        }
+        Function(labels:, ..) -> labels
         _ -> list.map(args, fn(_) { None })
       }
       let ordered_args = resolve_labels_ordered(args, labels)

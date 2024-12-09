@@ -3,6 +3,7 @@ import gig/core.{type LiteralKind, type Type}
 import gleam/int
 import gleam/io
 import gleam/list
+import pprint
 
 pub type Value {
   Literal(typ: Type, val: LiteralKind)

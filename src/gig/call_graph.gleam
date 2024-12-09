@@ -62,6 +62,7 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
   case pattern {
     g.PatternInt(_) -> []
     g.PatternFloat(_) -> []
+    g.PatternString(_) -> []
     g.PatternDiscard(_) -> []
     g.PatternVariable(x) -> [x]
     g.PatternAssignment(pattern, var) -> [var, ..pattern_bindings(pattern)]
