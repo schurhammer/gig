@@ -10,6 +10,17 @@ import gleam/option.{type Option, None, Some}
 import gleam/result.{try}
 import gleam/string
 
+type KV(d, k, v) {
+  KV(
+    new: fn() -> d,
+    put: fn(d, k, v) -> d,
+    get: fn(d, k) -> Result(v, Nil),
+    del: fn(d, k) -> d,
+  )
+}
+
+const dict_kv = KV(dict.new, dict.insert, dict.get, dict.delete)
+
 pub const builtin = "gleam"
 
 pub const nil_type = NamedType("Nil", builtin, [])

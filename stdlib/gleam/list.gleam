@@ -87,3 +87,47 @@ fn do_sort(
     }
   }
 }
+
+pub fn index_map(list: List(a), with fun: fn(a, Int) -> b) -> List(b) {
+  do_index_map(list, fun, 0, [])
+}
+
+fn do_index_map(
+  list: List(a),
+  fun: fn(a, Int) -> b,
+  index: Int,
+  acc: List(b),
+) -> List(b) {
+  case list {
+    [] -> reverse(acc)
+    [first, ..rest] -> {
+      let acc = [fun(first, index), ..acc]
+      do_index_map(rest, fun, index + 1, acc)
+    }
+  }
+}
+
+pub fn reverse(list: List(a)) -> List(a) {
+  do_reverse(list, [])
+}
+
+fn do_reverse(remaining: List(a), accumulator: List(a)) -> List(a) {
+  case remaining {
+    [] -> accumulator
+    [item, ..rest] -> do_reverse(rest, [item, ..accumulator])
+  }
+}
+
+fn do_intersperse(list: List(a), separator: a, acc: List(a)) -> List(a) {
+  case list {
+    [] -> reverse(acc)
+    [x, ..rest] -> do_intersperse(rest, separator, [x, separator, ..acc])
+  }
+}
+
+pub fn intersperse(list: List(a), with elem: a) -> List(a) {
+  case list {
+    [] | [_] -> list
+    [x, ..rest] -> do_intersperse(rest, elem, [x])
+  }
+}

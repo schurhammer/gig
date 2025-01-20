@@ -1,6 +1,9 @@
 //// 1
 //// 1
 
+// B is never constructed and as such List(Int) isn't either
+// but we need to make sure the List(Int) type is still generated
+
 import gleam/io
 
 type Foo {
@@ -8,8 +11,6 @@ type Foo {
   B(List(Int))
 }
 
-// B is never constructed and as such List(Int) isn't either
-// but we need to make sure the code to do it is still generated
 pub fn main() {
   case A(1) {
     A(1) -> io.debug(1)

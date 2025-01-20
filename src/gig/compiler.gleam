@@ -37,7 +37,11 @@ fn read_source_file(path, name) {
     _ ->
       case simplifile.read(dependency_path <> "/" <> name) {
         Ok(content) -> content
-        _ -> panic as { "Failed to read module " <> name }
+        Error(e) -> {
+          io.debug(path <> "/" <> name)
+          io.debug(e)
+          panic as { "Failed to read module " <> name }
+        }
       }
   }
 }

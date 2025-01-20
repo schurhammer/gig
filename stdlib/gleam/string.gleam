@@ -3,6 +3,7 @@
 // maybe we can build on bitstring / dynamic types once its supported
 import gleam
 import gleam/order
+import gleam/list
 
 @external(c, "", "append_string")
 pub fn append(a: String, b: String) -> String
@@ -26,4 +27,21 @@ pub fn compare(a: String, b: String) -> order.Order {
 
 pub fn inspect(value: a) -> String {
     gleam.inspect(value)
+}
+
+pub fn join(strings: List(String), with separator: String) -> String {
+  do_join(strings, separator)
+}
+
+fn do_join(strings: List(String), separator: String) -> String {
+  strings
+  |> list.intersperse(with: separator)
+  |> concat
+}
+
+fn concat(strings: List(String)) -> String {
+    case strings {
+        [] -> ""
+        [x, ..xs] -> x <> concat(xs)
+    }
 }
