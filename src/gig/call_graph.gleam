@@ -2,7 +2,6 @@ import gig/graph
 
 import glance as g
 
-import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 
@@ -42,7 +41,15 @@ fn walk_body(g: Graph, n: Env, r: String, body: List(g.Statement)) -> Graph {
     [] -> g
     [x, ..xs] ->
       case x {
-        g.Use(..) -> todo
+        g.Use(patterns, expression) -> {
+          let n =
+            list.fold(patterns, n, fn(n, pattern) {
+              let p = pattern_bindings(pattern)
+              combine_env(p, n)
+            })
+          let g = walk_expression(g, n, r, expression)
+          walk_body(g, n, r, xs)
+        }
         g.Assignment(_, pattern, _, e) -> {
           let p = pattern_bindings(pattern)
           let n = combine_env(p, n)
@@ -78,9 +85,11 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
       list.flat_map(segs, fn(seg) { pattern_bindings(seg.0) })
     g.PatternConstructor(_mod, _cons, args, _spread) ->
       list.flat_map(args, fn(x) { pattern_bindings(x.item) })
-    _ -> {
-      io.debug(pattern)
-      todo
+    g.PatternConcatenate(_prefix, binding) -> {
+      case binding {
+        g.Discarded(_) -> []
+        g.Named(name) -> [name]
+      }
     }
   }
 }
@@ -168,9 +177,5 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
     }
     g.BitString(segs) ->
       list.fold(segs, g, fn(g, seg) { walk_expression(g, n, r, seg.0) })
-    _ -> {
-      io.debug(e)
-      todo
-    }
   }
 }

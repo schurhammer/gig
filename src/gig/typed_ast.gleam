@@ -28,6 +28,7 @@ pub type Ref {
   Ref(id: Int)
 }
 
+// TODO do we need unbound? what if unbound is just a missing key in the map
 pub type TypeVar {
   Bound(Type)
   Unbound(id: Int)
@@ -259,6 +260,7 @@ pub type Publicity {
 
 pub type TypeAlias {
   TypeAlias(
+    typ: Poly,
     name: String,
     publicity: Publicity,
     parameters: List(String),
@@ -364,13 +366,23 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
 
   let c = Context(..c, module_alias_env:)
 
-  // add types to env so they can reference eachother and themselves
+  // add types to env so they can reference eachother (but not yet constructors)
   let c =
     list.fold(module.custom_types, c, fn(c, def) {
-      // TODO instead of type var, we can figure out the type just from the
-      // header (i.e. name + params), without inferring the constructors
-      let #(c, typ) = new_type_var_ref(c)
-      register_type(c, def.definition.name, Poly([], typ), [])
+      let custom = def.definition
+
+      let #(c, parameters) =
+        list.fold(custom.parameters, #(c, []), fn(acc, p) {
+          let #(c, l) = acc
+          let #(c, typ) = new_type_var_ref(c)
+          #(c, [#(p, typ), ..l])
+        })
+      let parameters = list.reverse(parameters)
+      let param_types = list.map(parameters, fn(x) { x.1 })
+      let typ = NamedType(custom.name, c.current_module, param_types)
+      let typ = generalise(c, typ)
+
+      register_type(c, def.definition.name, typ, [])
     })
 
   // add types aliases to env so they can reference eachother and themselves
@@ -385,7 +397,16 @@ pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
   // now infer custom types fr fr
   let c =
     list.fold(module.custom_types, c, fn(c, def) {
-      let #(c, custom) = infer_custom_type(c, def.definition)
+      let custom = def.definition
+
+      // reconstruct the type parameters
+      let assert Ok(#(_, poly, _)) =
+        resolve_global_type_name(c, c.current_module, custom.name)
+      let param_types = list.map(poly.vars, fn(x) { VariableType(Ref(x)) })
+      let parameters = list.zip(custom.parameters, param_types)
+
+      // infer the custom type including variants
+      let #(c, custom) = infer_custom_type(c, def.definition, parameters)
       let c = register_type(c, custom.name, custom.typ, custom.variants)
       let attrs = infer_attributes(c, def.attributes)
       let def = Definition(attrs, custom)
@@ -644,31 +665,33 @@ fn infer_alias_type(c: Context, alias: g.TypeAlias) -> #(Context, TypeAlias) {
   let parameters = alias.parameters
 
   // create an env for the type variables
-  let #(c, type_env) =
-    list.fold(parameters, #(c, dict.new()), fn(acc, name) {
-      let #(c, n) = acc
+  let #(c, type_env, args) =
+    list.fold(parameters, #(c, dict.new(), []), fn(acc, name) {
+      let #(c, n, args) = acc
       let #(c, typ) = new_type_var_ref(c)
       let n = dict.insert(n, name, typ)
-      #(c, n)
+      let assert VariableType(ref) = typ
+      #(c, n, [ref.id, ..args])
     })
+
+  let args = list.reverse(args)
+
   let #(c, aliased) = do_infer_annotation(c, type_env, alias.aliased)
 
-  let alias = TypeAlias(alias.name, publicity, parameters, aliased)
+  let poly = Poly(args, aliased.typ)
+
+  let alias = TypeAlias(poly, alias.name, publicity, parameters, aliased)
 
   #(c, alias)
 }
 
-fn infer_custom_type(c: Context, custom: g.CustomType) {
+fn infer_custom_type(
+  c: Context,
+  custom: g.CustomType,
+  parameters: List(#(String, Type)),
+) {
   // create a type variable for each parameter
   // these will be used when a field references a type parameter
-  let #(c, parameters) =
-    list.fold(custom.parameters, #(c, []), fn(acc, p) {
-      let #(c, l) = acc
-      let #(c, typ) = new_type_var_ref(c)
-      #(c, [#(p, typ), ..l])
-    })
-  let parameters = list.reverse(parameters)
-
   let param_types = list.map(parameters, fn(x) { x.1 })
   let module = c.current_module
   let name = custom.name
@@ -832,12 +855,15 @@ fn do_infer_annotation(
         })
       let params = list.reverse(params)
 
-      let assert Ok(#(QualifiedName(module, name), poly, _variants)) =
+      // instantiate the polymorphic type with the parameter types
+      let assert Ok(#(_, poly, _variants)) =
         resolve_type_name(c, anno_module, name)
+      let param_types = list.map(params, fn(param) { param.typ })
+      let assert Ok(mapping) = list.strict_zip(poly.vars, param_types)
+      let mapping = dict.from_list(mapping)
+      let typ = do_instantiate(c, mapping, poly.typ)
 
-      // TODO check correct type params were used (match with poly?)
-
-      let typ = NamedType(name, module, list.map(params, fn(x) { x.typ }))
+      // let typ = NamedType(name, module, list.map(params, fn(x) { x.typ }))
       #(c, NamedAnno(typ, name, anno_module, params))
     }
     g.TupleType(elements) -> {
