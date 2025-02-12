@@ -1,4 +1,5 @@
 import gig/graph
+import gleam/io
 
 import glance as g
 
@@ -42,18 +43,18 @@ fn walk_body(g: Graph, n: Env, r: String, body: List(g.Statement)) -> Graph {
     [x, ..xs] ->
       case x {
         g.Use(patterns, expression) -> {
+          let g = walk_expression(g, n, r, expression)
           let n =
             list.fold(patterns, n, fn(n, pattern) {
               let p = pattern_bindings(pattern)
               combine_env(p, n)
             })
-          let g = walk_expression(g, n, r, expression)
           walk_body(g, n, r, xs)
         }
         g.Assignment(_, pattern, _, e) -> {
+          let g = walk_expression(g, n, r, e)
           let p = pattern_bindings(pattern)
           let n = combine_env(p, n)
-          let g = walk_expression(g, n, r, e)
           walk_body(g, n, r, xs)
         }
         g.Expression(e) -> {
@@ -84,13 +85,23 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
     g.PatternBitString(segs) ->
       list.flat_map(segs, fn(seg) { pattern_bindings(seg.0) })
     g.PatternConstructor(_mod, _cons, args, _spread) ->
-      list.flat_map(args, fn(x) { pattern_bindings(x.item) })
+      list.flat_map(args, fn(x) {
+        pattern_bindings(field_item(x, g.PatternVariable))
+      })
     g.PatternConcatenate(_prefix, binding) -> {
       case binding {
         g.Discarded(_) -> []
         g.Named(name) -> [name]
       }
     }
+  }
+}
+
+fn field_item(field: g.Field(a), constructer: fn(String) -> a) {
+  case field {
+    g.LabelledField(_, item) -> item
+    g.ShorthandField(name) -> constructer(name)
+    g.UnlabelledField(item) -> item
   }
 }
 
@@ -130,13 +141,15 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
     }
     g.Call(fun, args) -> {
       let g = walk_expression(g, n, r, fun)
-      list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e.item) })
+      list.fold(args, g, fn(g, e) {
+        walk_expression(g, n, r, field_item(e, g.Variable))
+      })
     }
     g.TupleIndex(tuple, _index) -> walk_expression(g, n, r, tuple)
     g.FnCapture(_label, fun, before, after) -> {
-      let before = list.map(before, fn(x) { x.item })
-      let after = list.map(after, fn(x) { x.item })
-      let args = list.concat([[fun], before, after])
+      let before = list.map(before, field_item(_, g.Variable))
+      let after = list.map(after, field_item(_, g.Variable))
+      let args = list.flatten([[fun], before, after])
       list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e) })
     }
     g.BinaryOperator(_, left, right) -> {
@@ -173,7 +186,12 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
     }
     g.RecordUpdate(_module, _constructor, record, fields) -> {
       let g = walk_expression(g, n, r, record)
-      list.fold(fields, g, fn(g, f) { walk_expression(g, n, r, f.1) })
+      list.fold(fields, g, fn(g, f) {
+        case f.item {
+          Some(item) -> walk_expression(g, n, r, item)
+          None -> g
+        }
+      })
     }
     g.BitString(segs) ->
       list.fold(segs, g, fn(g, seg) { walk_expression(g, n, r, seg.0) })
