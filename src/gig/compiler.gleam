@@ -213,7 +213,7 @@ fn offset_to_line_col(text: String, offset: Int) {
 
 fn infer_file(
   c: typed_ast.Context,
-  d: List(String),
+  done: List(String),
   module_id: String,
 ) -> #(typed_ast.Context, List(String)) {
   let file = module_id <> ".gleam"
@@ -221,7 +221,7 @@ fn infer_file(
   io.println("Read  " <> build_src_dir <> "/" <> file)
 
   // add file to "done" list
-  let d = [file, ..d]
+  let done = [module_id, ..done]
 
   // parse file
   let assert Ok(module) =
@@ -238,19 +238,21 @@ fn infer_file(
   }
 
   // infer imports
-  let #(c, d) =
-    list.fold(module.imports, #(c, d), fn(acc, i) {
-      let #(c, d) = acc
-      let name = i.definition.module
-      let #(c, d) = infer_file(c, d, name)
-      #(c, d)
+  let #(c, done) =
+    list.fold(module.imports, #(c, done), fn(acc, i) {
+      let #(c, done) = acc
+      let module_id = i.definition.module
+      case list.contains(done, module_id) {
+        True -> #(c, done)
+        False -> infer_file(c, done, module_id)
+      }
     })
 
   // infer this file
   io.println("Check " <> build_src_dir <> "/" <> file)
   let c = typed_ast.infer_module(c, module, module_id)
 
-  #(c, d)
+  #(c, done)
 }
 
 fn parse_module(file: String, input: String) {
