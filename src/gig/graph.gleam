@@ -43,14 +43,10 @@ fn reverse_graph(g: Graph(a)) -> Graph(a) {
   g.adj
   |> list.map(fn(x) { #(x.0, []) })
   |> Graph()
-  |> list.fold(
-    g.adj,
-    _,
-    fn(g, i) {
-      let to = i.0
-      list.fold(i.1, g, fn(g, from) { insert_edge(g, from, to) })
-    },
-  )
+  |> list.fold(g.adj, _, fn(g, i) {
+    let to = i.0
+    list.fold(i.1, g, fn(g, from) { insert_edge(g, from, to) })
+  })
 }
 
 pub fn strongly_connected_components(g: Graph(a)) -> List(List(a)) {

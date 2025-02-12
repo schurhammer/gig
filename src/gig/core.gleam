@@ -145,7 +145,13 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
   let acc =
     list.fold(module.functions, acc, fn(acc, fun) {
       let attrs = fun.attributes
-      let external = list.find(attrs, fn(x) { x.name == "external" })
+      let external =
+        list.find(attrs, fn(x) {
+          case x {
+            t.Attribute("external", [t.LocalVariable(_, "c"), ..]) -> True
+            _ -> False
+          }
+        })
 
       case external {
         Ok(external) -> {

@@ -50,6 +50,7 @@ pub type Module {
     name: String,
     // TODO move these into context instead of module?
     // TODO put more info into the envs
+    module_env: Dict(String, String),
     type_env: Dict(String, #(Poly, List(Variant))),
     value_env: Dict(String, ResolvedGlobal),
     imports: List(Definition(Import)),
@@ -328,7 +329,6 @@ pub type TypeVarEnv =
 pub type Context {
   Context(
     current_module: String,
-    module_alias_env: Dict(String, String),
     type_vars: TypeVarEnv,
     modules: Dict(String, Module),
     type_uid: Int,
@@ -345,7 +345,6 @@ pub type TypeEnv =
 pub fn new_context() -> Context {
   Context(
     current_module: "",
-    module_alias_env: dict.new(),
     type_vars: dict.new(),
     modules: dict.new(),
     type_uid: 0,
@@ -353,18 +352,73 @@ pub fn new_context() -> Context {
   )
 }
 
-pub fn infer_module(c: Context, module: g.Module, name: String) -> Context {
-  let c = Context(..c, current_module: name)
+pub fn infer_module(
+  c: Context,
+  module: g.Module,
+  current_module: String,
+) -> Context {
+  let modules =
+    dict.insert(
+      c.modules,
+      current_module,
+      Module(
+        name: current_module,
+        module_env: dict.new(),
+        type_env: dict.new(),
+        value_env: dict.new(),
+        imports: [],
+        custom_types: [],
+        type_aliases: [],
+        constants: [],
+        functions: [],
+      ),
+    )
+
+  let c = Context(..c, modules:, current_module:)
 
   // handle module imports
-  let module_alias_env =
-    list.fold(module.imports, dict.new(), fn(n, imp) {
-      let name = imp.definition.module
-      let assert Ok(alias) = list.last(string.split(name, "/"))
-      dict.insert(n, alias, name)
-    })
+  let c =
+    list.fold(module.imports, c, fn(c, imp) {
+      update_module(c, fn(module) {
+        let imp = imp.definition
+        let module_id = imp.module
 
-  let c = Context(..c, module_alias_env:)
+        let module_env = case imp.alias {
+          Some(alias) ->
+            case alias {
+              g.Named(alias) -> dict.insert(module.module_env, alias, module_id)
+              g.Discarded(_) -> module.module_env
+            }
+          None -> {
+            let assert Ok(alias) = list.last(string.split(module_id, "/"))
+            dict.insert(module.module_env, alias, module_id)
+          }
+        }
+
+        let type_env =
+          list.fold(imp.unqualified_types, module.type_env, fn(acc, imp) {
+            let assert Ok(#(_, poly, variants)) =
+              resolve_global_type_name(c, module_id, imp.name)
+            let alias = case imp.alias {
+              Some(alias) -> alias
+              None -> imp.name
+            }
+            dict.insert(acc, alias, #(poly, variants))
+          })
+
+        let value_env =
+          list.fold(imp.unqualified_values, module.value_env, fn(acc, imp) {
+            let assert Ok(value) = resolve_global_name(c, module_id, imp.name)
+            let alias = case imp.alias {
+              Some(alias) -> alias
+              None -> imp.name
+            }
+            dict.insert(acc, alias, value)
+          })
+
+        Module(..module, module_env:, type_env:, value_env:)
+      })
+    })
 
   // add types to env so they can reference eachother (but not yet constructors)
   let c =
@@ -491,24 +545,17 @@ fn generalise(c: Context, typ: Type) {
   Poly(tvs, typ)
 }
 
-fn get_module_context(c: Context, module: String) -> Module {
-  dict.get(c.modules, module)
-  |> result.unwrap(
-    Module(
-      name: module,
-      type_env: dict.new(),
-      value_env: dict.new(),
-      imports: [],
-      custom_types: [],
-      type_aliases: [],
-      constants: [],
-      functions: [],
-    ),
-  )
+fn get_current_module(c: Context) -> Module {
+  get_module(c, c.current_module)
+}
+
+fn get_module(c: Context, module: String) -> Module {
+  let assert Ok(module) = dict.get(c.modules, module)
+  module
 }
 
 fn update_module(c: Context, fun: fn(Module) -> Module) {
-  let module = get_module_context(c, c.current_module)
+  let module = get_current_module(c)
   let module = fun(module)
   let modules = dict.insert(c.modules, c.current_module, module)
   Context(..c, modules:)
@@ -561,8 +608,11 @@ fn register_type(
 }
 
 fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
-  let attr_env = dict.new()
-  let attr_env = dict.insert(attr_env, "c", nil_type)
+  let attr_env =
+    dict.new()
+    |> dict.insert("c", nil_type)
+    |> dict.insert("erlang", nil_type)
+    |> dict.insert("javascript", nil_type)
 
   let #(_, attrs) =
     list.fold(attrs, #(c, []), fn(acc, attr) {
@@ -730,7 +780,10 @@ fn infer_variant(c, n, typ: Type, variant: g.Variant) -> #(Context, Variant) {
     list.fold(variant.fields, #(c, []), fn(acc, field) {
       let #(c, fields) = acc
       let #(c, annotation) = do_infer_annotation(c, n, field.item)
-      let label = field.label
+      let label = case field {
+        g.LabelledVariantField(_, label) -> Some(label)
+        g.UnlabelledVariantField(_) -> None
+      }
       let field = Field(label, annotation)
       #(c, [field, ..fields])
     })
@@ -952,7 +1005,7 @@ fn resolve_aliased_name(
   c: Context,
   name: QualifiedName,
 ) -> Result(ResolvedGlobal, String) {
-  case dict.get(c.module_alias_env, name.module) {
+  case dict.get(get_current_module(c).module_env, name.module) {
     Ok(module) -> resolve_global_name(c, module, name.name)
     Error(_) -> Error("Could not resolve module name " <> name.module)
   }
@@ -997,7 +1050,7 @@ fn resolve_aliased_type_name(
   module: String,
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
-  case dict.get(c.module_alias_env, module) {
+  case dict.get(get_current_module(c).module_env, module) {
     Ok(module) -> resolve_global_type_name(c, module, name)
     Error(_) -> Error("Could not resolve module name " <> module)
   }
@@ -1204,8 +1257,15 @@ fn infer_pattern(
       let #(c, n, arguments) =
         list.fold(arguments, #(c, n, []), fn(acc, arg) {
           let #(c, n, arguments) = acc
-          let #(c, n, arg2) = infer_pattern(c, n, arg.item)
-          #(c, n, [Field(arg.label, arg2), ..arguments])
+
+          let #(item, label) = case arg {
+            g.LabelledField(label, item) -> #(item, Some(label))
+            g.ShorthandField(label) -> #(g.PatternVariable(label), Some(label))
+            g.UnlabelledField(item) -> #(item, None)
+          }
+
+          let #(c, n, arg2) = infer_pattern(c, n, item)
+          #(c, n, [Field(label, arg2), ..arguments])
         })
       let arguments = list.reverse(arguments)
 
@@ -1322,25 +1382,45 @@ fn infer_body(
           #(c, [statement, ..rest])
         }
         g.Use(pats, fun) -> {
-          // infer each of the patterns
-          let #(c, n, pats) =
-            list.fold(pats, #(c, n, []), fn(acc, pat) {
-              let #(c, n, patterns) = acc
-              let #(c, n, pattern) = infer_pattern(c, n, pat)
-              #(c, n, [pattern, ..patterns])
-            })
-          let pats = list.reverse(pats)
-          let pat_types = list.map(pats, fn(p) { p.typ })
-
-          // TODO we can't just infer this because its missing the last parameter
-          // is fun always a Call node?
-          let assert Ok(#(c, fun)) = infer_expression(c, n, fun)
-
-          // 1. fun must be a function type
-          // 2. fun must have callback as last parameter
-          // 3. callback arg types must match pattern types
-
-          todo
+          // TODO infer without desugaring
+          case fun {
+            g.Call(fun, args) -> {
+              let params =
+                list.index_map(pats, fn(_pat, i) {
+                  g.FnParameter(g.Named("P" <> int.to_string(i)), None)
+                })
+              let body =
+                list.index_fold(pats, xs, fn(body, pat, i) {
+                  let param = g.Variable("P" <> int.to_string(i))
+                  let assignment = g.Assignment(g.Let, pat, None, param)
+                  [assignment, ..body]
+                })
+              let callback = g.Fn(params, None, body)
+              let field = case fun {
+                g.Variable(fun) -> {
+                  let assert Ok(fun) = resolve_unqualified_name(c, n, fun)
+                  case fun {
+                    ResolvedGlobal(global) ->
+                      case global {
+                        FunctionGlobal(labels:, ..) ->
+                          case list.last(labels) {
+                            Ok(Some(label)) -> g.LabelledField(label, callback)
+                            _ -> g.UnlabelledField(callback)
+                          }
+                        _ -> g.UnlabelledField(callback)
+                      }
+                    _ -> g.UnlabelledField(callback)
+                  }
+                }
+                _ -> g.UnlabelledField(callback)
+              }
+              let call = g.Call(fun, list.append(args, [field]))
+              let assert Ok(#(c, exp)) = infer_expression(c, n, call)
+              let statement = Expression(exp.typ, exp)
+              #(c, [statement])
+            }
+            _ -> panic as "expected a function call"
+          }
         }
       }
   }
@@ -1575,8 +1655,12 @@ fn infer_expression(
       use #(c, updated_fields) <- try(
         list.try_fold(fields, #(c, []), fn(acc, field) {
           let #(c, updated_fields) = acc
-          use #(c, value) <- try(infer_expression(c, n, field.1))
-          Ok(#(c, [#(field.0, value), ..updated_fields]))
+          let item = case field.item {
+            Some(item) -> item
+            None -> g.Variable(field.label)
+          }
+          use #(c, value) <- try(infer_expression(c, n, item))
+          Ok(#(c, [#(field.label, value), ..updated_fields]))
         }),
       )
       let updated_fields = list.reverse(updated_fields)
@@ -1691,8 +1775,13 @@ fn infer_expression(
       use #(c, args) <- try(
         list.try_fold(args, #(c, []), fn(acc, field) {
           let #(c, args) = acc
-          use #(c, arg) <- try(infer_expression(c, n, field.item))
-          Ok(#(c, [Field(field.label, arg), ..args]))
+          let #(label, item) = case field {
+            g.LabelledField(label, item) -> #(Some(label), item)
+            g.ShorthandField(label) -> #(Some(label), g.Variable(label))
+            g.UnlabelledField(item) -> #(None, item)
+          }
+          use #(c, arg) <- try(infer_expression(c, n, item))
+          Ok(#(c, [Field(label, arg), ..args]))
         }),
       )
       let args = list.reverse(args)
@@ -1724,8 +1813,11 @@ fn infer_expression(
     g.FnCapture(label, fun, before, after) -> {
       // TODO return non-desugared version
       let #(c, x) = new_temp_var(c)
-      let arg = g.Field(label, g.Variable(x))
-      let args = list.concat([before, [arg], after])
+      let arg = case label {
+        Some(label) -> g.LabelledField(label, g.Variable(x))
+        None -> g.UnlabelledField(g.Variable(x))
+      }
+      let args = list.flatten([before, [arg], after])
       let param = g.FnParameter(g.Named(x), None)
       let abs = g.Fn([param], None, [g.Expression(g.Call(fun, args))])
       infer_expression(c, n, abs)
@@ -1855,12 +1947,22 @@ fn infer_expression(
       // TODO return a not-desugared version
       case right {
         g.Call(fun, args) ->
-          infer_expression(c, n, g.Call(fun, [g.Field(None, left), ..args]))
+          infer_expression(c, n, g.Call(fun, [g.UnlabelledField(left), ..args]))
         g.Variable(_name) ->
-          infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
+          infer_expression(c, n, g.Call(right, [g.UnlabelledField(left)]))
         g.FieldAccess(_value, _field) ->
-          infer_expression(c, n, g.Call(right, [g.Field(None, left)]))
-        _ -> panic as "pipe to unexpected expression"
+          infer_expression(c, n, g.Call(right, [g.UnlabelledField(left)]))
+        g.FnCapture(label, fun, before, after) -> {
+          let args = case label {
+            Some(label) -> [before, [g.LabelledField(label, left)], after]
+            None -> [before, [g.UnlabelledField(left)], after]
+          }
+          infer_expression(c, n, g.Call(fun, list.flatten(args)))
+        }
+        _ -> {
+          io.debug(right)
+          panic as "pipe to unexpected expression"
+        }
       }
     }
     g.BinaryOperator(name, left, right) -> {

@@ -1,4 +1,3 @@
-import gleam/list
 import gleam/order
 
 type Color {
@@ -15,23 +14,12 @@ type Node(k, v) {
 }
 
 pub opaque type Dict(k, v) {
-  Dict(root: Node(k, v), compare: fn(k, k) -> order.Order)
+  Dict(root: Node(k, v))
 }
 
-// TODO need a built in hash function or compare function so we don't need to pass compare
 /// Creates a new empty map with the provided comparison function for keys.
-pub fn new(compare: fn(k, k) -> order.Order) -> Dict(k, v) {
-  Dict(E, compare)
-}
-
-pub fn from_list(
-  from: List(#(k, v)),
-  compare: fn(k, k) -> order.Order,
-) -> Dict(k, v) {
-  list.fold(from, new(compare), fn(d, item) {
-    let #(k, v) = item
-    insert(d, k, v)
-  })
+pub fn new() -> Dict(k, v) {
+  Dict(E)
 }
 
 pub fn to_list(dict: Dict(k, v)) -> List(#(k, v)) {
@@ -41,7 +29,7 @@ pub fn to_list(dict: Dict(k, v)) -> List(#(k, v)) {
 /// Removes all elements from the map, resulting in an empty map.
 /// Time complexity: O(1)
 pub fn clear(tree: Dict(k, v)) -> Dict(k, v) {
-  Dict(E, tree.compare)
+  Dict(E)
 }
 
 // TODO is this O(1) amortised?
@@ -49,20 +37,20 @@ pub fn clear(tree: Dict(k, v)) -> Dict(k, v) {
 /// If the key already exists, its associated value is updated with the new value.
 /// Time complexity: O(log n)
 pub fn insert(tree: Dict(k, v), key: k, value: v) -> Dict(k, v) {
-  Dict(blacken(ins(tree.root, #(key, value), tree.compare)), tree.compare)
+  Dict(blacken(ins(tree.root, #(key, value))))
 }
 
 // TODO is this O(1) amortised?
 /// Removes a key-value pair from the map, if the key exists.
 /// Time complexity: O(log n)
 pub fn delete(tree: Dict(k, v), key: k) -> Dict(k, v) {
-  Dict(del(redden(tree.root), key, tree.compare), tree.compare)
+  Dict(del(redden(tree.root), key))
 }
 
 /// Searches for a key in the map and returns the associated value if found.
 /// Time complexity: O(log n)
 pub fn get(tree: Dict(k, v), key: k) -> Result(v, Nil) {
-  case do_find(tree.root, key, tree.compare) {
+  case do_find(tree.root, key) {
     Ok(entry) -> Ok(entry.1)
     _ -> Error(Nil)
   }
@@ -71,25 +59,25 @@ pub fn get(tree: Dict(k, v), key: k) -> Result(v, Nil) {
 /// Applies a function to every key-value pair in the map, accumulating
 /// the results with the provided initial accumulator value.
 /// Time complexity: O(n)
-pub fn fold(tree: Dict(k, v), acc: b, fun: fn(b, k, v) -> b) -> b {
-  do_fold(tree.root, acc, fun)
+pub fn fold(
+  over dict: Dict(k, v),
+  from initial: acc,
+  with fun: fn(acc, k, v) -> acc,
+) -> acc {
+  do_fold(dict.root, initial, fun)
 }
 
-pub fn foldr(tree: Dict(k, v), acc: b, fun: fn(b, k, v) -> b) -> b {
+fn foldr(tree: Dict(k, v), acc: b, fun: fn(b, k, v) -> b) -> b {
   do_foldr(tree.root, acc, fun)
 }
 
-fn ins(
-  node: Node(k, v),
-  x: #(k, v),
-  compare: fn(k, k) -> order.Order,
-) -> Node(k, v) {
+fn ins(node: Node(k, v), x: #(k, v)) -> Node(k, v) {
   case node {
     E -> T(R, E, x, E)
     T(c, k, y, b) ->
       case compare(x.0, y.0) {
-        order.Lt -> balance(c, ins(k, x, compare), y, b)
-        order.Gt -> balance(c, k, y, ins(b, x, compare))
+        order.Lt -> balance(c, ins(k, x), y, b)
+        order.Gt -> balance(c, k, y, ins(b, x))
         order.Eq -> T(c, k, x, b)
       }
     _ -> node
@@ -123,7 +111,7 @@ fn redden(node: Node(k, v)) -> Node(k, v) {
   }
 }
 
-fn del(node: Node(k, v), x: k, compare: fn(k, k) -> order.Order) -> Node(k, v) {
+fn del(node: Node(k, v), x: k) -> Node(k, v) {
   case node {
     E -> node
     T(R, E, y, E) ->
@@ -138,14 +126,14 @@ fn del(node: Node(k, v), x: k, compare: fn(k, k) -> order.Order) -> Node(k, v) {
       }
     T(B, T(R, E, y, E) as l, z, E) ->
       case compare(x, z.0) {
-        order.Lt -> T(B, del(l, x, compare), z, E)
+        order.Lt -> T(B, del(l, x), z, E)
         order.Gt -> node
         order.Eq -> T(B, E, y, E)
       }
     T(c, k, y, b) ->
       case compare(x, y.0) {
-        order.Lt -> rotate(c, del(k, x, compare), y, b)
-        order.Gt -> rotate(c, k, y, del(b, x, compare))
+        order.Lt -> rotate(c, del(k, x), y, b)
+        order.Gt -> rotate(c, k, y, del(b, x))
         order.Eq ->
           case min_del(b) {
             Min(y1, b1) -> rotate(c, k, y1, b1)
@@ -201,16 +189,12 @@ fn min_del(node: Node(k, v)) -> MinDel(k, v) {
   }
 }
 
-fn do_find(
-  node: Node(k, v),
-  key: k,
-  compare: fn(k, k) -> order.Order,
-) -> Result(#(k, v), Nil) {
+fn do_find(node: Node(k, v), key: k) -> Result(#(k, v), Nil) {
   case node {
     T(_, l, k, r) ->
       case compare(key, k.0) {
-        order.Lt -> do_find(l, key, compare)
-        order.Gt -> do_find(r, key, compare)
+        order.Lt -> do_find(l, key)
+        order.Gt -> do_find(r, key)
         order.Eq -> Ok(k)
       }
     _ -> Error(Nil)
@@ -239,4 +223,8 @@ fn do_foldr(node: Node(k, v), acc: a, fun: fn(a, k, v) -> a) -> a {
     }
     _ -> acc
   }
+}
+
+fn compare(a: a, b: a) -> order.Order {
+  todo
 }

@@ -6,13 +6,13 @@ import gleam/order
 import gleam/list
 
 @external(c, "", "append_string")
-pub fn append(a: String, b: String) -> String
+pub fn append(to first: String, suffix second: String) -> String
 
 @external(c, "", "starts_with_string")
-pub fn starts_with(string: String, with: String) -> Bool
+pub fn starts_with(string: String, prefix: String) -> Bool
 
 @external(c, "", "ends_with_string")
-pub fn ends_with(string: String, with: String) -> Bool
+pub fn ends_with(string: String, suffix: String) -> Bool
 
 @external(c, "", "compare_string")
 fn do_compare(a: String, b: String) -> Int
@@ -33,15 +33,23 @@ pub fn join(strings: List(String), with separator: String) -> String {
   do_join(strings, separator)
 }
 
-fn do_join(strings: List(String), separator: String) -> String {
+fn do_join(strings: List(String), with separator: String) -> String {
   strings
   |> list.intersperse(with: separator)
   |> concat
 }
 
-fn concat(strings: List(String)) -> String {
+pub fn concat(strings: List(String)) -> String {
     case strings {
         [] -> ""
         [x, ..xs] -> x <> concat(xs)
     }
+}
+
+fn do_to_utf_codepoints(string: String) -> List(UtfCodepoint) {
+  todo
+}
+
+fn to_utf_codepoints_loop(string: String) -> List(UtfCodepoint) {
+  todo
 }

@@ -1,7 +1,22 @@
-import gig/graph.{insert_edge, insert_node, new, strongly_connected_components}
+import gig/graph.{
+  insert_edge, insert_node, neighbours, new, strongly_connected_components,
+}
 import startest/expect
 
-pub fn conencted_components_test() {
+pub fn multiple_neighbours_test() {
+  let g =
+    new()
+    |> insert_node(1)
+    |> insert_node(2)
+    |> insert_node(3)
+    |> insert_edge(1, 2)
+    |> insert_edge(1, 3)
+
+  neighbours(g, 1)
+  |> expect.to_equal([3, 2])
+}
+
+pub fn strongly_connected_components_test() {
   // Test case 1: Acyclic graph
   let graph =
     new()

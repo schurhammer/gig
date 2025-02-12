@@ -1,5 +1,4 @@
 import gig/graph
-import gleam/io
 
 import glance as g
 

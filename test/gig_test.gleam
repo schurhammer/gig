@@ -23,6 +23,7 @@ pub fn all_samples_tests() {
   let tests =
     files
     |> list.filter(fn(file) { string.ends_with(file, ".gleam") })
+    |> list.filter(fn(file) { !string.ends_with(file, ".polyfill.gleam") })
     |> list.sort(string.compare)
     |> list.map(fn(file) { sample_test(file) })
   describe("samples", tests)
@@ -40,7 +41,7 @@ fn sample_test(file) {
         string.split(content, "\n")
         |> list.filter_map(fn(x) {
           case string.starts_with(x, "//// ") {
-            True -> Ok(string.drop_left(x, 5))
+            True -> Ok(string.drop_start(x, 5))
             False -> Error(Nil)
           }
         })
@@ -61,7 +62,7 @@ fn sample_test(file) {
         string.split(content, "\n")
         |> list.filter_map(fn(x) {
           case string.starts_with(x, "//// ") {
-            True -> Ok(string.drop_left(x, 5))
+            True -> Ok(string.drop_start(x, 5))
             False -> Error(Nil)
           }
         })

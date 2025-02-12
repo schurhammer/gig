@@ -10,6 +10,7 @@ import gig/normalise.{
 }
 import gig/type_graph
 import gleam/io
+import gleam/order
 
 import gig/graph
 
@@ -523,7 +524,14 @@ pub fn module(mod: Module) -> String {
       let assert Ok(x) = list.find(mod.types, fn(x) { x.name == name })
       x
     })
-    |> list.sort(fn(x, y) { bool.compare(x.pointer, y.pointer) })
+    |> list.sort(fn(a, b) {
+      case a.pointer, b.pointer {
+        True, True -> order.Eq
+        True, False -> order.Gt
+        False, False -> order.Eq
+        False, True -> order.Lt
+      }
+    })
 
   let type_decl =
     list.map(types, custom_type_forward)

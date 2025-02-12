@@ -15,6 +15,8 @@ pub type String
 
 pub type BitArray
 
+pub type UtfCodepoint
+
 pub type Result(a, b) {
   Ok(value: a)
   Error(value: b)
@@ -39,6 +41,10 @@ pub fn negate_bool(b: Bool) -> Bool
 @monomorphise()
 @external(c, "", "eq")
 pub fn eq(a: a, b: a) -> Bool
+
+@monomorphise()
+@external(c, "", "builtin_compare")
+pub fn builtin_compare(a: a, b: a) -> Int
 
 // Int Operators
 
