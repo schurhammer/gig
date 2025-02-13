@@ -1270,7 +1270,7 @@ fn infer_pattern(
       let arguments = list.reverse(arguments)
 
       // handle labels
-      let ordered_arguments = resolve_labels_ordered(arguments, labels)
+      let ordered_arguments = match_labels(arguments, labels)
       let arg_types = list.map(ordered_arguments, fn(x) { x.typ })
 
       // handle 0 parameter variants are not functions
@@ -1396,22 +1396,13 @@ fn infer_body(
                   [assignment, ..body]
                 })
               let callback = g.Fn(params, None, body)
-              let field = case fun {
-                g.Variable(fun) -> {
-                  let assert Ok(fun) = resolve_unqualified_name(c, n, fun)
-                  case fun {
-                    ResolvedGlobal(global) ->
-                      case global {
-                        FunctionGlobal(labels:, ..) ->
-                          case list.last(labels) {
-                            Ok(Some(label)) -> g.LabelledField(label, callback)
-                            _ -> g.UnlabelledField(callback)
-                          }
-                        _ -> g.UnlabelledField(callback)
-                      }
+              let assert Ok(#(_, ifun)) = infer_expression(c, n, fun)
+              let field = case ifun {
+                Function(labels:, ..) ->
+                  case list.last(labels) {
+                    Ok(Some(label)) -> g.LabelledField(label, callback)
                     _ -> g.UnlabelledField(callback)
                   }
-                }
                 _ -> g.UnlabelledField(callback)
               }
               let call = g.Call(fun, list.append(args, [field]))
@@ -1426,33 +1417,28 @@ fn infer_body(
   }
 }
 
-fn resolve_labels_ordered(args: List(Field(a)), params: List(Option(String))) {
-  // unify by position until reaching a labeled arg, at which point switch to unify_labels
-  case args, params {
-    [], [] -> []
-    [], _ -> panic as "not enough arguments"
-    _, [] -> panic as "too many arguments"
-    [a, ..a_rest], [_p, ..p_rest] ->
-      case a.label {
-        Some(_) -> resolve_labels(args, params)
-        None -> [a.item, ..resolve_labels_ordered(a_rest, p_rest)]
-      }
-  }
-}
-
-fn resolve_labels(args: List(Field(a)), params: List(Option(String))) {
+fn match_labels(args: List(Field(a)), params: List(Option(String))) -> List(a) {
   // find the labels in the order specified by parameters
+  // either we find the matching label or default to the first unlabelled arg
   case params {
-    [] -> []
+    [] ->
+      case args {
+        [] -> []
+        _ -> panic as "too many arguments"
+      }
     [p, ..p_rest] ->
       case list.pop(args, fn(a) { a.label == p }) {
-        Ok(#(a, a_rest)) -> [a.item, ..resolve_labels(a_rest, p_rest)]
-        Error(_) -> panic as { "no matching label" }
+        Ok(#(a, a_rest)) -> [a.item, ..match_labels(a_rest, p_rest)]
+        Error(_) ->
+          case list.pop(args, fn(a) { a.label == None }) {
+            Ok(#(a, a_rest)) -> [a.item, ..match_labels(a_rest, p_rest)]
+            Error(_) -> panic as "no matching label"
+          }
       }
   }
 }
 
-fn resolve_labels_optional(args: List(Field(a)), params: List(Option(String))) {
+fn match_labels_optional(args: List(Field(a)), params: List(Option(String))) {
   // find the labels in the order specified by parameters
   case params {
     [] -> []
@@ -1460,9 +1446,9 @@ fn resolve_labels_optional(args: List(Field(a)), params: List(Option(String))) {
       case list.pop(args, fn(a) { a.label == p }) {
         Ok(#(a, a_rest)) -> [
           Some(a.item),
-          ..resolve_labels_optional(a_rest, p_rest)
+          ..match_labels_optional(a_rest, p_rest)
         ]
-        Error(_) -> [None, ..resolve_labels_optional(args, p_rest)]
+        Error(_) -> [None, ..match_labels_optional(args, p_rest)]
       }
   }
 }
@@ -1666,7 +1652,7 @@ fn infer_expression(
       let updated_fields = list.reverse(updated_fields)
 
       let fields = list.map(updated_fields, fn(x) { Field(Some(x.0), x.1) })
-      let ordered_fields = resolve_labels_optional(fields, labels)
+      let ordered_fields = match_labels_optional(fields, labels)
       let assert Ok(ordered_fields) =
         list.strict_zip(ordered_fields, constructor_args)
       let #(c, ordered_fields) =
@@ -1791,7 +1777,7 @@ fn infer_expression(
         Function(labels:, ..) -> labels
         _ -> list.map(args, fn(_) { None })
       }
-      let ordered_args = resolve_labels_ordered(args, labels)
+      let ordered_args = match_labels(args, labels)
       let arg_types = list.map(ordered_args, fn(x) { x.typ })
 
       // unify the function type with the types of args
