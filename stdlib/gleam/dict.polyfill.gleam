@@ -36,14 +36,14 @@ pub fn clear(tree: Dict(k, v)) -> Dict(k, v) {
 /// Inserts a new key-value pair into the map.
 /// If the key already exists, its associated value is updated with the new value.
 /// Time complexity: O(log n)
-pub fn insert(tree: Dict(k, v), key: k, value: v) -> Dict(k, v) {
+pub fn insert(into tree: Dict(k, v), for key: k, insert value: v) -> Dict(k, v) {
   Dict(blacken(ins(tree.root, #(key, value))))
 }
 
 // TODO is this O(1) amortised?
 /// Removes a key-value pair from the map, if the key exists.
 /// Time complexity: O(log n)
-pub fn delete(tree: Dict(k, v), key: k) -> Dict(k, v) {
+pub fn delete(from tree: Dict(k, v), delete key: k) -> Dict(k, v) {
   Dict(del(redden(tree.root), key))
 }
 

@@ -1,6 +1,7 @@
 import glance
 import gleam/dict
 import gleam/list
+import gleam/option.{None, Some}
 
 pub fn apply(module: glance.Module, polyfill: glance.Module) -> glance.Module {
   // polyfill imports
@@ -41,13 +42,14 @@ pub fn apply(module: glance.Module, polyfill: glance.Module) -> glance.Module {
     |> list.map(fn(f) { #(f.definition.name, f) })
     |> dict.from_list()
 
-  let polyfill_functions =
-    polyfill.functions
-    |> list.map(fn(f) { #(f.definition.name, f) })
-    |> dict.from_list()
-
   let merged_functions =
-    dict.merge(functions, polyfill_functions)
+    list.fold(polyfill.functions, functions, fn(funs, i) {
+      case dict.get(funs, i.definition.name) {
+        Ok(existing) -> check_matching_args(existing.definition, i.definition)
+        Error(_) -> Nil
+      }
+      dict.insert(funs, i.definition.name, i)
+    })
     |> dict.values()
 
   // polyfill custom types
@@ -102,4 +104,39 @@ pub fn apply(module: glance.Module, polyfill: glance.Module) -> glance.Module {
     type_aliases: merged_type_aliases,
     imports: merged_imports,
   )
+}
+
+fn check_matching_args(af: glance.Function, bf: glance.Function) {
+  let args = case list.strict_zip(af.parameters, bf.parameters) {
+    Ok(args) -> args
+    Error(_) -> {
+      panic as { "polyfill should have matching parameters. \n at " <> bf.name }
+    }
+  }
+  list.each(args, fn(arg) {
+    let #(a, b) = arg
+    let a_label = case a.label {
+      Some(label) -> label
+      None -> "None"
+    }
+    let b_label = case b.label {
+      Some(label) -> label
+      None -> "None"
+    }
+    case a.label == b.label {
+      False -> {
+        panic as {
+          "polyfill should have matching labels. \n at "
+          <> bf.name
+          <> " "
+          <> a_label
+          <> "!="
+          <> b_label
+        }
+      }
+      True -> Nil
+    }
+    Nil
+  })
+  Nil
 }

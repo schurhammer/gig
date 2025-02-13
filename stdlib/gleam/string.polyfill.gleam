@@ -46,10 +46,15 @@ pub fn concat(strings: List(String)) -> String {
     }
 }
 
+fn unsafe_int_to_utf_codepoint(a: Int) -> UtfCodepoint
+
 fn do_to_utf_codepoints(string: String) -> List(UtfCodepoint) {
   todo
 }
 
-fn to_utf_codepoints_loop(string: String) -> List(UtfCodepoint) {
+fn to_utf_codepoints_loop(
+  bit_array: BitArray,
+  acc: List(UtfCodepoint),
+) -> List(UtfCodepoint) {
   todo
 }
