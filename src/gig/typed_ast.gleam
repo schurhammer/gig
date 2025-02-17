@@ -165,7 +165,8 @@ pub type Expression {
   Call(
     typ: Type,
     function: Expression,
-    arguments: List(Field(Expression)),
+    // TODO provide args in original order
+    // arguments: List(Field(Expression)),
     ordered_arguments: List(Expression),
   )
   TupleIndex(typ: Type, tuple: Expression, index: Int)
@@ -1720,6 +1721,24 @@ fn infer_expression(
       // infer the type of the function
       use #(c, fun) <- try(infer_expression(c, n, fun))
 
+      // handle labels
+      let labels = case fun {
+        Function(labels:, ..) -> labels
+        _ -> list.map(args, fn(_) { None })
+      }
+
+      let args =
+        list.map(args, fn(arg) {
+          let #(label, arg) = case arg {
+            g.LabelledField(label, item) -> #(Some(label), item)
+            g.ShorthandField(label) -> #(Some(label), g.Variable(label))
+            g.UnlabelledField(item) -> #(None, item)
+          }
+          Field(label, arg)
+        })
+
+      let args = match_labels(args, labels)
+
       // use fun parameter type as type hints for inferring arguments
       let args = case resolve_type(c, fun.typ) {
         FunctionType(params, _ret) -> {
@@ -1735,12 +1754,8 @@ fn infer_expression(
         list.try_fold(args, #(c, []), fn(acc, item) {
           let #(hint, arg) = item
           let #(c, args) = acc
-          let #(label, arg) = case arg {
-            g.LabelledField(label, item) -> #(Some(label), item)
-            g.ShorthandField(label) -> #(Some(label), g.Variable(label))
-            g.UnlabelledField(item) -> #(None, item)
-          }
 
+          // give type hint when arg is a fn
           let result = case arg, hint {
             g.Fn(parameters, return, body), Some(hint) ->
               infer_fn(c, n, parameters, return, body, Some(hint))
@@ -1752,24 +1767,17 @@ fn infer_expression(
             Some(hint) -> unify(c, hint, arg.typ)
             None -> c
           }
-          Ok(#(c, [Field(label, arg), ..args]))
+          Ok(#(c, [arg, ..args]))
         }),
       )
       let args = list.reverse(args)
-
-      // handle labels
-      let labels = case fun {
-        Function(labels:, ..) -> labels
-        _ -> list.map(args, fn(_) { None })
-      }
-      let ordered_args = match_labels(args, labels)
-      let arg_types = list.map(ordered_args, fn(x) { x.typ })
+      let arg_types = list.map(args, fn(x) { x.typ })
 
       // unify the function type with the types of args
       let #(c, typ) = new_type_var_ref(c)
       let c = unify(c, fun.typ, FunctionType(arg_types, typ))
 
-      Ok(#(c, Call(typ, fun, args, ordered_args)))
+      Ok(#(c, Call(typ, fun, args)))
     }
     g.TupleIndex(tuple, index) -> {
       use #(c, tuple) <- try(infer_expression(c, n, tuple))

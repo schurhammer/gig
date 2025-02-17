@@ -320,7 +320,6 @@ fn index_bit_array(options, subject, offset) {
             "slice_bit_array",
             [],
           ),
-          [t.Field(None, subject)],
           [
             subject,
             t.Int(t.int_type, int.to_string(offset)),
@@ -346,7 +345,6 @@ fn index_bit_array(options, subject, offset) {
             "index_bit_array_int",
             [],
           ),
-          [t.Field(None, subject)],
           [
             subject,
             t.Int(t.int_type, int.to_string(offset)),
@@ -582,7 +580,6 @@ fn lower_pattern_match(
             "length_bit_array",
             [],
           ),
-          [t.Field(None, subject)],
           [subject],
         )
 
@@ -769,10 +766,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let getter = Global(getter_typ, getter_name)
       Call(typ, getter, [container])
     }
-    t.Call(typ, function, _, ordered_arguments) -> {
+    t.Call(typ, function, args) -> {
       let typ = map_type(c, typ)
       let function = lower_expression(c, function)
-      let arguments = list.map(ordered_arguments, lower_expression(c, _))
+      let arguments = list.map(args, lower_expression(c, _))
       Call(typ, function, arguments)
     }
     t.TupleIndex(typ, tuple, index) -> {
@@ -963,8 +960,8 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
       let function_name = case name {
-        g.And -> "and_bool"
-        g.Or -> "or_bool"
+        g.And -> panic as "and_bool"
+        g.Or -> panic as "or_bool"
         g.Eq -> "eq"
         g.NotEq -> "not_eq"
         g.LtInt -> "lt_int"
@@ -975,7 +972,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         g.GtInt -> "gt_int"
         g.GtEqFloat -> "gte_float"
         g.GtFloat -> "gt_float"
-        g.Pipe -> todo as "pipe"
+        g.Pipe -> panic as "pipe"
         g.AddInt -> "add_int"
         g.AddFloat -> "add_float"
         g.SubInt -> "sub_int"
