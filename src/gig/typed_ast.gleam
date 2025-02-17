@@ -443,10 +443,38 @@ pub fn infer_module(
   // add types aliases to env so they can reference eachother
   let c =
     list.fold(module.type_aliases, c, fn(c, def) {
-      // TODO instead of type var, we can figure out the type just from the
-      // header (i.e. name + params), without inferring the constructors
       let #(c, typ) = new_type_var_ref(c)
       register_type(c, def.definition.name, Poly([], typ), [])
+    })
+
+  // infer type aliases fr fr
+  let #(c, aliases) =
+    list.fold(module.type_aliases, #(c, []), fn(acc, def) {
+      let #(c, aliases) = acc
+      // infer the alias type
+      let #(c, alias) = infer_alias_type(c, def.definition)
+
+      // update the placeholder
+      let assert Ok(#(_, placeholder, _)) =
+        resolve_global_type_name(c, c.current_module, alias.name)
+      let c = unify(c, alias.aliased.typ, placeholder.typ)
+
+      #(c, [#(def, alias), ..aliases])
+    })
+
+  // create alias entries
+  // we have to do this in two stages to make sure we genralize correctly
+  let c =
+    list.fold(aliases, c, fn(c, alias) {
+      let #(def, alias) = alias
+      // create alias entry
+      let poly = generalise(c, alias.aliased.typ)
+      let c = register_type(c, alias.name, poly, [])
+      let attrs = infer_attributes(c, def.attributes)
+      let def = Definition(attrs, alias)
+      update_module(c, fn(mod) {
+        Module(..mod, type_aliases: [def, ..mod.type_aliases])
+      })
     })
 
   // now infer custom types fr fr
@@ -467,19 +495,6 @@ pub fn infer_module(
       let def = Definition(attrs, custom)
       update_module(c, fn(mod) {
         Module(..mod, custom_types: [def, ..mod.custom_types])
-      })
-    })
-
-  // infer type aliases fr fr
-  let c =
-    list.fold(module.type_aliases, c, fn(c, def) {
-      let #(c, alias) = infer_alias_type(c, def.definition)
-      let poly = generalise(c, alias.aliased.typ)
-      let c = register_type(c, alias.name, poly, [])
-      let attrs = infer_attributes(c, def.attributes)
-      let def = Definition(attrs, alias)
-      update_module(c, fn(mod) {
-        Module(..mod, type_aliases: [def, ..mod.type_aliases])
       })
     })
 
