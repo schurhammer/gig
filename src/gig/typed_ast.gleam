@@ -439,7 +439,7 @@ pub fn infer_module(
       register_type(c, def.definition.name, typ, [])
     })
 
-  // add types aliases to env so they can reference eachother and themselves
+  // add types aliases to env so they can reference eachother
   let c =
     list.fold(module.type_aliases, c, fn(c, def) {
       // TODO instead of type var, we can figure out the type just from the
@@ -1582,44 +1582,7 @@ fn infer_expression(
       Ok(#(c, List(typ, elements, tail)))
     }
     g.Fn(parameters, return, body) -> {
-      // map parameters to FunctionParameter for code reuse
-      let parameters =
-        list.map(parameters, fn(p) {
-          g.FunctionParameter(None, p.name, p.type_)
-        })
-
-      let #(c, parameters, return) =
-        infer_function_parameters(c, parameters, return)
-
-      let #(c, return_type) = case return {
-        Some(x) -> #(c, x.typ)
-        None -> new_type_var_ref(c)
-      }
-
-      // put params into local env
-      let n =
-        list.fold(parameters, n, fn(n, param) {
-          case param.name {
-            Named(name) -> dict.insert(n, name, param.typ)
-            Discarded(_) -> n
-          }
-        })
-
-      // infer body
-      let #(c, body) = infer_body(c, n, body)
-
-      // compute function type
-      let parameter_types = list.map(parameters, fn(x) { x.typ })
-      let typ = FunctionType(parameter_types, return_type)
-
-      // unify the return type with the last statement
-      let c = case list.last(body) {
-        Ok(statement) -> unify(c, return_type, statement.typ)
-        Error(_) -> c
-      }
-
-      let fun = Fn(typ:, parameters:, return:, body:)
-      Ok(#(c, fun))
+      infer_fn(c, n, parameters, return, body, None)
     }
     g.RecordUpdate(module, constructor, expression, fields) -> {
       // Infer the type of the base record expression
@@ -1757,16 +1720,38 @@ fn infer_expression(
       // infer the type of the function
       use #(c, fun) <- try(infer_expression(c, n, fun))
 
+      // use fun parameter type as type hints for inferring arguments
+      let args = case resolve_type(c, fun.typ) {
+        FunctionType(params, _ret) -> {
+          let params = list.map(params, Some)
+          let assert Ok(args) = list.strict_zip(params, args)
+          args
+        }
+        _ -> list.map(args, fn(arg) { #(None, arg) })
+      }
+
       // infer the type of all args
       use #(c, args) <- try(
-        list.try_fold(args, #(c, []), fn(acc, field) {
+        list.try_fold(args, #(c, []), fn(acc, item) {
+          let #(hint, arg) = item
           let #(c, args) = acc
-          let #(label, item) = case field {
+          let #(label, arg) = case arg {
             g.LabelledField(label, item) -> #(Some(label), item)
             g.ShorthandField(label) -> #(Some(label), g.Variable(label))
             g.UnlabelledField(item) -> #(None, item)
           }
-          use #(c, arg) <- try(infer_expression(c, n, item))
+
+          let result = case arg, hint {
+            g.Fn(parameters, return, body), Some(hint) ->
+              infer_fn(c, n, parameters, return, body, Some(hint))
+            _, _ -> infer_expression(c, n, arg)
+          }
+          use #(c, arg) <- try(result)
+
+          let c = case hint {
+            Some(hint) -> unify(c, hint, arg.typ)
+            None -> c
+          }
           Ok(#(c, [Field(label, arg), ..args]))
         }),
       )
@@ -2014,6 +1999,58 @@ fn tuple_index_type(c: Context, elements: List(Type), index: Int) {
     _, [_, ..xs] -> tuple_index_type(c, xs, index - 1)
     _, _ -> panic as "tuple index out of bounds"
   }
+}
+
+fn infer_fn(
+  c: Context,
+  n,
+  parameters: List(g.FnParameter),
+  return: Option(g.Type),
+  body: List(g.Statement),
+  hint: Option(Type),
+) -> Result(#(Context, Expression), String) {
+  // map parameters to FunctionParameter for code reuse
+  let parameters =
+    list.map(parameters, fn(p) { g.FunctionParameter(None, p.name, p.type_) })
+
+  let #(c, parameters, return) =
+    infer_function_parameters(c, parameters, return)
+
+  let #(c, return_type) = case return {
+    Some(x) -> #(c, x.typ)
+    None -> new_type_var_ref(c)
+  }
+
+  // compute function type
+  let parameter_types = list.map(parameters, fn(x) { x.typ })
+  let typ = FunctionType(parameter_types, return_type)
+
+  // unify parameters with type hint
+  let c = case hint {
+    Some(hint) -> unify(c, typ, hint)
+    None -> c
+  }
+
+  // put params into local env
+  let n =
+    list.fold(parameters, n, fn(n, param) {
+      case param.name {
+        Named(name) -> dict.insert(n, name, param.typ)
+        Discarded(_) -> n
+      }
+    })
+
+  // infer body
+  let #(c, body) = infer_body(c, n, body)
+
+  // unify the return type with the last statement
+  let c = case list.last(body) {
+    Ok(statement) -> unify(c, return_type, statement.typ)
+    Error(_) -> c
+  }
+
+  let fun = Fn(typ:, parameters:, return:, body:)
+  Ok(#(c, fun))
 }
 
 type PolyEnv =

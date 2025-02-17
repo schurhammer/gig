@@ -15,7 +15,11 @@ pub fn run(c: t.Context, main_name: String) {
     t.Context(types: dict.new(), functions: dict.new(), externals: dict.new())
   let c = Context(in: c, out: oc)
 
-  let assert Ok(main) = dict.get(c.in.functions, main_name)
+  let main = case dict.get(c.in.functions, main_name) {
+    Ok(main) -> main
+    Error(_) -> panic as "main function not found"
+  }
+
   let typ = sub_type(c, [], main.typ.typ)
   let #(c, main_name) = instantiate_function(c, main_name, typ)
   #(c, main_name)

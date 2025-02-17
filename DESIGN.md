@@ -6,6 +6,7 @@ It is mostly just a place to keep my thoughts in order.
 ## Compiler flow
 
 - lexing & parsing (glance)
+- apply polyfills
 - process imports
 - type check
 - lower to core language
@@ -30,19 +31,25 @@ This has now been refactored into two passes due to the following motivations.
 
 In the type checker we pass around a Context object. This object contains
 the current state of the type checker.
+
 1. The name of the current module
 2. The type variable environment
-  - This is used to emulate mutable references. It is a map from Ref to TypeVar
-  - Ref is just a wrapper for a unique integer, used to look up reference cells
-  - TypeVar is either Bound with a type or Unbound with a type variable id
-  - A Type is either a VariableType or a concrete type. A VariableType holds a
-    Ref. We update the map entry corresponding to the Ref to simulate mutating a
-    mutable reference.
+
+- This is used to emulate mutable references. It is a map from Ref to TypeVar
+- Ref is just a wrapper for a unique integer, used to look up reference cells
+- TypeVar is either Bound with a type or Unbound with a type variable id
+- A Type is either a VariableType or a concrete type. A VariableType holds a
+  Ref. We update the map entry corresponding to the Ref to simulate mutating a
+  mutable reference.
+
 3. The modules map
-  - This lets you look up modules by name. Inside the modules is information
-    regarding what types and functions are defined.
+
+- This lets you look up modules by name. Inside the modules is information
+  regarding what types and functions are defined.
+
 4. The type uid
-  - This is used and incremented when creating a new type variable.
+
+- This is used and incremented when creating a new type variable.
 
 Type checking works by walking the AST and assigning types to each value or
 expression. This might be either a concrete type for things like literals or a
