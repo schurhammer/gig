@@ -37,6 +37,8 @@ fn read_file(name) {
 }
 
 fn include_sources(src_dir: String) {
+  // TODO instead of copying files we could create an index of where to find them
+
   io.println("Sources " <> src_dir)
   let assert Ok(files) = simplifile.get_files(src_dir)
 

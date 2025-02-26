@@ -14,11 +14,13 @@ version = "1.0.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.39.0"
-glance = ">= 2.0.0 and < 3.0.0"
 pprint = ">= 1.0.3 and < 2.0.0"
 shellout = ">= 1.6.0 and < 2.0.0"
 startest = ">= 0.2.4 and < 1.0.0"
 argv = ">= 1.0.2 and < 2.0.0"
 simplifile = ">= 2.0.0"
+
+glance = ">= 3.0.0 and < 4.0.0"
+# glance = { path = "../glance" }
 
 [dev-dependencies]

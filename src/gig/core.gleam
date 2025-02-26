@@ -394,7 +394,7 @@ fn lower_pattern_bindings(
       let pattern = lower_pattern_bindings(c, pattern, subject)
       [#(name, subject), ..pattern]
     }
-    t.PatternConcatenate(typ, left, right) -> todo
+    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> todo
     t.PatternBitString(typ, segs) -> {
       let #(total_size, segs) =
         list.fold(segs, #(0, []), fn(acc, seg) {
@@ -545,7 +545,8 @@ fn lower_pattern_match(
       lower_pattern_match(c, list, subject)
     }
     t.PatternAssignment(typ, pattern, name) -> true_value
-    t.PatternConcatenate(typ, left, right) -> todo as "PatternConcatenate"
+    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) ->
+      todo as "PatternConcatenate"
     t.PatternBitString(typ, segs) -> {
       let #(total_size, rest, data_match) =
         list.fold(segs, #(0, False, true_value), fn(acc, seg) {

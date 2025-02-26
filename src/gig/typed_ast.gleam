@@ -104,7 +104,12 @@ pub type Pattern {
   PatternTuple(typ: Type, elems: List(Pattern))
   PatternList(typ: Type, elements: List(Pattern), tail: Option(Pattern))
   PatternAssignment(typ: Type, pattern: Pattern, name: String)
-  PatternConcatenate(typ: Type, left: String, right: AssignmentName)
+  PatternConcatenate(
+    typ: Type,
+    prefix: String,
+    prefix_name: Option(AssignmentName),
+    suffix_name: AssignmentName,
+  )
   PatternBitString(
     typ: Type,
     segments: List(#(Pattern, List(BitStringSegmentOption(Pattern)))),
@@ -1191,9 +1196,19 @@ fn infer_pattern(
 
       #(c, n, pattern)
     }
-    g.PatternConcatenate(left, right) -> {
-      // If it's not discarded, add right as a string variable
-      let #(n, right) = case right {
+    g.PatternConcatenate(prefix, prefix_name, suffix_name) -> {
+      // Add prefix_name to the environment if applicable
+      let #(n, prefix_name) = case prefix_name {
+        Some(g.Named(name)) -> {
+          let n = dict.insert(n, name, string_type)
+          #(n, Some(Named(name)))
+        }
+        Some(g.Discarded(name)) -> #(n, Some(Discarded(name)))
+        None -> #(n, None)
+      }
+
+      // Add suffix_name to the environment if applicable
+      let #(n, suffix_name) = case suffix_name {
         g.Named(name) -> {
           let n = dict.insert(n, name, string_type)
           #(n, Named(name))
@@ -1201,8 +1216,8 @@ fn infer_pattern(
         g.Discarded(name) -> #(n, Discarded(name))
       }
 
-      // Create the concatenation pattern
-      let pattern = PatternConcatenate(string_type, left, right)
+      let pattern =
+        PatternConcatenate(string_type, prefix, prefix_name, suffix_name)
 
       #(c, n, pattern)
     }
@@ -1454,7 +1469,10 @@ fn match_labels(args: List(Field(a)), params: List(Option(String))) -> List(a) {
   }
 }
 
-fn match_labels_optional(args: List(Field(a)), params: List(Option(String))) {
+fn match_labels_optional(
+  args: List(Field(a)),
+  params: List(Option(String)),
+) -> List(Option(a)) {
   // find the labels in the order specified by parameters
   case params {
     [] -> []

@@ -87,11 +87,16 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
       list.flat_map(args, fn(x) {
         pattern_bindings(field_item(x, g.PatternVariable))
       })
-    g.PatternConcatenate(_prefix, binding) -> {
-      case binding {
-        g.Discarded(_) -> []
-        g.Named(name) -> [name]
+    g.PatternConcatenate(_prefix, prefix_name, rest_name) -> {
+      let prefix = case prefix_name {
+        Some(g.Named(name)) -> [name]
+        _ -> []
       }
+      let rest = case rest_name {
+        g.Named(name) -> [name]
+        _ -> []
+      }
+      combine_env(prefix, rest)
     }
   }
 }
