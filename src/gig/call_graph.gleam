@@ -11,13 +11,24 @@ type Graph =
 type Env =
   List(String)
 
-pub fn create(module: g.Module) {
+pub fn function_graph(module: g.Module) {
   let g =
     list.fold(module.functions, graph.new(), fn(g, f) {
       graph.insert_node(g, f.definition.name)
     })
 
   list.fold(module.functions, g, fn(g, f) { walk_function(g, [], f.definition) })
+}
+
+pub fn constant_graph(module: g.Module) {
+  let g =
+    list.fold(module.constants, graph.new(), fn(g, f) {
+      graph.insert_node(g, f.definition.name)
+    })
+
+  list.fold(module.constants, g, fn(g, f) {
+    walk_expression(g, [], f.definition.name, f.definition.value)
+  })
 }
 
 fn combine_env(a: Env, b: Env) -> Env {

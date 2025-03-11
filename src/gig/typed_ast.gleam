@@ -503,9 +503,18 @@ pub fn infer_module(
       })
     })
 
+  let constants =
+    call_graph.constant_graph(module)
+    |> graph.strongly_connected_components()
+    |> list.flatten()
+    |> list.filter_map(fn(name) {
+      module.constants
+      |> list.find(fn(c) { c.definition.name == name })
+    })
+
   // infer constant expressions
   let c =
-    list.fold(module.constants, c, fn(c, def) {
+    list.fold(constants, c, fn(c, def) {
       let #(c, constant) = infer_constant(c, def.definition)
       let poly = generalise(c, constant.value.typ)
       let c = register_constant(c, constant.name, poly, constant.value)
@@ -519,7 +528,7 @@ pub fn infer_module(
   // create a function call graph to group mutually recursive functions
   // these will be type checked/inferred together as a group
   let rec_groups =
-    call_graph.create(module)
+    call_graph.function_graph(module)
     |> graph.strongly_connected_components()
 
   list.fold(rec_groups, c, fn(c, group) {
@@ -1301,7 +1310,28 @@ fn infer_pattern(
       let arguments = list.reverse(arguments)
 
       // handle labels
-      let ordered_arguments = match_labels(arguments, labels)
+      let #(c, ordered_arguments) = case with_spread {
+        True -> {
+          let #(c, args) =
+            match_labels_optional(arguments, labels)
+            |> list.fold(#(c, []), fn(acc, opt) {
+              let #(c, opts) = acc
+              let #(c, opt) = case opt {
+                Some(opt) -> #(c, opt)
+                None -> {
+                  let #(c, typ) = new_type_var_ref(c)
+                  #(c, PatternDiscard(typ, ""))
+                }
+              }
+              #(c, [opt, ..opts])
+            })
+          #(c, list.reverse(args))
+        }
+        False -> {
+          let args = match_labels(arguments, labels)
+          #(c, args)
+        }
+      }
       let arg_types = list.map(ordered_arguments, fn(x) { x.typ })
 
       // handle 0 parameter variants are not functions
