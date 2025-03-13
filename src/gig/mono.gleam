@@ -1,6 +1,6 @@
 import gig/core as t
 import gig/gen_names
-import gleam/dict.{type Dict}
+import gleam/dict
 
 import gleam/io
 import gleam/list

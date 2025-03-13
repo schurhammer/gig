@@ -459,7 +459,7 @@ pub fn infer_module(
       // infer the alias type
       let #(c, alias) = infer_alias_type(c, def.definition)
 
-      // update the placeholder
+      // update the placeholder type
       let assert Ok(#(_, placeholder, _)) =
         resolve_global_type_name(c, c.current_module, alias.name)
       let c = unify(c, alias.aliased.typ, placeholder.typ)
@@ -546,19 +546,34 @@ pub fn infer_module(
         register_function(c, def.definition.name, Poly([], typ), labels)
       })
 
-    // infer types for each function
+    // infer types for the group
     let #(c, group) =
       list.fold(group, #(c, []), fn(acc, def) {
         let #(c, group) = acc
+
+        // infer function
         let #(c, fun) = infer_function(c, def.definition)
         let attrs = infer_attributes(c, def.attributes)
         let def = Definition(attrs, fun)
+
         #(c, [def, ..group])
       })
 
-    // update context with fully inferred function
+    // generalise
     list.fold(group, c, fn(c, def) {
       let fun = def.definition
+
+      // unify placeholder type
+      let assert Ok(placeholder) =
+        resolve_global_name(c, c.current_module, fun.name)
+      let c = unify(c, placeholder.typ.typ, fun.typ.typ)
+
+      // generalise
+      let typ = generalise(c, fun.typ.typ)
+      let fun = FunctionDefinition(..fun, typ:)
+      let def = Definition(..def, definition: fun)
+
+      // update context
       let labels = list.map(fun.parameters, fn(f) { f.label })
       let c = register_function(c, fun.name, fun.typ, labels)
       update_module(c, fn(mod) {
@@ -721,7 +736,7 @@ fn infer_function(c: Context, fun: g.Function) -> #(Context, FunctionDefinition)
 
   let location = Span(fun.location.start, fun.location.end)
 
-  let typ = generalise(c, typ)
+  let typ = Poly([], typ)
 
   let fun =
     FunctionDefinition(
@@ -1722,7 +1737,7 @@ fn infer_expression(
         // field access must be on a named type
         let value_typ = case resolve_type(c, value.typ) {
           NamedType(type_name, module, _) -> Ok(#(type_name, module))
-          _ -> Error("Field access attempted on invalid type.")
+          _ -> Error("Field access attempted on invalid type. ")
         }
         use #(type_name, module) <- try(value_typ)
 
@@ -1772,7 +1787,7 @@ fn infer_expression(
                   let #(c, typ) = instantiate(c, poly)
                   Ok(#(c, Constant(typ, module, name, value)))
                 }
-                Error(e) -> Error(e)
+                Error(_) -> Error(e)
               }
             }
             _ -> Error(e)
@@ -2074,7 +2089,7 @@ fn tuple_index_type(c: Context, elements: List(Type), index: Int) {
 
 fn infer_fn(
   c: Context,
-  n,
+  n: Dict(String, Type),
   parameters: List(g.FnParameter),
   return: Option(g.Type),
   body: List(g.Statement),
@@ -2278,7 +2293,7 @@ fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
 }
 
 /// follow any references to get the real type
-fn resolve_type(c: Context, typ: Type) {
+pub fn resolve_type(c: Context, typ: Type) {
   case typ {
     VariableType(x) -> {
       let assert Ok(x) = dict.get(c.type_vars, x)
@@ -2290,5 +2305,26 @@ fn resolve_type(c: Context, typ: Type) {
     NamedType(..) -> typ
     FunctionType(..) -> typ
     TupleType(..) -> typ
+  }
+}
+
+pub fn resolve_type_deep(c: Context, typ: Type) {
+  case typ {
+    VariableType(x) -> {
+      let assert Ok(x) = dict.get(c.type_vars, x)
+      case x {
+        Bound(x) -> resolve_type_deep(c, x)
+        Unbound(..) -> typ
+      }
+    }
+    NamedType(name, mod, args) ->
+      NamedType(name, mod, list.map(args, resolve_type_deep(c, _)))
+    FunctionType(args, ret) ->
+      FunctionType(
+        list.map(args, resolve_type_deep(c, _)),
+        resolve_type_deep(c, ret),
+      )
+    TupleType(elements) ->
+      TupleType(list.map(elements, resolve_type_deep(c, _)))
   }
 }
