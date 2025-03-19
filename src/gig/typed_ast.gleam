@@ -541,9 +541,22 @@ pub fn infer_module(
     // add functions to global env so they are available for recursion
     let c =
       list.fold(group, c, fn(c, def) {
-        let #(c, typ) = new_type_var_ref(c)
-        let labels = list.map(def.definition.parameters, fn(f) { f.label })
-        register_function(c, def.definition.name, Poly([], typ), labels)
+        let fun = def.definition
+
+        // create placeholder function type based on function signature
+        let #(c, parameters, return) =
+          infer_function_parameters(c, fun.parameters, fun.return)
+
+        let #(c, return_type) = case return {
+          Some(x) -> #(c, x.typ)
+          None -> new_type_var_ref(c)
+        }
+
+        let param_types = list.map(parameters, fn(param) { param.typ })
+        let param_labels = list.map(parameters, fn(f) { f.label })
+        let typ = FunctionType(param_types, return_type)
+
+        register_function(c, def.definition.name, Poly([], typ), param_labels)
       })
 
     // infer types for the group
@@ -1748,7 +1761,8 @@ fn infer_expression(
 
         // access only works with one variant
         let variant = case custom.definition.variants {
-          [variant] -> Ok(variant)
+          // TODO proper implementation checking all variants
+          [variant, ..] -> Ok(variant)
           _ -> Error("Field access attempted on type with multiple variants.")
         }
         use variant <- try(variant)
@@ -1826,7 +1840,6 @@ fn infer_expression(
         }
         _ -> list.map(args, fn(arg) { #(None, arg) })
       }
-
       // infer the type of all args
       use #(c, args) <- try(
         list.try_fold(args, #(c, []), fn(acc, item) {
@@ -1834,10 +1847,10 @@ fn infer_expression(
           let #(c, args) = acc
 
           // give type hint when arg is a fn
-          let result = case arg, hint {
-            g.Fn(parameters, return, body), Some(hint) ->
-              infer_fn(c, n, parameters, return, body, Some(hint))
-            _, _ -> infer_expression(c, n, arg)
+          let result = case arg {
+            g.Fn(parameters, return, body) ->
+              infer_fn(c, n, parameters, return, body, hint)
+            _ -> infer_expression(c, n, arg)
           }
           use #(c, arg) <- try(result)
 
@@ -1850,11 +1863,9 @@ fn infer_expression(
       )
       let args = list.reverse(args)
       let arg_types = list.map(args, fn(x) { x.typ })
-
       // unify the function type with the types of args
       let #(c, typ) = new_type_var_ref(c)
       let c = unify(c, fun.typ, FunctionType(arg_types, typ))
-
       Ok(#(c, Call(typ, fun, args)))
     }
     g.TupleIndex(tuple, index) -> {
