@@ -2,6 +2,7 @@ import gig/gen_names.{get_id}
 import gig/typed_ast as t
 import gleam/dict.{type Dict}
 import gleam/io
+import gleam/result
 import pprint
 
 import glance as g
@@ -283,31 +284,59 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
   }
 }
 
-fn index_bit_array(options, subject, offset) {
-  let #(size, bits) =
-    list.fold(options, #(-1, False), fn(acc, option) {
-      let #(size, bits) = acc
+type BitArrayMode {
+  BitsMode
+  BytesMode
+  IntMode
+}
+
+fn index_bit_array(
+  options: List(t.BitStringSegmentOption(t.Pattern)),
+  subject: t.Expression,
+  offset: t.Expression,
+) -> #(t.Expression, Bool, t.Expression) {
+  let mode =
+    list.find_map(options, fn(option) {
       case option {
-        t.BytesOption | t.BitsOption -> #(size, True)
-        t.SizeOption(size) -> #(size, bits)
-        t.SizeValueOption(e) -> {
-          case e {
-            t.PatternInt(_, size) -> {
-              let assert Ok(size) = int.parse(size)
-              #(size, bits)
-            }
-            _ -> todo
-          }
+        t.BytesOption -> Ok(BytesMode)
+        t.BitsOption -> Ok(BitsMode)
+        t.IntOption -> Ok(IntMode)
+        t.FloatOption -> todo as "FloatOption"
+        t.Utf8Option -> todo as "Utf8Option"
+        t.Utf16Option -> todo as "Utf16Option"
+        t.Utf32Option -> todo as "Utf32Option"
+        t.Utf8CodepointOption -> todo as "Utf8CodepointOption"
+        t.Utf16CodepointOption -> todo as "Utf16CodepointOption"
+        t.Utf32CodepointOption -> todo as "Utf32CodepointOption"
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(IntMode)
+
+  let size =
+    list.find_map(options, fn(option) {
+      case option {
+        t.SizeOption(value) -> {
+          Ok(t.Int(t.int_type, int.to_string(value)))
         }
-        _ -> todo
+        t.SizeValueOption(t.PatternInt(_, value)) -> {
+          Ok(t.Int(t.int_type, value))
+        }
+        t.SizeValueOption(t.PatternVariable(_, value)) -> {
+          // TODO possibly global?
+          Ok(t.LocalVariable(t.int_type, value))
+        }
+        _ -> Error(Nil)
       }
     })
 
-  case bits {
-    True -> {
-      // slice_bit_array knows how to handle -1
-      // it is interpreted as "to the end"
-      // so we only set the size afterwards
+  case mode {
+    BitsMode | BytesMode -> {
+      let #(size, match_to_end) = case size {
+        Ok(size) -> #(size, False)
+        // -1 is interpreted as "to the end"
+        Error(_) -> #(t.Int(t.int_type, "-1"), True)
+      }
       let inner_subject =
         t.Call(
           t.bit_array_type,
@@ -320,18 +349,15 @@ fn index_bit_array(options, subject, offset) {
             "slice_bit_array",
             [],
           ),
-          [
-            subject,
-            t.Int(t.int_type, int.to_string(offset)),
-            t.Int(t.int_type, int.to_string(size)),
-          ],
+          [subject, offset, size],
         )
-      #(size, inner_subject)
+      #(size, match_to_end, inner_subject)
     }
-    False -> {
+    IntMode -> {
       let size = case size {
-        -1 -> 8
-        _ -> size
+        Ok(size) -> size
+        // default size is 8 bits
+        Error(_) -> t.Int(t.int_type, "8")
       }
       let inner_subject =
         t.Call(
@@ -345,13 +371,9 @@ fn index_bit_array(options, subject, offset) {
             "index_bit_array_int",
             [],
           ),
-          [
-            subject,
-            t.Int(t.int_type, int.to_string(offset)),
-            t.Int(t.int_type, int.to_string(size)),
-          ],
+          [subject, offset, size],
         )
-      #(size, inner_subject)
+      #(size, False, inner_subject)
     }
   }
 }
@@ -396,19 +418,16 @@ fn lower_pattern_bindings(
     }
     t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> todo
     t.PatternBitString(typ, segs) -> {
+      // TODO total size not used? can we remove the calculation?
       let #(total_size, segs) =
-        list.fold(segs, #(0, []), fn(acc, seg) {
+        list.fold(segs, #(t.Int(t.int_type, "0"), []), fn(acc, seg) {
           let #(offset, bindings) = acc
           let #(pattern, options) = seg
 
-          let #(size, inner_subject) = index_bit_array(options, subject, offset)
+          let #(size, _match_to_end, inner_subject) =
+            index_bit_array(options, subject, offset)
 
-          let size = case size {
-            -1 -> 0
-            _ -> size
-          }
-
-          let offset = offset + size
+          let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
           let new_binding = lower_pattern_bindings(c, pattern, inner_subject)
           #(offset, list.append(bindings, new_binding))
         })
@@ -548,29 +567,30 @@ fn lower_pattern_match(
     t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) ->
       todo as "PatternConcatenate"
     t.PatternBitString(typ, segs) -> {
-      let #(total_size, rest, data_match) =
-        list.fold(segs, #(0, False, true_value), fn(acc, seg) {
-          let #(offset, rest, match) = acc
-          let #(pattern, options) = seg
+      let #(total_size, match_to_end, data_match) =
+        list.fold(
+          segs,
+          #(t.Int(t.int_type, "0"), False, true_value),
+          fn(acc, seg) {
+            let #(offset, match_to_end, match) = acc
+            let #(pattern, options) = seg
 
-          let #(size, inner_subject) = index_bit_array(options, subject, offset)
+            case match_to_end {
+              True -> panic as "can not match after matching to end"
+              False -> Nil
+            }
 
-          let rest = case size {
-            -1 -> True
-            _ -> rest
-          }
-          let size = case size {
-            -1 -> 0
-            _ -> size
-          }
+            let #(size, match_to_end, inner_subject) =
+              index_bit_array(options, subject, offset)
 
-          let offset = offset + size
+            let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
 
-          let seg_match = lower_pattern_match(c, pattern, inner_subject)
-          let match = and_exp(seg_match, match)
+            let seg_match = lower_pattern_match(c, pattern, inner_subject)
+            let match = and_exp(seg_match, match)
 
-          #(offset, rest, match)
-        })
+            #(offset, match_to_end, match)
+          },
+        )
 
       let length_subject =
         t.Call(
@@ -584,16 +604,17 @@ fn lower_pattern_match(
           [subject],
         )
 
-      let length_match_op = case rest {
+      let length_match_op = case match_to_end {
         True -> g.GtEqInt
         False -> g.Eq
       }
+
       let length_match =
         t.BinaryOperator(
           t.bool_type,
           length_match_op,
           length_subject,
-          t.Int(t.int_type, int.to_string(total_size)),
+          total_size,
         )
       let length_match = lower_expression(c, length_match)
 

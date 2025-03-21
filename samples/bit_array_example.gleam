@@ -4,6 +4,7 @@
 //// 1
 //// 1
 //// 1
+//// 261
 
 import gleam/io
 
@@ -51,5 +52,11 @@ pub fn main() {
         }
       }
     _ -> io.debug(2)
+  }
+  let g = <<1, 2, 3>>
+  let x = 16
+  case g {
+    <<a:size(x), b>> -> io.debug(a + b)
+    _ -> io.debug(0)
   }
 }

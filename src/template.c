@@ -111,8 +111,8 @@ struct Closure {
 };
 
 void panic_exit() {
-    printf("panic\n");
-    exit(1);
+  printf("panic\n");
+  exit(1);
 }
 
 #define eq_Nil(a, b) True
