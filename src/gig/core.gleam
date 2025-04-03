@@ -3,6 +3,7 @@ import gig/typed_ast as t
 import gleam/dict.{type Dict}
 import gleam/io
 import gleam/result
+import gleam/string
 import pprint
 
 import glance as g
@@ -288,55 +289,203 @@ type BitArrayMode {
   BitsMode
   BytesMode
   IntMode
+  Utf8Mode
+}
+
+type Signedness {
+  Signed
+  Unsigned
+}
+
+type Endianness {
+  BigEndian
+  LittleEndian
+  NativeEndian
+}
+
+type Sizedness {
+  Sized(e: t.Expression)
+  Unsized
+}
+
+fn parse_bitstring_segment_expression(
+  value: t.Expression,
+  options: List(t.BitStringSegmentOption(t.Expression)),
+) {
+  let mode =
+    list.find_map(options, fn(option) {
+      case option {
+        t.BitsOption -> Ok(BitsMode)
+        t.BytesOption -> Ok(BytesMode)
+        t.FloatOption -> todo
+        t.IntOption -> Ok(IntMode)
+        t.Utf16CodepointOption -> todo
+        t.Utf16Option -> todo
+        t.Utf32CodepointOption -> todo
+        t.Utf32Option -> todo
+        t.Utf8CodepointOption -> todo
+        t.Utf8Option -> Ok(Utf8Mode)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(case value {
+      t.Int(typ, value) -> IntMode
+      t.Float(typ, value) -> todo
+      t.String(typ, value) -> Utf8Mode
+      _ -> IntMode
+    })
+
+  let size =
+    list.find_map(options, fn(option) {
+      case option {
+        t.SizeOption(size) -> Ok(Sized(t.Int(t.int_type, int.to_string(size))))
+        t.SizeValueOption(size) -> Ok(Sized(size))
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(case mode {
+      IntMode -> Sized(t.Int(t.int_type, "8"))
+      BitsMode -> Unsized
+      BytesMode -> Unsized
+      Utf8Mode -> Unsized
+    })
+
+  let unit =
+    list.find_map(options, fn(option) {
+      case option {
+        t.UnitOption(value) -> Ok(value)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(case mode {
+      BytesMode -> 8
+      _ -> 1
+    })
+
+  let signed =
+    list.find_map(options, fn(option) {
+      case option {
+        t.SignedOption -> Ok(Signed)
+        t.UnsignedOption -> Ok(Unsigned)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(Unsigned)
+
+  let endian =
+    list.find_map(options, fn(option) {
+      case option {
+        t.BigOption -> Ok(BigEndian)
+        t.LittleOption -> Ok(LittleEndian)
+        t.NativeOption -> Ok(NativeEndian)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(BigEndian)
+
+  #(mode, size, unit, signed, endian)
+}
+
+fn parse_bitstring_segment_pattern(
+  value: t.Pattern,
+  options: List(t.BitStringSegmentOption(t.Pattern)),
+) {
+  let mode =
+    list.find_map(options, fn(option) {
+      case option {
+        t.BitsOption -> Ok(BitsMode)
+        t.BytesOption -> Ok(BytesMode)
+        t.FloatOption -> todo
+        t.IntOption -> Ok(IntMode)
+        t.Utf16CodepointOption -> todo
+        t.Utf16Option -> todo
+        t.Utf32CodepointOption -> todo
+        t.Utf32Option -> todo
+        t.Utf8CodepointOption -> todo
+        t.Utf8Option -> Ok(Utf8Mode)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(case value {
+      t.PatternInt(typ, value) -> IntMode
+      t.PatternFloat(typ, value) -> todo
+      t.PatternString(typ, value) -> Utf8Mode
+      _ -> IntMode
+    })
+
+  let size =
+    list.find_map(options, fn(option) {
+      case option {
+        t.SizeOption(size) -> Ok(Sized(t.Int(t.int_type, int.to_string(size))))
+        t.SizeValueOption(pattern) ->
+          case pattern {
+            t.PatternInt(typ, value) -> Ok(Sized(t.Int(typ, value)))
+            t.PatternVariable(typ, value) ->
+              Ok(Sized(t.LocalVariable(typ, value)))
+            _ -> Error(Nil)
+          }
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(case mode {
+      IntMode -> Sized(t.Int(t.int_type, "8"))
+      BitsMode -> Unsized
+      BytesMode -> Unsized
+      Utf8Mode -> Unsized
+    })
+
+  let unit =
+    list.find_map(options, fn(option) {
+      case option {
+        t.UnitOption(value) -> Ok(value)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(case mode {
+      BytesMode -> 8
+      _ -> 1
+    })
+
+  let signed =
+    list.find_map(options, fn(option) {
+      case option {
+        t.SignedOption -> Ok(Signed)
+        t.UnsignedOption -> Ok(Unsigned)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(Unsigned)
+
+  let endian =
+    list.find_map(options, fn(option) {
+      case option {
+        t.BigOption -> Ok(BigEndian)
+        t.LittleOption -> Ok(LittleEndian)
+        t.NativeOption -> Ok(NativeEndian)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap(BigEndian)
+
+  #(mode, size, unit, signed, endian)
 }
 
 fn index_bit_array(
   options: List(t.BitStringSegmentOption(t.Pattern)),
   subject: t.Expression,
   offset: t.Expression,
+  expr: t.Pattern,
 ) -> #(t.Expression, Bool, t.Expression) {
-  let mode =
-    list.find_map(options, fn(option) {
-      case option {
-        t.BytesOption -> Ok(BytesMode)
-        t.BitsOption -> Ok(BitsMode)
-        t.IntOption -> Ok(IntMode)
-        t.FloatOption -> todo as "FloatOption"
-        t.Utf8Option -> todo as "Utf8Option"
-        t.Utf16Option -> todo as "Utf16Option"
-        t.Utf32Option -> todo as "Utf32Option"
-        t.Utf8CodepointOption -> todo as "Utf8CodepointOption"
-        t.Utf16CodepointOption -> todo as "Utf16CodepointOption"
-        t.Utf32CodepointOption -> todo as "Utf32CodepointOption"
-        _ -> Error(Nil)
-      }
-    })
-    |> result.unwrap(IntMode)
-
-  let size =
-    list.find_map(options, fn(option) {
-      case option {
-        t.SizeOption(value) -> {
-          Ok(t.Int(t.int_type, int.to_string(value)))
-        }
-        t.SizeValueOption(t.PatternInt(_, value)) -> {
-          Ok(t.Int(t.int_type, value))
-        }
-        t.SizeValueOption(t.PatternVariable(_, value)) -> {
-          // TODO possibly global?
-          Ok(t.LocalVariable(t.int_type, value))
-        }
-        _ -> Error(Nil)
-      }
-    })
+  let #(mode, size_value, unit, signed, endian) =
+    parse_bitstring_segment_pattern(expr, options)
 
   case mode {
     BitsMode | BytesMode -> {
-      let #(size, match_to_end) = case size {
-        Ok(size) -> #(size, False)
-        // -1 is interpreted as "to the end"
-        Error(_) -> #(t.Int(t.int_type, "-1"), True)
+      let #(size, match_to_end) = case size_value {
+        Sized(size) -> #(size, False)
+        Unsized -> #(t.Int(t.int_type, "-1"), True)
       }
+
       let inner_subject =
         t.Call(
           t.bit_array_type,
@@ -351,14 +500,38 @@ fn index_bit_array(
           ),
           [subject, offset, size],
         )
+
+      let size = case unit {
+        1 -> size
+        _ ->
+          t.BinaryOperator(
+            t.int_type,
+            g.MultInt,
+            size,
+            t.Int(t.int_type, int.to_string(unit)),
+          )
+      }
+
       #(size, match_to_end, inner_subject)
     }
+
     IntMode -> {
-      let size = case size {
-        Ok(size) -> size
-        // default size is 8 bits
-        Error(_) -> t.Int(t.int_type, "8")
+      let size = case size_value {
+        Sized(size) -> size
+        Unsized -> t.Int(t.int_type, "8")
       }
+
+      let size = case unit {
+        1 -> size
+        _ ->
+          t.BinaryOperator(
+            t.int_type,
+            g.MultInt,
+            size,
+            t.Int(t.int_type, int.to_string(unit)),
+          )
+      }
+
       let inner_subject =
         t.Call(
           t.int_type,
@@ -373,6 +546,39 @@ fn index_bit_array(
           ),
           [subject, offset, size],
         )
+
+      #(size, False, inner_subject)
+    }
+
+    Utf8Mode -> {
+      let size = case size_value {
+        Sized(_size) -> panic as "size not supported"
+        Unsized ->
+          case expr {
+            t.PatternString(_typ, s) ->
+              t.Int(t.int_type, int.to_string(8 * string.byte_size(s)))
+            _ -> {
+              // TODO actually need to read a utf8 char (variable size)?
+              t.Int(t.int_type, "8")
+            }
+          }
+      }
+
+      let inner_subject =
+        t.Call(
+          t.string_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type],
+              t.string_type,
+            ),
+            t.builtin,
+            "index_bit_array_string",
+            [],
+          ),
+          [subject, offset, size],
+        )
+
       #(size, False, inner_subject)
     }
   }
@@ -425,7 +631,7 @@ fn lower_pattern_bindings(
           let #(pattern, options) = seg
 
           let #(size, _match_to_end, inner_subject) =
-            index_bit_array(options, subject, offset)
+            index_bit_array(options, subject, offset, pattern)
 
           let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
           let new_binding = lower_pattern_bindings(c, pattern, inner_subject)
@@ -458,6 +664,8 @@ const nil_type = NamedType("Nil", [])
 const bool_type = NamedType("Bool", [])
 
 const int_type = NamedType("Int", [])
+
+const string_type = NamedType("String", [])
 
 const true_value = Literal(bool_type, Bool("True"))
 
@@ -581,7 +789,7 @@ fn lower_pattern_match(
             }
 
             let #(size, match_to_end, inner_subject) =
-              index_bit_array(options, subject, offset)
+              index_bit_array(options, subject, offset, pattern)
 
             let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
 
@@ -810,81 +1018,74 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let segs =
         list.map(segs, fn(seg) {
           let #(exp, options) = seg
+
+          let #(mode, size_value, unit, signed, endian) =
+            parse_bitstring_segment_expression(exp, options)
           let exp = lower_expression(c, exp)
-          let #(size) =
-            list.fold(options, #(OptionUnset), fn(acc, option) {
-              let #(size_option) = acc
-              let #(size) = case option {
-                t.BigOption -> todo
-                t.BytesOption | t.BitsOption -> {
+
+          let size = case size_value {
+            Sized(e) -> lower_expression(c, e)
+            Unsized ->
+              case mode {
+                IntMode -> Literal(int_type, Int("8"))
+                BitsMode | BytesMode -> {
                   let fun_type = FunctionType([typ], int_type)
                   let fun = Global(fun_type, "length_bit_array")
-                  let size = Call(int_type, fun, [exp])
-                  let size_option = update_option(size_option, OptionOpen(size))
-                  #(size_option)
+                  Call(int_type, fun, [exp])
                 }
-                t.FloatOption -> todo
-                t.IntOption -> todo
-                t.LittleOption -> todo
-                t.NativeOption -> todo
-                t.SignedOption -> todo
-                t.SizeOption(size) -> {
-                  let size = Literal(int_type, Int(int.to_string(size)))
-                  let size_option =
-                    update_option(size_option, OptionClosed(size))
-                  #(size_option)
-                }
-                t.SizeValueOption(e) -> {
-                  let size = lower_expression(c, e)
-                  let size_option =
-                    update_option(size_option, OptionClosed(size))
-                  #(size_option)
-                }
-                t.UnitOption(_) -> todo
-                t.UnsignedOption -> todo
-                t.Utf16CodepointOption -> todo
-                t.Utf16Option -> todo
-                t.Utf32CodepointOption -> todo
-                t.Utf32Option -> todo
-                t.Utf8CodepointOption -> todo
-                t.Utf8Option -> todo
+                Utf8Mode ->
+                  case exp {
+                    Literal(_, String(s)) ->
+                      Literal(
+                        int_type,
+                        Int(int.to_string(8 * string.byte_size(s))),
+                      )
+                    _ -> panic as "expected string value for utf8"
+                  }
               }
-              #(size)
-            })
-          let size = case size {
-            OptionClosed(x) -> x
-            OptionOpen(x) -> x
-            OptionUnset -> Literal(int_type, Int("8"))
           }
-          #(exp, size)
+
+          // Scale the size by the unit
+          let size = case unit {
+            1 -> size
+            _ -> {
+              let unit_size = Literal(int_type, Int(int.to_string(unit)))
+              let mul_typ = FunctionType([int_type, int_type], int_type)
+              let mul = Global(mul_typ, "mul_int")
+              Call(int_type, mul, [size, unit_size])
+            }
+          }
+
+          #(exp, size, mode, signed, endian)
         })
+
       let total_size =
         list.map(segs, fn(x) { x.1 })
         |> list.fold_right(Literal(int_type, Int("0")), add_exp)
+
       let body =
         list.fold_right(segs, Local(typ, "bit_array"), fn(exp, seg) {
-          let #(seg_value, seg_size) = seg
+          let #(seg_value, seg_size, mode, signed, endian) = seg
           let target = Local(typ, "bit_array")
           let offset = Local(int_type, "offset")
-          let write_call = case seg_value.typ {
-            NamedType("Int", []) -> {
-              let write_typ =
-                FunctionType([int_type, typ, int_type, int_type], nil_type)
-              let write_fun = Global(write_typ, "write_bit_array_int")
-              Call(nil_type, write_fun, [seg_value, target, offset, seg_size])
-            }
-            NamedType("BitArray", []) -> {
-              let write_typ =
-                FunctionType([typ, typ, int_type, int_type], nil_type)
-              let write_fun = Global(write_typ, "write_bit_array")
-              Call(nil_type, write_fun, [seg_value, target, offset, seg_size])
-            }
-            _ -> panic as "unsupported segment type"
+
+          let write_fun_name = case mode {
+            IntMode -> "write_bit_array_int"
+            BitsMode | BytesMode -> "write_bit_array"
+            Utf8Mode -> "write_bit_array_string"
           }
+
+          let write_typ =
+            FunctionType([seg_value.typ, typ, int_type, int_type], nil_type)
+          let write_fun = Global(write_typ, write_fun_name)
+          let write_call =
+            Call(nil_type, write_fun, [seg_value, target, offset, seg_size])
+
           let new_offset = add_exp(Local(int_type, "offset"), seg_size)
           let update_offset = Let(typ, "offset", new_offset, exp)
           Let(update_offset.typ, "_", write_call, update_offset)
         })
+
       let body = Let(body.typ, "offset", Literal(int_type, Int("0")), body)
       let body =
         Let(body.typ, "bit_array", Literal(typ, BitArray("total_size")), body)

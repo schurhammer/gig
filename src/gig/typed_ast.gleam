@@ -1293,7 +1293,7 @@ fn infer_pattern(
                 g.Utf32CodepointOption -> todo
                 g.Utf32Option -> todo
                 g.Utf8CodepointOption -> todo
-                g.Utf8Option -> todo
+                g.Utf8Option -> #(c, n, Utf8Option, Some(string_type))
               }
               let typ = case typ, option_type {
                 Some(_), Some(_) -> panic as "type set twice"
@@ -1921,7 +1921,9 @@ fn infer_expression(
                 g.Utf32CodepointOption -> todo
                 g.Utf32Option -> todo
                 g.Utf8CodepointOption -> todo
-                g.Utf8Option -> todo
+                g.Utf8Option -> {
+                  #(c, Utf8Option, Some(string_type))
+                }
               }
               let typ = case typ, option_type {
                 Some(_), Some(_) -> panic as "type set twice"

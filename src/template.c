@@ -193,8 +193,8 @@ Nil write_bit_array(BitArray src, BitArray dst, Int offset, Int len) {
       a = (a << 8) | src.bytes[src_start_byte + i + 1];
       b = (b << 8) | dst.bytes[dst_start_byte + i + 1];
     } else {
-      a <<= 8;
-      b <<= 8;
+      a = a << 8;
+      b = b << 8;
     }
 
     int n = len > 8 ? 8 : len;
@@ -209,6 +209,15 @@ Nil write_bit_array(BitArray src, BitArray dst, Int offset, Int len) {
   return 0;
 }
 
+Nil write_bit_array_string(String value, BitArray dst, Int offset, Int len) {
+  BitArray src;
+  src.bytes = (uint8_t *)value.bytes;
+  src.offset = 0;
+  src.len = 8 * value.byte_length;
+  write_bit_array(src, dst, offset, len);
+  return 0;
+}
+
 Nil write_bit_array_int(Int value, BitArray dst, Int offset, Int len) {
   // convert to big endian
   u_int8_t bytes[8];
@@ -217,16 +226,39 @@ Nil write_bit_array_int(Int value, BitArray dst, Int offset, Int len) {
   }
 
   BitArray src;
-  src.bytes = (uint8_t *)&bytes;
+  src.bytes = (uint8_t *)bytes;
   src.offset = 64 - len;
   src.len = len;
   write_bit_array(src, dst, offset, len);
   return 0;
 }
 
+String index_bit_array_string(BitArray ba, size_t bit_offset, int bit_length) {
+  String result;
+  result.byte_length = bit_length / 8;
+  result.bytes = malloc(result.byte_length);
+
+  bit_offset = bit_offset + ba.offset;
+  int byte_offset = bit_offset / 8;
+  int bits_into_byte = bit_offset % 8;
+
+  for (int i = 0; i < result.byte_length; i++) {
+    uint16_t current_byte = ba.bytes[byte_offset + i];
+    uint16_t next_byte = ba.bytes[byte_offset + i + 1];
+
+    // Combine parts of two bytes and shift to correct position
+    uint16_t combined = (current_byte << 8) | next_byte;
+    combined = (combined << bits_into_byte) >> 8;
+
+    result.bytes[i] = (uint8_t)combined;
+  }
+
+  return result;
+}
+
 Int index_bit_array_int(BitArray ba, size_t bit_offset, int bit_length) {
   if (bit_length > 64)
-    bit_length = 64; // Limit to 64 bits max
+    panic_exit();
 
   bit_offset = bit_offset + ba.offset;
 

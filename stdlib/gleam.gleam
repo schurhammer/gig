@@ -115,11 +115,17 @@ pub fn inspect(a: a) -> String
 
 // BitArray Operators
 
+@external(c, "", "write_bit_array_string")
+pub fn write_bit_array_string(value: String, to: BitArray, at_offset: Int, len: Int) -> Nil
+
 @external(c, "", "write_bit_array_int")
-pub fn write_bit_array_int(value: Int, to: BitArray, at_offset: Int, len: Int)
+pub fn write_bit_array_int(value: Int, to: BitArray, at_offset: Int, len: Int) -> Nil
 
 @external(c, "", "write_bit_array")
-pub fn write_bit_array(value: BitArray, to: BitArray, to_offset: Int, len: Int)
+pub fn write_bit_array(value: BitArray, to: BitArray, to_offset: Int, len: Int) -> Nil
+
+@external(c, "", "index_bit_array_string")
+pub fn index_bit_array_string(a: BitArray, offset: Int, length: Int) -> String
 
 @external(c, "", "index_bit_array_int")
 pub fn index_bit_array_int(a: BitArray, offset: Int, length: Int) -> Int
