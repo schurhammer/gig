@@ -368,6 +368,23 @@ Bool ends_with_string(String string, String with) {
   return True;
 }
 
+String drop_start_string(String string, Int count) {
+  if (count <= 0) {
+    return string;
+  }
+  if (count >= string.byte_length) {
+    struct String str;
+    str.byte_length = 0;
+    str.bytes = string.bytes + string.byte_length;
+    return str;
+  }
+  
+  struct String str;
+  str.byte_length = string.byte_length - count;
+  str.bytes = string.bytes + count;
+  return str;
+}
+
 Int compare_string(struct String str1, struct String str2) {
   if (str1.byte_length != str2.byte_length) {
     return str1.byte_length - str2.byte_length;

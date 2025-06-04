@@ -109,6 +109,12 @@ pub fn div_float(a: Float, b: Float) -> Float
 @external(c, "", "append_string")
 pub fn append_string(a: String, b: String) -> String
 
+@external(c, "", "starts_with_string")
+pub fn starts_with_string(string: String, prefix: String) -> Bool
+
+@external(c, "", "drop_start_string")
+pub fn drop_start_string(string: String, count: Int) -> String
+
 @monomorphise()
 @external(c, "", "inspect")
 pub fn inspect(a: a) -> String

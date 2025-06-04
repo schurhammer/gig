@@ -622,7 +622,33 @@ fn lower_pattern_bindings(
       let pattern = lower_pattern_bindings(c, pattern, subject)
       [#(name, subject), ..pattern]
     }
-    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> todo
+    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
+      let prefix_binding = case prefix_name {
+        Some(t.Named(name)) -> [#(name, t.String(t.string_type, prefix))]
+        _ -> []
+      }
+
+      let suffix_binding = case suffix_name {
+        t.Named(name) -> {
+          // Create a call to drop the prefix from the subject string
+          let prefix_len =
+            t.Int(t.int_type, int.to_string(string.length(prefix)))
+          let drop_fun =
+            t.Function(
+              t.FunctionType([t.string_type, t.int_type], t.string_type),
+              t.builtin,
+              "drop_start_string",
+              [],
+            )
+          let suffix_value =
+            t.Call(t.string_type, drop_fun, [subject, prefix_len])
+          [#(name, suffix_value)]
+        }
+        t.Discarded(_) -> []
+      }
+
+      list.append(prefix_binding, suffix_binding)
+    }
     t.PatternBitString(typ, segs) -> {
       // TODO total size not used? can we remove the calculation?
       let #(total_size, segs) =
@@ -772,8 +798,18 @@ fn lower_pattern_match(
       lower_pattern_match(c, list, subject)
     }
     t.PatternAssignment(typ, pattern, name) -> true_value
-    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) ->
-      todo as "PatternConcatenate"
+    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
+      let prefix_str = t.String(t.string_type, prefix)
+      let match =
+        t.Function(
+          t.FunctionType([t.string_type, t.string_type], t.bool_type),
+          t.builtin,
+          "starts_with_string",
+          [],
+        )
+      let starts_with_call = t.Call(t.bool_type, match, [subject, prefix_str])
+      lower_expression(c, starts_with_call)
+    }
     t.PatternBitString(typ, segs) -> {
       let #(total_size, match_to_end, data_match) =
         list.fold(
