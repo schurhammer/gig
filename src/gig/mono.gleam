@@ -22,6 +22,13 @@ pub fn run(c: t.Context, main_name: String) {
 
   let typ = sub_type(c, [], main.typ.typ)
   let #(c, main_name) = instantiate_function(c, main_name, typ)
+
+  // these types are required for the pop_grapheme implementation
+  let c = register_tuple(c, t.TupleType([t.string_type, t.string_type]))
+  let grapheme_tuple = t.NamedType("Tuple2", [t.string_type, t.string_type])
+  let grapheme_result = t.NamedType("Result", [grapheme_tuple, t.nil_type])
+  let c = instantiate_type(c, grapheme_result)
+
   #(c, main_name)
 }
 
@@ -194,11 +201,14 @@ fn register_tuple(c: Context, typ: t.Type) {
           t.Context(..cin, externals: dict.insert(cin.externals, fun.id, fun))
         })
 
-      // create instantiated custom type via rewriting to named type
-      // let c = Context(..c, in: cin)
-      // let typ = t.NamedType(variant_id, elements)
-      // instantiate_type(c, typ)
       Context(..c, in: cin)
+    }
+    t.NamedType(_, args) -> {
+      list.fold(args, c, register_tuple)
+    }
+    t.FunctionType(params, ret) -> {
+      let c = register_tuple(c, ret)
+      list.fold(params, c, register_tuple)
     }
     _ -> c
   }
@@ -271,16 +281,7 @@ fn typed_to_mono_exp(
       #(c, t.Local(typ, name))
     }
     t.Global(typ, name) -> {
-      // // constructors are globals so this should capture all used types
-      // let c = case typ {
-      //   t.FunctionType(_, ret) -> register_tuple(c, ret)
-      //   _ -> register_tuple(c, typ)
-      // }
       let typ = sub_type(c, sub, typ)
-      // let c = case typ {
-      //   t.FunctionType(_, ret) -> instantiate_type(c, ret)
-      //   _ -> instantiate_type(c, typ)
-      // }
       let #(c, name) = instantiate_function(c, name, typ)
       #(c, t.Global(typ, name))
     }

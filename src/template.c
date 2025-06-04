@@ -378,7 +378,7 @@ String drop_start_string(String string, Int count) {
     str.bytes = string.bytes + string.byte_length;
     return str;
   }
-  
+
   struct String str;
   str.byte_length = string.byte_length - count;
   str.bytes = string.bytes + count;
@@ -526,6 +526,10 @@ String inspect_BitArray(struct BitArray ba) {
   return result;
 }
 
+typedef struct Tuple2_String_String Tuple2_String_String;
+typedef Pointer Result_Tuple2_String_String_Nil;
+Result_Tuple2_String_String_Nil pop_grapheme_string(String str);
+
 String inspect_Closure(Closure c) { return String_LIT("Closure", 7); }
 
 Closure create_closure(void *fun, Pointer env) {
@@ -553,6 +557,57 @@ Bool eq_Closure(Closure a, Closure b) { return False; }
 /// CODEGEN
 
 /// end of codegen
+
+Result_Tuple2_String_String_Nil pop_grapheme_string(String str) {
+  // the required types and functions for this are generated during codegen
+
+  if (str.byte_length == 0) {
+    // Return Error(Nil)
+    return new_Error_Tuple2_String_String_Nil(0);
+  }
+
+  // Find the byte length of the first UTF-8 character
+  unsigned char first_byte = (unsigned char)str.bytes[0];
+  int grapheme_len;
+
+  if ((first_byte & 0x80) == 0) {
+    // ASCII: 0xxxxxxx
+    grapheme_len = 1;
+  } else if ((first_byte & 0xE0) == 0xC0) {
+    // 2-byte: 110xxxxx
+    grapheme_len = 2;
+  } else if ((first_byte & 0xF0) == 0xE0) {
+    // 3-byte: 1110xxxx
+    grapheme_len = 3;
+  } else if ((first_byte & 0xF8) == 0xF0) {
+    // 4-byte: 11110xxx
+    grapheme_len = 4;
+  } else {
+    // Invalid UTF-8, treat as single byte
+    grapheme_len = 1;
+  }
+
+  // Ensure we don't read past the string end
+  if (grapheme_len > str.byte_length) {
+    grapheme_len = str.byte_length;
+  }
+
+  // Create the first grapheme string (zero-copy slice)
+  String grapheme;
+  grapheme.byte_length = grapheme_len;
+  grapheme.bytes = str.bytes;
+
+  // Create the rest string (zero-copy slice)
+  String rest;
+  rest.byte_length = str.byte_length - grapheme_len;
+  rest.bytes = str.bytes + grapheme_len;
+
+  // Create tuple #(grapheme, rest)
+  Tuple2_String_String tuple = new_Tuple2_String_String(grapheme, rest);
+
+  // Return Ok(tuple)
+  return new_Ok_Tuple2_String_String_Nil(tuple);
+}
 
 /// main
 

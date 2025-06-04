@@ -685,15 +685,15 @@ fn lower_pattern_bindings(
   }
 }
 
-const nil_type = NamedType("Nil", [])
+pub const nil_type = NamedType("Nil", [])
 
-const bool_type = NamedType("Bool", [])
+pub const bool_type = NamedType("Bool", [])
 
-const int_type = NamedType("Int", [])
+pub const int_type = NamedType("Int", [])
 
-const string_type = NamedType("String", [])
+pub const string_type = NamedType("String", [])
 
-const true_value = Literal(bool_type, Bool("True"))
+pub const true_value = Literal(bool_type, Bool("True"))
 
 fn if_exp(cond: Exp, then: Exp, els: Exp) -> Exp {
   case cond {

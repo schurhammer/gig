@@ -25,6 +25,9 @@ pub fn compare(a: String, b: String) -> order.Order {
     }
 }
 
+@external(c, "", "pop_grapheme_string")
+pub fn pop_grapheme(string: String) -> Result(#(String, String), Nil)
+
 pub fn inspect(value: a) -> String {
     gleam.inspect(value)
 }
