@@ -161,7 +161,7 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
       let var_names = list.map(vars, fn(x) { x.name })
       let var_types = list.map(vars, fn(x) { x.typ })
 
-      let closure_fields = fv(var_names, e)
+      let closure_fields = list.unique(fv(var_names, e))
 
       case closure_fields {
         [] -> {
