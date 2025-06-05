@@ -1214,6 +1214,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let right = lower_expression(c, right)
       or_exp(left, right)
     }
+    t.BinaryOperator(typ, g.NotEq, left, right) -> {
+      let not_eq = t.NegateBool(typ, t.BinaryOperator(typ, g.Eq, left, right))
+      lower_expression(c, not_eq)
+    }
     t.BinaryOperator(typ, name, left, right) -> {
       let typ = map_type(c, typ)
       let left = lower_expression(c, left)
@@ -1222,7 +1226,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         g.And -> panic as "and_bool"
         g.Or -> panic as "or_bool"
         g.Eq -> "eq"
-        g.NotEq -> "not_eq"
+        g.NotEq -> panic as "not_eq"
         g.LtInt -> "lt_int"
         g.LtEqInt -> "lte_int"
         g.LtFloat -> "lt_float"
