@@ -308,6 +308,33 @@ BitArray slice_bit_array(BitArray ba, Int offset, Int len) {
 
 Int length_bit_array(BitArray ba) { return ba.len; }
 
+Bool eq_BitArray(BitArray a, BitArray b) {
+  if (a.len != b.len) {
+    return False;
+  }
+  
+  if (a.len == 0) {
+    return True;
+  }
+  
+  // Compare bit by bit
+  for (size_t i = 0; i < a.len; i++) {
+    size_t a_byte_index = (a.offset + i) / 8;
+    size_t a_bit_index = (a.offset + i) % 8;
+    size_t b_byte_index = (b.offset + i) / 8;
+    size_t b_bit_index = (b.offset + i) % 8;
+    
+    bool a_bit = (a.bytes[a_byte_index] & (1 << (7 - a_bit_index))) != 0;
+    bool b_bit = (b.bytes[b_byte_index] & (1 << (7 - b_bit_index))) != 0;
+    
+    if (a_bit != b_bit) {
+      return False;
+    }
+  }
+  
+  return True;
+}
+
 String String_LIT(char *bytes, int byte_length) {
   if (byte_length < 0) {
     byte_length = strlen(bytes);

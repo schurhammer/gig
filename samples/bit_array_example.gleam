@@ -6,6 +6,8 @@
 //// 1
 //// 261
 //// 99
+//// eq
+//// neq
 
 import gleam/io
 
@@ -65,5 +67,13 @@ pub fn main() {
   case f {
     <<"ab":utf8, c>> -> io.debug(c)
     _ -> io.debug(0)
+  }
+  case <<1, 2, 3>> == <<1, 2, 3>> {
+    True -> io.println("eq")
+    False -> io.println("neq")
+  }
+  case <<1, 2, 3>> == <<3, 2, 1>> {
+    True -> io.println("eq")
+    False -> io.println("neq")
   }
 }
