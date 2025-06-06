@@ -1,6 +1,4 @@
-import gig/closure.{
-  type CustomType, type Function, type Module, CustomType, Field, Module,
-}
+import gig/closure.{type CustomType, type Function, type Module, Field}
 import gig/core.{BitArray, Float, Int, String}
 import gig/gen_names
 import gig/mono.{type_name}
@@ -9,15 +7,37 @@ import gig/normalise.{
   Variable,
 }
 import gig/type_graph
-import gleam/io
 import gleam/order
 
 import gig/graph
 
-import gleam/bool
 import gleam/int
 import gleam/list
 import gleam/string
+
+/// List of C keywords that cannot be used as variable names or function parameters
+const c_keywords = [
+  "auto", "break", "case", "char", "const", "continue", "default", "do",
+  "double", "else", "enum", "extern", "float", "for", "goto", "if", "inline",
+  "int", "long", "register", "restrict", "return", "short", "signed", "sizeof",
+  "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+  "volatile", "while", "asm", "typeof", "main", "printf", "malloc", "free",
+  "exit", "abort",
+]
+
+/// Check if a given name is a C keyword or reserved identifier
+fn is_keyword(name: String) -> Bool {
+  list.contains(c_keywords, name)
+}
+
+/// Escape a name if it's a C keyword by appending an underscore
+/// If the name is not a keyword, return it unchanged
+fn escape_if_keyword(name: String) -> String {
+  case is_keyword(name) {
+    True -> "_" <> name
+    False -> name
+  }
+}
 
 fn hit_target(target: String, with: String) {
   case target {
@@ -58,7 +78,7 @@ fn gen_value(arg: Value, target: String, id: Int) {
         }
       }
 
-    Variable(_, val) -> hit_target(target, val)
+    Variable(_, val) -> hit_target(target, escape_if_keyword(val))
   }
 }
 
@@ -128,9 +148,10 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
         }
         _, Value(typ, val) -> {
           // inline value
+          let escaped_var = escape_if_keyword(var)
           type_name(val.typ)
           <> " "
-          <> var
+          <> escaped_var
           <> " = "
           <> gen_value(val, "", id)
           <> ";\n"
@@ -138,11 +159,12 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
         }
         _, _ -> {
           // complex expression
+          let escaped_var = escape_if_keyword(var)
           type_name(val.typ)
           <> " "
-          <> var
+          <> escaped_var
           <> ";\n"
-          <> gen_term(val, var, id)
+          <> gen_term(val, escaped_var, id)
           <> gen_term(exp, target, id)
         }
       }
@@ -168,7 +190,7 @@ fn function(fun: Function) -> String {
   <> list.zip(params, param_types)
   |> list.map(fn(p) {
     let #(name, typ) = p
-    type_name(typ) <> " " <> name
+    type_name(typ) <> " " <> escape_if_keyword(name)
   })
   |> string.join(", ")
   <> ") {\n"
@@ -192,7 +214,7 @@ fn function_forward(fun: Function) -> String {
   <> list.zip(params, param_types)
   |> list.map(fn(p) {
     let #(name, typ) = p
-    type_name(typ) <> " " <> name
+    type_name(typ) <> " " <> escape_if_keyword(name)
   })
   |> string.join(", ")
   <> ");"
@@ -284,16 +306,18 @@ fn custom_type(t: CustomType) {
               <> f.name
               <> ")) { return False; }\n"
               <> "}"
-            False ->
+            False -> {
+              let escaped_field_name = escape_if_keyword(f.name)
               "if(!"
               <> field_equal
               <> "(a"
               <> access_op
-              <> f.name
+              <> escaped_field_name
               <> ", b"
               <> access_op
-              <> f.name
+              <> escaped_field_name
               <> ")) { return False; }\n"
+            }
           }
         })
         |> string.concat
@@ -311,14 +335,15 @@ fn custom_type(t: CustomType) {
           <> "* b = b_ptr;\n"
           <> list.map(v.fields, fn(f) {
             let field_equal = "eq_" <> type_name(f.typ)
+            let escaped_field_name = escape_if_keyword(f.name)
             "if(!"
             <> field_equal
             <> "(a"
             <> access_op
-            <> f.name
+            <> escaped_field_name
             <> ", b"
             <> access_op
-            <> f.name
+            <> escaped_field_name
             <> ")) { return False; }\n"
           })
           |> string.concat
@@ -352,7 +377,7 @@ fn custom_type(t: CustomType) {
               <> type_name(f.typ)
               <> "(a"
               <> access_op
-              <> f.name
+              <> escape_if_keyword(f.name)
               <> ")"
             })
             |> list.intersperse(string_lit(", "))
@@ -385,7 +410,7 @@ fn custom_type(t: CustomType) {
                 <> type_name(f.typ)
                 <> "(a"
                 <> access_op
-                <> f.name
+                <> escape_if_keyword(f.name)
                 <> ")"
               })
               |> list.intersperse(string_lit(", "))
@@ -414,7 +439,9 @@ fn custom_type(t: CustomType) {
         x -> x
       }
       let fields =
-        list.map(fields, fn(f) { type_name(f.typ) <> " " <> f.name <> ";\n" })
+        list.map(fields, fn(f) {
+          type_name(f.typ) <> " " <> escape_if_keyword(f.name) <> ";\n"
+        })
         |> string.join("")
 
       let struct = "struct " <> v.name <> "{\n" <> fields <> "};\n"
@@ -432,7 +459,9 @@ fn custom_type(t: CustomType) {
           <> v.name
           <> "("
           <> v.fields
-          |> list.map(fn(p) { type_name(p.typ) <> " " <> p.name })
+          |> list.map(fn(p) {
+            type_name(p.typ) <> " " <> escape_if_keyword(p.name)
+          })
           |> string.join(", ")
           <> ") {\n"
           <> case t.pointer {
@@ -449,14 +478,15 @@ fn custom_type(t: CustomType) {
           }
           <> v.fields
           |> list.map(fn(p) {
+            let escaped_name = escape_if_keyword(p.name)
             case t.pointer {
               True -> "_ptr"
               False -> "_value"
             }
             <> access_op
-            <> p.name
+            <> escaped_name
             <> " = "
-            <> p.name
+            <> escaped_name
             <> ";\n"
           })
           |> string.join("")
@@ -481,6 +511,7 @@ fn custom_type(t: CustomType) {
       let getters =
         list.index_map(v.fields, fn(f, i) {
           // TODO getters probably broken for record types
+          let escaped_field_name = escape_if_keyword(f.name)
           type_name(f.typ)
           <> " "
           <> gen_names.get_getter_name(v.name, i)
@@ -496,8 +527,8 @@ fn custom_type(t: CustomType) {
               <> v.name
               <> "* ptr = decode_pointer(value); return ptr"
               <> access_op
-              <> f.name
-            False -> "return value" <> access_op <> f.name
+              <> escaped_field_name
+            False -> "return value" <> access_op <> escaped_field_name
           }
           <> "; }\n"
         })
