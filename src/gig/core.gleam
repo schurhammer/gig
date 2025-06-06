@@ -205,7 +205,8 @@ fn lower_function(c: t.Context, def: t.Definition(t.FunctionDefinition)) {
   let id = get_id(module, name)
   let parameters = list.map(function.parameters, lower_parameter(c, _))
   let body = lower_body(c, function.body)
-  let #(_, _, body) = unshadow([], 1, body)
+  let taken = list.map(parameters, fn(param) { param.name })
+  let #(_, _, body) = unshadow(taken, 1, body)
 
   Function(typ:, id:, parameters:, body:)
 }
