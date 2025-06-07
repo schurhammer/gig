@@ -1357,7 +1357,7 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
             True -> {
               let new_var = var.name <> "V" <> int.to_string(i)
               let i = i + 1
-              let exp = replace_var(var.name, Local(typ, new_var), exp)
+              let exp = replace_var(var.name, Local(var.typ, new_var), exp)
               let taken = [new_var, ..taken]
               let #(taken, i, exp) = unshadow(taken, i, exp)
               let vars = [Parameter(var.typ, new_var), ..vars]
@@ -1403,5 +1403,155 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       let #(taken, i, val) = unshadow(taken, i, val)
       #(taken, i, Panic(typ, val))
     }
+  }
+}
+
+/// Convert a Type to a string representation
+pub fn type_to_string(typ: Type) -> String {
+  case typ {
+    NamedType(id, []) -> id
+    NamedType(id, parameters) ->
+      id
+      <> "("
+      <> string.join(list.map(parameters, type_to_string), ", ")
+      <> ")"
+    TupleType([]) -> "()"
+    TupleType([single]) -> "(" <> type_to_string(single) <> ",)"
+    TupleType(elements) ->
+      "(" <> string.join(list.map(elements, type_to_string), ", ") <> ")"
+    FunctionType([], return) -> "fn() -> " <> type_to_string(return)
+    FunctionType(parameters, return) ->
+      "fn("
+      <> string.join(list.map(parameters, type_to_string), ", ")
+      <> ") -> "
+      <> type_to_string(return)
+    Unbound(id) -> "?" <> int.to_string(id)
+  }
+}
+
+/// Convert a LiteralKind to a string representation
+pub fn literal_to_string(literal: LiteralKind) -> String {
+  case literal {
+    NilVal -> "Nil"
+    Bool(value) -> value
+    Int(value) -> value
+    Float(value) -> value
+    String(value) -> "\"" <> value <> "\""
+    BitArray(size) -> "<<" <> size <> ">>"
+  }
+}
+
+/// Convert a Poly to a string representation
+pub fn poly_to_string(poly: Poly) -> String {
+  case poly {
+    Poly([], typ) -> type_to_string(typ)
+    Poly(vars, typ) -> {
+      let var_strings = list.map(vars, fn(var) { "?" <> int.to_string(var) })
+      "forall " <> string.join(var_strings, " ") <> ". " <> type_to_string(typ)
+    }
+  }
+}
+
+/// Convert a Parameter to a string representation
+pub fn parameter_to_string(param: Parameter) -> String {
+  param.name <> ": " <> type_to_string(param.typ)
+}
+
+/// Convert a Function to a string representation
+pub fn function_to_string(func: Function) -> String {
+  let Function(typ, id, parameters, body) = func
+  let param_strings = list.map(parameters, parameter_to_string)
+  "fn "
+  <> id
+  <> "("
+  <> string.join(param_strings, ", ")
+  <> ") : "
+  <> poly_to_string(typ)
+  <> " {\n"
+  <> "  "
+  <> exp_to_string_with_indent(body, 1)
+  <> "\n"
+  <> "}"
+}
+
+/// Convert an Exp to a string representation that looks like source code
+/// and includes type information
+pub fn exp_to_string(exp: Exp) -> String {
+  exp_to_string_with_indent(exp, 0)
+}
+
+/// Helper function for exp_to_string with indentation support
+fn exp_to_string_with_indent(exp: Exp, indent: Int) -> String {
+  let indent_str = string.repeat("  ", indent)
+  let next_indent = indent + 1
+  let next_indent_str = string.repeat("  ", next_indent)
+
+  case exp {
+    Literal(typ, value) ->
+      literal_to_string(value) <> " : " <> type_to_string(typ)
+
+    Local(typ, name) -> name <> " : " <> type_to_string(typ)
+
+    Global(typ, id) -> id <> " : " <> type_to_string(typ)
+
+    Fn(typ, parameters, body) -> {
+      let param_strings =
+        list.map(parameters, fn(param) {
+          param.name <> ": " <> type_to_string(param.typ)
+        })
+      "fn("
+      <> string.join(param_strings, ", ")
+      <> ") : "
+      <> type_to_string(typ)
+      <> " {\n"
+      <> next_indent_str
+      <> exp_to_string_with_indent(body, next_indent)
+      <> "\n"
+      <> indent_str
+      <> "}"
+    }
+
+    Call(typ, function, arguments) -> {
+      let arg_strings =
+        list.map(arguments, fn(arg) { exp_to_string_with_indent(arg, indent) })
+      exp_to_string_with_indent(function, indent)
+      <> "("
+      <> string.join(arg_strings, ", ")
+      <> ") : "
+      <> type_to_string(typ)
+    }
+
+    Let(typ, name, value, body) ->
+      "let "
+      <> name
+      <> " = "
+      <> exp_to_string_with_indent(value, indent)
+      <> " in\n"
+      <> indent_str
+      <> exp_to_string_with_indent(body, indent)
+      <> " : "
+      <> type_to_string(typ)
+
+    If(typ, condition, then_exp, else_exp) ->
+      "if "
+      <> exp_to_string_with_indent(condition, indent)
+      <> " then\n"
+      <> next_indent_str
+      <> exp_to_string_with_indent(then_exp, next_indent)
+      <> "\n"
+      <> indent_str
+      <> "else\n"
+      <> next_indent_str
+      <> exp_to_string_with_indent(else_exp, next_indent)
+      <> "\n"
+      <> indent_str
+      <> ": "
+      <> type_to_string(typ)
+
+    Panic(typ, reason) ->
+      "panic("
+      <> exp_to_string_with_indent(reason, indent)
+      <> ") : "
+      <> type_to_string(typ)
   }
 }
