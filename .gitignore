@@ -4,3 +4,4 @@ samples/*
 !samples/nested
 samples/nested/*
 !samples/nested/*.gleam
+src/gig.c
