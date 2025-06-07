@@ -51,6 +51,38 @@ fn hit_target(target: String, with: String) {
   }
 }
 
+fn convert_float_literal(val: String) -> String {
+  string.replace(val, "_", "") <> "L"
+}
+
+fn convert_integer_literal(val: String) -> String {
+  let clean_val = string.replace(val, "_", "")
+
+  case clean_val {
+    // Binary literals (0b) - convert to decimal
+    "0b" <> binary_digits -> {
+      case parse_binary_to_decimal(binary_digits) {
+        Ok(decimal) -> decimal
+        Error(_) -> clean_val
+      }
+    }
+    // Octal literals (0o) - convert to C octal format
+    "0o" <> octal_digits -> "0" <> octal_digits
+    // Hex literals (0x) - already C compatible
+    "0x" <> _ -> clean_val
+    // Regular numbers
+    _ -> clean_val
+  }
+}
+
+/// Parse binary string to decimal string
+fn parse_binary_to_decimal(binary_str: String) -> Result(String, Nil) {
+  case int.base_parse(binary_str, 2) {
+    Ok(value) -> Ok(int.to_string(value))
+    Error(_) -> Error(Nil)
+  }
+}
+
 fn ternary(cond: String, then: String, els: String) -> String {
   "(" <> cond <> " ? " <> then <> " : " <> els <> ")"
 }
@@ -69,8 +101,8 @@ fn gen_value(arg: Value, target: String, id: Int) {
       case val {
         core.NilVal -> hit_target(target, "0")
         core.Bool(val) -> hit_target(target, val)
-        Int(val) -> hit_target(target, string.replace(val, "_", ""))
-        Float(val) -> hit_target(target, val <> "L")
+        Int(val) -> hit_target(target, convert_integer_literal(val))
+        Float(val) -> hit_target(target, convert_float_literal(val))
         String(val) -> hit_target(target, string_lit(val))
         BitArray(size) -> {
           let value = "new_bit_array(" <> size <> ")"
