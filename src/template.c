@@ -123,6 +123,7 @@ Bool or_bool(Bool x, Bool y) { return x || y; }
 Bool negate_bool(Bool x) { return !x; }
 Bool isa_True(Bool x) { return x == True; }
 Bool isa_False(Bool x) { return x == False; }
+Bool isa_Nil(Nil x) { return True; }
 
 Bool eq_Int(Int x, Int y) { return x == y; }
 Bool lt_int(Int x, Int y) { return x < y; }
@@ -145,6 +146,22 @@ Float add_float(Float x, Float y) { return x + y; }
 Float sub_float(Float x, Float y) { return x - y; }
 Float mul_float(Float x, Float y) { return x * y; }
 Float div_float(Float x, Float y) { return x / y; }
+
+#define UtfCodepoint uint32_t
+Bool eq_UtfCodepoint(UtfCodepoint x, UtfCodepoint y) { return x == y; }
+
+String inspect_UtfCodepoint(UtfCodepoint value) {
+  char buffer[16];
+  snprintf(buffer, sizeof(buffer), "%d", value);
+
+  struct String result;
+  result.byte_length = strlen(buffer);
+  result.bytes = malloc(result.byte_length);
+
+  memcpy(result.bytes, buffer, result.byte_length);
+
+  return result;
+}
 
 u_int16_t splice_bits(u_int16_t src, u_int16_t dst, int src_offset,
                       int dst_offset, int n) {
@@ -312,26 +329,26 @@ Bool eq_BitArray(BitArray a, BitArray b) {
   if (a.len != b.len) {
     return False;
   }
-  
+
   if (a.len == 0) {
     return True;
   }
-  
+
   // Compare bit by bit
   for (size_t i = 0; i < a.len; i++) {
     size_t a_byte_index = (a.offset + i) / 8;
     size_t a_bit_index = (a.offset + i) % 8;
     size_t b_byte_index = (b.offset + i) / 8;
     size_t b_bit_index = (b.offset + i) % 8;
-    
+
     bool a_bit = (a.bytes[a_byte_index] & (1 << (7 - a_bit_index))) != 0;
     bool b_bit = (b.bytes[b_byte_index] & (1 << (7 - b_bit_index))) != 0;
-    
+
     if (a_bit != b_bit) {
       return False;
     }
   }
-  
+
   return True;
 }
 
