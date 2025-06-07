@@ -335,6 +335,7 @@ pub type TypeVarEnv =
 pub type Context {
   Context(
     current_module: String,
+    current_definition: String,
     type_vars: TypeVarEnv,
     modules: Dict(String, Module),
     type_uid: Int,
@@ -351,6 +352,7 @@ pub type TypeEnv =
 pub fn new_context() -> Context {
   Context(
     current_module: "",
+    current_definition: "",
     type_vars: dict.new(),
     modules: dict.new(),
     type_uid: 0,
@@ -430,6 +432,7 @@ pub fn infer_module(
   let c =
     list.fold(module.custom_types, c, fn(c, def) {
       let custom = def.definition
+      let c = Context(..c, current_definition: custom.name)
 
       let #(c, parameters) =
         list.fold(custom.parameters, #(c, []), fn(acc, p) {
@@ -456,6 +459,8 @@ pub fn infer_module(
   let #(c, aliases) =
     list.fold(module.type_aliases, #(c, []), fn(acc, def) {
       let #(c, aliases) = acc
+      let c = Context(..c, current_definition: def.definition.name)
+
       // infer the alias type
       let #(c, alias) = infer_alias_type(c, def.definition)
 
@@ -472,6 +477,8 @@ pub fn infer_module(
   let c =
     list.fold(aliases, c, fn(c, alias) {
       let #(def, alias) = alias
+      let c = Context(..c, current_definition: alias.name)
+
       // create alias entry
       let poly = generalise(c, alias.aliased.typ)
       let c = register_type(c, alias.name, poly, [])
@@ -486,6 +493,7 @@ pub fn infer_module(
   let c =
     list.fold(module.custom_types, c, fn(c, def) {
       let custom = def.definition
+      let c = Context(..c, current_definition: custom.name)
 
       // reconstruct the type parameters
       let assert Ok(#(_, poly, _)) =
@@ -516,6 +524,8 @@ pub fn infer_module(
   let c =
     list.fold(constants, c, fn(c, def) {
       let #(c, constant) = infer_constant(c, def.definition)
+      let c = Context(..c, current_definition: constant.name)
+
       let poly = generalise(c, constant.value.typ)
       let c = register_constant(c, constant.name, poly, constant.value)
       let attrs = infer_attributes(c, def.attributes)
@@ -542,6 +552,7 @@ pub fn infer_module(
     let c =
       list.fold(group, c, fn(c, def) {
         let fun = def.definition
+        let c = Context(..c, current_definition: fun.name)
 
         // create placeholder function type based on function signature
         let #(c, parameters, return) =
@@ -563,6 +574,7 @@ pub fn infer_module(
     let #(c, group) =
       list.fold(group, #(c, []), fn(acc, def) {
         let #(c, group) = acc
+        let c = Context(..c, current_definition: def.definition.name)
 
         // infer function
         let #(c, fun) = infer_function(c, def.definition)
@@ -2238,7 +2250,12 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
     -> {
       io.debug(#(aname, amodule))
       io.debug(#(bname, bmodule))
-      panic as "failed to unify types"
+      let message =
+        "failed to unify types in "
+        <> c.current_module
+        <> "."
+        <> c.current_definition
+      panic as message
     }
     NamedType(_, _, aargs), NamedType(_, _, bargs) -> {
       case list.strict_zip(aargs, bargs) {
@@ -2340,4 +2357,1147 @@ pub fn resolve_type_deep(c: Context, typ: Type) {
     TupleType(elements) ->
       TupleType(list.map(elements, resolve_type_deep(c, _)))
   }
+}
+
+/// Convert a Type to a string representation
+pub fn type_to_string(typ: Type) -> String {
+  case typ {
+    NamedType(name, "", []) -> name
+    NamedType(name, "", parameters) ->
+      name
+      <> "("
+      <> string.join(list.map(parameters, type_to_string), ", ")
+      <> ")"
+    NamedType(name, module, []) -> module <> "." <> name
+    NamedType(name, module, parameters) ->
+      module
+      <> "."
+      <> name
+      <> "("
+      <> string.join(list.map(parameters, type_to_string), ", ")
+      <> ")"
+    TupleType([]) -> "()"
+    TupleType([single]) -> "(" <> type_to_string(single) <> ",)"
+    TupleType(elements) ->
+      "(" <> string.join(list.map(elements, type_to_string), ", ") <> ")"
+    FunctionType([], return) -> "fn() -> " <> type_to_string(return)
+    FunctionType(parameters, return) ->
+      "fn("
+      <> string.join(list.map(parameters, type_to_string), ", ")
+      <> ") -> "
+      <> type_to_string(return)
+    VariableType(Ref(id)) -> "?" <> int.to_string(id)
+  }
+}
+
+/// Convert a Poly to a string representation
+pub fn poly_to_string(poly: Poly) -> String {
+  case poly {
+    Poly([], typ) -> type_to_string(typ)
+    Poly(vars, typ) -> {
+      let var_strings = list.map(vars, fn(var) { "?" <> int.to_string(var) })
+      "forall " <> string.join(var_strings, " ") <> ". " <> type_to_string(typ)
+    }
+  }
+}
+
+/// Convert a Publicity to a string representation
+pub fn publicity_to_string(publicity: Publicity) -> String {
+  case publicity {
+    Public -> "pub"
+    Private -> ""
+  }
+}
+
+/// Convert an AssignmentName to a string representation
+pub fn assignment_name_to_string(name: AssignmentName) -> String {
+  case name {
+    Named(value) -> value
+    Discarded(value) -> value
+  }
+}
+
+/// Convert an Annotation to a string representation
+pub fn annotation_to_string(annotation: Annotation) -> String {
+  case annotation {
+    NamedAnno(typ, name, None, parameters) ->
+      name
+      <> case parameters {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(list.map(parameters, annotation_to_string), ", ")
+          <> ")"
+      }
+      <> " : "
+      <> type_to_string(typ)
+    NamedAnno(typ, name, Some(module), parameters) ->
+      module
+      <> "."
+      <> name
+      <> case parameters {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(list.map(parameters, annotation_to_string), ", ")
+          <> ")"
+      }
+      <> " : "
+      <> type_to_string(typ)
+    TupleAnno(typ, elements) ->
+      "("
+      <> string.join(list.map(elements, annotation_to_string), ", ")
+      <> ")"
+      <> " : "
+      <> type_to_string(typ)
+    FunctionAnno(typ, parameters, return) ->
+      "fn("
+      <> string.join(list.map(parameters, annotation_to_string), ", ")
+      <> ") -> "
+      <> annotation_to_string(return)
+      <> " : "
+      <> type_to_string(typ)
+    VariableAnno(typ, name) -> name <> " : " <> type_to_string(typ)
+    HoleAnno(typ, name) -> name <> " : " <> type_to_string(typ)
+  }
+}
+
+/// Convert a FunctionParameter to a string representation
+pub fn function_parameter_to_string(param: FunctionParameter) -> String {
+  let FunctionParameter(typ, label, name, annotation) = param
+  let label_str = case label {
+    Some(l) -> l <> " "
+    None -> ""
+  }
+  let name_str = assignment_name_to_string(name)
+  let annotation_str = case annotation {
+    Some(anno) -> " " <> annotation_to_string(anno)
+    None -> ""
+  }
+  label_str <> name_str <> ": " <> type_to_string(typ) <> annotation_str
+}
+
+/// Convert a Span to a string representation
+pub fn span_to_string(span: Span) -> String {
+  let Span(start, end) = span
+  "@" <> int.to_string(start) <> "-" <> int.to_string(end)
+}
+
+/// Convert a Statement to a string representation (simplified)
+pub fn statement_to_string(statement: Statement) -> String {
+  case statement {
+    Use(typ, patterns, function) ->
+      "use "
+      <> string.join(list.map(patterns, pattern_to_string), ", ")
+      <> " <- "
+      <> expression_to_string(function)
+      <> " : "
+      <> type_to_string(typ)
+    Assignment(typ, kind, pattern, annotation, value) -> {
+      let kind_str = case kind {
+        Let -> "let"
+        Assert -> "assert"
+      }
+      let annotation_str = case annotation {
+        Some(anno) -> ": " <> annotation_to_string(anno)
+        None -> ""
+      }
+      kind_str
+      <> " "
+      <> pattern_to_string(pattern)
+      <> annotation_str
+      <> " = "
+      <> expression_to_string(value)
+      <> " : "
+      <> type_to_string(typ)
+    }
+    Expression(typ, expression) ->
+      expression_to_string(expression) <> " : " <> type_to_string(typ)
+  }
+}
+
+/// Convert a Pattern to a string representation (simplified)
+pub fn pattern_to_string(pattern: Pattern) -> String {
+  case pattern {
+    PatternInt(typ, value) -> value <> " : " <> type_to_string(typ)
+    PatternFloat(typ, value) -> value <> " : " <> type_to_string(typ)
+    PatternString(typ, value) ->
+      "\"" <> value <> "\"" <> " : " <> type_to_string(typ)
+    PatternDiscard(typ, name) -> name <> " : " <> type_to_string(typ)
+    PatternVariable(typ, name) -> name <> " : " <> type_to_string(typ)
+    PatternTuple(typ, elems) ->
+      "("
+      <> string.join(list.map(elems, pattern_to_string), ", ")
+      <> ")"
+      <> " : "
+      <> type_to_string(typ)
+    PatternList(typ, elements, tail) -> {
+      let elements_str =
+        string.join(list.map(elements, pattern_to_string), ", ")
+      let tail_str = case tail {
+        Some(t) -> ", .." <> pattern_to_string(t)
+        None -> ""
+      }
+      "[" <> elements_str <> tail_str <> "]" <> " : " <> type_to_string(typ)
+    }
+    PatternAssignment(typ, pattern, name) ->
+      pattern_to_string(pattern)
+      <> " as "
+      <> name
+      <> " : "
+      <> type_to_string(typ)
+    PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
+      let prefix_name_str = case prefix_name {
+        Some(name) -> assignment_name_to_string(name)
+        None -> "_"
+      }
+      "<<"
+      <> prefix
+      <> " as "
+      <> prefix_name_str
+      <> ", rest as "
+      <> assignment_name_to_string(suffix_name)
+      <> ">>"
+      <> " : "
+      <> type_to_string(typ)
+    }
+    PatternBitString(typ, segments) ->
+      "<<"
+      <> string.join(list.map(segments, fn(_) { "..." }), ", ")
+      <> ">>"
+      <> " : "
+      <> type_to_string(typ)
+    PatternConstructor(typ, module, constructor, arguments, _, _, _) -> {
+      let module_str = case module == "" {
+        True -> ""
+        False -> module <> "."
+      }
+      let args_str = case arguments {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(
+            list.map(arguments, fn(arg) { pattern_to_string(arg.item) }),
+            ", ",
+          )
+          <> ")"
+      }
+      module_str <> constructor <> args_str <> " : " <> type_to_string(typ)
+    }
+  }
+}
+
+/// Convert an Expression to a string representation (simplified)
+pub fn expression_to_string(expression: Expression) -> String {
+  case expression {
+    Int(typ, value) -> value <> " : " <> type_to_string(typ)
+    Float(typ, value) -> value <> " : " <> type_to_string(typ)
+    String(typ, value) -> "\"" <> value <> "\"" <> " : " <> type_to_string(typ)
+    LocalVariable(typ, name) -> name <> " : " <> type_to_string(typ)
+    Function(typ, module, name, labels) -> {
+      let labels_str = case labels {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(
+            list.map(labels, fn(label) {
+              case label {
+                Some(l) -> l <> ": "
+                None -> ""
+              }
+            }),
+            ", ",
+          )
+          <> ")"
+      }
+      module <> "." <> name <> labels_str <> " : " <> type_to_string(typ)
+    }
+    Constant(typ, module, name, _) -> {
+      module <> "." <> name <> " : " <> type_to_string(typ)
+    }
+    NegateInt(typ, value) ->
+      "-" <> expression_to_string(value) <> " : " <> type_to_string(typ)
+    NegateBool(typ, value) ->
+      "!" <> expression_to_string(value) <> " : " <> type_to_string(typ)
+    Block(typ, statements) ->
+      "{\n  "
+      <> string.join(list.map(statements, statement_to_string), "\n  ")
+      <> "\n}"
+      <> " : "
+      <> type_to_string(typ)
+    Panic(typ, value) -> {
+      let value_str = case value {
+        Some(v) -> expression_to_string(v)
+        None -> ""
+      }
+      "panic(" <> value_str <> ")" <> " : " <> type_to_string(typ)
+    }
+    Todo(typ, value) -> {
+      let value_str = case value {
+        Some(v) -> expression_to_string(v)
+        None -> ""
+      }
+      "todo(" <> value_str <> ")" <> " : " <> type_to_string(typ)
+    }
+    Tuple(typ, elements) ->
+      "("
+      <> string.join(list.map(elements, expression_to_string), ", ")
+      <> ")"
+      <> " : "
+      <> type_to_string(typ)
+    List(typ, elements, rest) -> {
+      let elements_str =
+        string.join(list.map(elements, expression_to_string), ", ")
+      let rest_str = case rest {
+        Some(r) -> ", .." <> expression_to_string(r)
+        None -> ""
+      }
+      "[" <> elements_str <> rest_str <> "]" <> " : " <> type_to_string(typ)
+    }
+    Fn(typ, parameters, return, body) -> {
+      let param_strings = list.map(parameters, function_parameter_to_string)
+      let params_str = string.join(param_strings, ", ")
+      let return_str = case return {
+        Some(ret) -> " -> " <> annotation_to_string(ret)
+        None -> ""
+      }
+      let body_str = case body {
+        [] -> "{}"
+        statements -> {
+          "{\n    "
+          <> string.join(list.map(statements, statement_to_string), "\n    ")
+          <> "\n  }"
+        }
+      }
+      "fn("
+      <> params_str
+      <> ")"
+      <> return_str
+      <> " "
+      <> body_str
+      <> " : "
+      <> type_to_string(typ)
+    }
+    RecordUpdate(typ, module, resolved_module, constructor, record, fields, _) -> {
+      let module_str = case module {
+        Some(m) -> m <> "."
+        None -> ""
+      }
+      let fields_str =
+        string.join(
+          list.map(fields, fn(field) {
+            let #(label, value) = field
+            label <> ": " <> expression_to_string(value)
+          }),
+          ", ",
+        )
+      module_str
+      <> constructor
+      <> "("
+      <> expression_to_string(record)
+      <> " with "
+      <> fields_str
+      <> ")"
+      <> " : "
+      <> type_to_string(typ)
+    }
+    FieldAccess(typ, container, module, variant, label, index) -> {
+      expression_to_string(container)
+      <> "."
+      <> label
+      <> " : "
+      <> type_to_string(typ)
+    }
+    Call(typ, function, ordered_arguments) -> {
+      let args_str =
+        string.join(list.map(ordered_arguments, expression_to_string), ", ")
+      expression_to_string(function)
+      <> "("
+      <> args_str
+      <> ")"
+      <> " : "
+      <> type_to_string(typ)
+    }
+    TupleIndex(typ, tuple, index) -> {
+      expression_to_string(tuple)
+      <> "."
+      <> int.to_string(index)
+      <> " : "
+      <> type_to_string(typ)
+    }
+    FnCapture(typ, label, function, arguments_before, arguments_after) -> {
+      let before_str =
+        string.join(
+          list.map(arguments_before, fn(field) {
+            let Field(label, item) = field
+            let label_str = case label {
+              Some(l) -> l <> ": "
+              None -> ""
+            }
+            label_str <> expression_to_string(item)
+          }),
+          ", ",
+        )
+      let after_str =
+        string.join(
+          list.map(arguments_after, fn(field) {
+            let Field(label, item) = field
+            let label_str = case label {
+              Some(l) -> l <> ": "
+              None -> ""
+            }
+            label_str <> expression_to_string(item)
+          }),
+          ", ",
+        )
+      let label_str = case label {
+        Some(l) -> l <> ": "
+        None -> ""
+      }
+      let args = case before_str == "" && after_str == "" {
+        True -> label_str <> "_"
+        False ->
+          before_str
+          <> case before_str == "" {
+            True -> ""
+            False -> ", "
+          }
+          <> label_str
+          <> "_"
+          <> case after_str == "" {
+            True -> ""
+            False -> ", " <> after_str
+          }
+      }
+      expression_to_string(function)
+      <> "("
+      <> args
+      <> ")"
+      <> " : "
+      <> type_to_string(typ)
+    }
+    BitString(typ, segments) -> {
+      let segments_str =
+        string.join(
+          list.map(segments, fn(segment) {
+            let #(expr, _options) = segment
+            expression_to_string(expr)
+          }),
+          ", ",
+        )
+      "<<" <> segments_str <> ">>" <> " : " <> type_to_string(typ)
+    }
+    Case(typ, subjects, clauses) -> {
+      let subjects_str =
+        string.join(list.map(subjects, expression_to_string), ", ")
+      let clauses_str =
+        string.join(
+          list.map(clauses, fn(clause) {
+            let Clause(patterns, guard, body) = clause
+            let patterns_str =
+              string.join(
+                list.map(patterns, fn(pattern_list) {
+                  string.join(list.map(pattern_list, pattern_to_string), ", ")
+                }),
+                " | ",
+              )
+            let guard_str = case guard {
+              Some(g) -> " if " <> expression_to_string(g)
+              None -> ""
+            }
+            patterns_str <> guard_str <> " -> " <> expression_to_string(body)
+          }),
+          "\n    ",
+        )
+      "case "
+      <> subjects_str
+      <> " {\n    "
+      <> clauses_str
+      <> "\n  }"
+      <> " : "
+      <> type_to_string(typ)
+    }
+    BinaryOperator(typ, name, left, right) -> {
+      expression_to_string(left)
+      <> " "
+      <> binary_operator_to_string(name)
+      <> " "
+      <> expression_to_string(right)
+      <> " : "
+      <> type_to_string(typ)
+    }
+  }
+}
+
+/// Convert a BinaryOperator to string representation
+fn binary_operator_to_string(op: g.BinaryOperator) -> String {
+  case op {
+    g.And -> "&&"
+    g.Or -> "||"
+    g.LtInt -> "<"
+    g.LtEqInt -> "<="
+    g.LtFloat -> "<."
+    g.LtEqFloat -> "<=."
+    g.Eq -> "=="
+    g.NotEq -> "!="
+    g.GtEqInt -> ">="
+    g.GtInt -> ">"
+    g.GtEqFloat -> ">=."
+    g.GtFloat -> ">."
+    g.AddInt -> "+"
+    g.AddFloat -> "+."
+    g.SubInt -> "-"
+    g.SubFloat -> "-."
+    g.MultInt -> "*"
+    g.MultFloat -> "*."
+    g.DivInt -> "/"
+    g.DivFloat -> "/."
+    g.RemainderInt -> "%"
+    g.Concatenate -> "<>"
+    g.Pipe -> "|>"
+  }
+}
+
+/// Convert a FunctionDefinition to a string representation
+pub fn function_definition_to_string(func_def: FunctionDefinition) -> String {
+  let FunctionDefinition(
+    typ,
+    name,
+    publicity,
+    parameters,
+    return,
+    body,
+    location,
+  ) = func_def
+
+  let publicity_str = case publicity_to_string(publicity) {
+    "" -> ""
+    pub_str -> pub_str <> " "
+  }
+
+  let param_strings = list.map(parameters, function_parameter_to_string)
+  let params_str = string.join(param_strings, ", ")
+
+  let return_str = case return {
+    Some(ret) -> " -> " <> annotation_to_string(ret)
+    None -> ""
+  }
+
+  let body_str = case body {
+    [] -> "{}"
+    statements -> {
+      "{\n  "
+      <> string.join(list.map(statements, statement_to_string), "\n  ")
+      <> "\n}"
+    }
+  }
+
+  let location_str = " " <> span_to_string(location)
+
+  publicity_str
+  <> "fn "
+  <> name
+  <> "("
+  <> params_str
+  <> ")"
+  <> return_str
+  <> " : "
+  <> poly_to_string(typ)
+  <> " "
+  <> body_str
+  <> location_str
+}
+
+/// Convert a Type to a string representation with resolved type variables
+pub fn type_to_string_resolved(c: Context, typ: Type) -> String {
+  let resolved_typ = resolve_type(c, typ)
+  case resolved_typ {
+    NamedType(name, "", []) -> name
+    NamedType(name, "", parameters) ->
+      name
+      <> "("
+      <> string.join(list.map(parameters, type_to_string_resolved(c, _)), ", ")
+      <> ")"
+    NamedType(name, module, []) -> module <> "." <> name
+    NamedType(name, module, parameters) ->
+      module
+      <> "."
+      <> name
+      <> "("
+      <> string.join(list.map(parameters, type_to_string_resolved(c, _)), ", ")
+      <> ")"
+    TupleType([]) -> "()"
+    TupleType([single]) -> "(" <> type_to_string_resolved(c, single) <> ",)"
+    TupleType(elements) ->
+      "("
+      <> string.join(list.map(elements, type_to_string_resolved(c, _)), ", ")
+      <> ")"
+    FunctionType([], return) -> "fn() -> " <> type_to_string_resolved(c, return)
+    FunctionType(parameters, return) ->
+      "fn("
+      <> string.join(list.map(parameters, type_to_string_resolved(c, _)), ", ")
+      <> ") -> "
+      <> type_to_string_resolved(c, return)
+    VariableType(Ref(id)) -> "?" <> int.to_string(id)
+  }
+}
+
+/// Convert a Poly to a string representation with resolved type variables
+pub fn poly_to_string_resolved(c: Context, poly: Poly) -> String {
+  case poly {
+    Poly([], typ) -> type_to_string_resolved(c, typ)
+    Poly(vars, typ) -> {
+      let var_strings = list.map(vars, fn(var) { "?" <> int.to_string(var) })
+      "forall "
+      <> string.join(var_strings, " ")
+      <> ". "
+      <> type_to_string_resolved(c, typ)
+    }
+  }
+}
+
+/// Convert an Annotation to a string representation with resolved type variables
+pub fn annotation_to_string_resolved(
+  c: Context,
+  annotation: Annotation,
+) -> String {
+  case annotation {
+    NamedAnno(typ, name, None, parameters) ->
+      name
+      <> case parameters {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(
+            list.map(parameters, annotation_to_string_resolved(c, _)),
+            ", ",
+          )
+          <> ")"
+      }
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    NamedAnno(typ, name, Some(module), parameters) ->
+      module
+      <> "."
+      <> name
+      <> case parameters {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(
+            list.map(parameters, annotation_to_string_resolved(c, _)),
+            ", ",
+          )
+          <> ")"
+      }
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    TupleAnno(typ, elements) ->
+      "("
+      <> string.join(
+        list.map(elements, annotation_to_string_resolved(c, _)),
+        ", ",
+      )
+      <> ")"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    FunctionAnno(typ, parameters, return) ->
+      "fn("
+      <> string.join(
+        list.map(parameters, annotation_to_string_resolved(c, _)),
+        ", ",
+      )
+      <> ") -> "
+      <> annotation_to_string_resolved(c, return)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    VariableAnno(typ, name) -> name <> " : " <> type_to_string_resolved(c, typ)
+    HoleAnno(typ, name) -> name <> " : " <> type_to_string_resolved(c, typ)
+  }
+}
+
+/// Convert a FunctionParameter to a string representation with resolved type variables
+pub fn function_parameter_to_string_resolved(
+  c: Context,
+  param: FunctionParameter,
+) -> String {
+  let FunctionParameter(typ, label, name, annotation) = param
+  let label_str = case label {
+    Some(l) -> l <> " "
+    None -> ""
+  }
+  let name_str = assignment_name_to_string(name)
+  let annotation_str = case annotation {
+    Some(anno) -> " " <> annotation_to_string_resolved(c, anno)
+    None -> ""
+  }
+  label_str
+  <> name_str
+  <> ": "
+  <> type_to_string_resolved(c, typ)
+  <> annotation_str
+}
+
+/// Convert a Statement to a string representation with resolved type variables
+pub fn statement_to_string_resolved(c: Context, statement: Statement) -> String {
+  case statement {
+    Use(typ, patterns, function) ->
+      "use "
+      <> string.join(list.map(patterns, pattern_to_string_resolved(c, _)), ", ")
+      <> " <- "
+      <> expression_to_string_resolved(c, function)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    Assignment(typ, kind, pattern, annotation, value) -> {
+      let kind_str = case kind {
+        Let -> "let"
+        Assert -> "assert"
+      }
+      let annotation_str = case annotation {
+        Some(anno) -> ": " <> annotation_to_string_resolved(c, anno)
+        None -> ""
+      }
+      kind_str
+      <> " "
+      <> pattern_to_string_resolved(c, pattern)
+      <> annotation_str
+      <> " = "
+      <> expression_to_string_resolved(c, value)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    Expression(typ, expression) ->
+      expression_to_string_resolved(c, expression)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+  }
+}
+
+/// Convert a Pattern to a string representation with resolved type variables
+pub fn pattern_to_string_resolved(c: Context, pattern: Pattern) -> String {
+  case pattern {
+    PatternInt(typ, value) -> value <> " : " <> type_to_string_resolved(c, typ)
+    PatternFloat(typ, value) ->
+      value <> " : " <> type_to_string_resolved(c, typ)
+    PatternString(typ, value) ->
+      "\"" <> value <> "\"" <> " : " <> type_to_string_resolved(c, typ)
+    PatternDiscard(typ, name) ->
+      name <> " : " <> type_to_string_resolved(c, typ)
+    PatternVariable(typ, name) ->
+      name <> " : " <> type_to_string_resolved(c, typ)
+    PatternTuple(typ, elems) ->
+      "("
+      <> string.join(list.map(elems, pattern_to_string_resolved(c, _)), ", ")
+      <> ")"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    PatternList(typ, elements, tail) -> {
+      let elements_str =
+        string.join(list.map(elements, pattern_to_string_resolved(c, _)), ", ")
+      let tail_str = case tail {
+        Some(t) -> ", .." <> pattern_to_string_resolved(c, t)
+        None -> ""
+      }
+      "["
+      <> elements_str
+      <> tail_str
+      <> "]"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    PatternAssignment(typ, pattern, name) ->
+      pattern_to_string_resolved(c, pattern)
+      <> " as "
+      <> name
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
+      let prefix_name_str = case prefix_name {
+        Some(name) -> assignment_name_to_string(name)
+        None -> "_"
+      }
+      "<<"
+      <> prefix
+      <> " as "
+      <> prefix_name_str
+      <> ", rest as "
+      <> assignment_name_to_string(suffix_name)
+      <> ">>"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    PatternBitString(typ, segments) ->
+      "<<"
+      <> string.join(list.map(segments, fn(_) { "..." }), ", ")
+      <> ">>"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    PatternConstructor(typ, module, constructor, arguments, _, _, _) -> {
+      let module_str = case module == "" {
+        True -> ""
+        False -> module <> "."
+      }
+      let args_str = case arguments {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(
+            list.map(arguments, fn(arg) {
+              pattern_to_string_resolved(c, arg.item)
+            }),
+            ", ",
+          )
+          <> ")"
+      }
+      module_str
+      <> constructor
+      <> args_str
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+  }
+}
+
+/// Convert an Expression to a string representation with resolved type variables
+pub fn expression_to_string_resolved(
+  c: Context,
+  expression: Expression,
+) -> String {
+  case expression {
+    Int(typ, value) -> value <> " : " <> type_to_string_resolved(c, typ)
+    Float(typ, value) -> value <> " : " <> type_to_string_resolved(c, typ)
+    String(typ, value) ->
+      "\"" <> value <> "\"" <> " : " <> type_to_string_resolved(c, typ)
+    LocalVariable(typ, name) -> name <> " : " <> type_to_string_resolved(c, typ)
+    Function(typ, module, name, labels) -> {
+      let labels_str = case labels {
+        [] -> ""
+        _ ->
+          "("
+          <> string.join(
+            list.map(labels, fn(label) {
+              case label {
+                Some(l) -> l <> ": "
+                None -> ""
+              }
+            }),
+            ", ",
+          )
+          <> ")"
+      }
+      module
+      <> "."
+      <> name
+      <> labels_str
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    Constant(typ, module, name, _) -> {
+      module <> "." <> name <> " : " <> type_to_string_resolved(c, typ)
+    }
+    NegateInt(typ, value) ->
+      "-"
+      <> expression_to_string_resolved(c, value)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    NegateBool(typ, value) ->
+      "!"
+      <> expression_to_string_resolved(c, value)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    Block(typ, statements) ->
+      "{\n  "
+      <> string.join(
+        list.map(statements, statement_to_string_resolved(c, _)),
+        "\n  ",
+      )
+      <> "\n}"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    Panic(typ, value) -> {
+      let value_str = case value {
+        Some(v) -> expression_to_string_resolved(c, v)
+        None -> ""
+      }
+      "panic(" <> value_str <> ")" <> " : " <> type_to_string_resolved(c, typ)
+    }
+    Todo(typ, value) -> {
+      let value_str = case value {
+        Some(v) -> expression_to_string_resolved(c, v)
+        None -> ""
+      }
+      "todo(" <> value_str <> ")" <> " : " <> type_to_string_resolved(c, typ)
+    }
+    Tuple(typ, elements) ->
+      "("
+      <> string.join(
+        list.map(elements, expression_to_string_resolved(c, _)),
+        ", ",
+      )
+      <> ")"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    List(typ, elements, rest) -> {
+      let elements_str =
+        string.join(
+          list.map(elements, expression_to_string_resolved(c, _)),
+          ", ",
+        )
+      let rest_str = case rest {
+        Some(r) -> ", .." <> expression_to_string_resolved(c, r)
+        None -> ""
+      }
+      "["
+      <> elements_str
+      <> rest_str
+      <> "]"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    Fn(typ, parameters, return, body) -> {
+      let param_strings =
+        list.map(parameters, function_parameter_to_string_resolved(c, _))
+      let params_str = string.join(param_strings, ", ")
+      let return_str = case return {
+        Some(ret) -> " -> " <> annotation_to_string_resolved(c, ret)
+        None -> ""
+      }
+      let body_str = case body {
+        [] -> "{}"
+        statements -> {
+          "{\n    "
+          <> string.join(
+            list.map(statements, statement_to_string_resolved(c, _)),
+            "\n    ",
+          )
+          <> "\n  }"
+        }
+      }
+      "fn("
+      <> params_str
+      <> ")"
+      <> return_str
+      <> " "
+      <> body_str
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    RecordUpdate(typ, module, resolved_module, constructor, record, fields, _) -> {
+      let module_str = case module {
+        Some(m) -> m <> "."
+        None -> ""
+      }
+      let fields_str =
+        string.join(
+          list.map(fields, fn(field) {
+            let #(label, value) = field
+            label <> ": " <> expression_to_string_resolved(c, value)
+          }),
+          ", ",
+        )
+      module_str
+      <> constructor
+      <> "("
+      <> expression_to_string_resolved(c, record)
+      <> " with "
+      <> fields_str
+      <> ")"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    FieldAccess(typ, container, module, variant, label, index) -> {
+      expression_to_string_resolved(c, container)
+      <> "."
+      <> label
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    Call(typ, function, ordered_arguments) -> {
+      let args_str =
+        string.join(
+          list.map(ordered_arguments, expression_to_string_resolved(c, _)),
+          ", ",
+        )
+      expression_to_string_resolved(c, function)
+      <> "("
+      <> args_str
+      <> ")"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    TupleIndex(typ, tuple, index) -> {
+      expression_to_string_resolved(c, tuple)
+      <> "."
+      <> int.to_string(index)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    FnCapture(typ, label, function, arguments_before, arguments_after) -> {
+      let before_str =
+        string.join(
+          list.map(arguments_before, fn(field) {
+            let Field(label, item) = field
+            let label_str = case label {
+              Some(l) -> l <> ": "
+              None -> ""
+            }
+            label_str <> expression_to_string_resolved(c, item)
+          }),
+          ", ",
+        )
+      let after_str =
+        string.join(
+          list.map(arguments_after, fn(field) {
+            let Field(label, item) = field
+            let label_str = case label {
+              Some(l) -> l <> ": "
+              None -> ""
+            }
+            label_str <> expression_to_string_resolved(c, item)
+          }),
+          ", ",
+        )
+      let label_str = case label {
+        Some(l) -> l <> ": "
+        None -> ""
+      }
+      let args = case before_str == "" && after_str == "" {
+        True -> label_str <> "_"
+        False ->
+          before_str
+          <> case before_str == "" {
+            True -> ""
+            False -> ", "
+          }
+          <> label_str
+          <> "_"
+          <> case after_str == "" {
+            True -> ""
+            False -> ", " <> after_str
+          }
+      }
+      expression_to_string_resolved(c, function)
+      <> "("
+      <> args
+      <> ")"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    BitString(typ, segments) -> {
+      let segments_str =
+        string.join(
+          list.map(segments, fn(segment) {
+            let #(expr, _options) = segment
+            expression_to_string_resolved(c, expr)
+          }),
+          ", ",
+        )
+      "<<" <> segments_str <> ">>" <> " : " <> type_to_string_resolved(c, typ)
+    }
+    Case(typ, subjects, clauses) -> {
+      let subjects_str =
+        string.join(
+          list.map(subjects, expression_to_string_resolved(c, _)),
+          ", ",
+        )
+      let clauses_str =
+        string.join(
+          list.map(clauses, fn(clause) {
+            let Clause(patterns, guard, body) = clause
+            let patterns_str =
+              string.join(
+                list.map(patterns, fn(pattern_list) {
+                  string.join(
+                    list.map(pattern_list, pattern_to_string_resolved(c, _)),
+                    ", ",
+                  )
+                }),
+                " | ",
+              )
+            let guard_str = case guard {
+              Some(g) -> " if " <> expression_to_string_resolved(c, g)
+              None -> ""
+            }
+            patterns_str
+            <> guard_str
+            <> " -> "
+            <> expression_to_string_resolved(c, body)
+          }),
+          "\n    ",
+        )
+      "case "
+      <> subjects_str
+      <> " {\n    "
+      <> clauses_str
+      <> "\n  }"
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+    BinaryOperator(typ, name, left, right) -> {
+      expression_to_string_resolved(c, left)
+      <> " "
+      <> binary_operator_to_string(name)
+      <> " "
+      <> expression_to_string_resolved(c, right)
+      <> " : "
+      <> type_to_string_resolved(c, typ)
+    }
+  }
+}
+
+/// Convert a FunctionDefinition to a string representation with resolved type variables
+pub fn function_definition_to_string_resolved(
+  c: Context,
+  func_def: FunctionDefinition,
+) -> String {
+  let FunctionDefinition(
+    typ,
+    name,
+    publicity,
+    parameters,
+    return,
+    body,
+    location,
+  ) = func_def
+
+  let publicity_str = case publicity_to_string(publicity) {
+    "" -> ""
+    pub_str -> pub_str <> " "
+  }
+
+  let param_strings =
+    list.map(parameters, function_parameter_to_string_resolved(c, _))
+  let params_str = string.join(param_strings, ", ")
+
+  let return_str = case return {
+    Some(ret) -> " -> " <> annotation_to_string_resolved(c, ret)
+    None -> ""
+  }
+
+  let body_str = case body {
+    [] -> "{}"
+    statements -> {
+      "{\n  "
+      <> string.join(
+        list.map(statements, statement_to_string_resolved(c, _)),
+        "\n  ",
+      )
+      <> "\n}"
+    }
+  }
+
+  let location_str = " " <> span_to_string(location)
+
+  publicity_str
+  <> "fn "
+  <> name
+  <> "("
+  <> params_str
+  <> ")"
+  <> return_str
+  <> " : "
+  <> poly_to_string_resolved(c, typ)
+  <> " "
+  <> body_str
+  <> location_str
 }
