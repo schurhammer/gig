@@ -66,7 +66,11 @@ pub fn cc_module(mod: mono.Context) {
           Variant(v.id, fields)
         })
       let pointer = case variants {
-        [_] -> False
+        [v] ->
+          case v.fields {
+            [] -> True
+            _ -> False
+          }
         _ -> True
       }
       let custom =

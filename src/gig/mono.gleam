@@ -221,6 +221,14 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
       let type_string = get_type_string(sub)
       let mono_name = "F_" <> fun.id <> type_string
 
+      case fun.body {
+        t.Panic(_, _) -> {
+          io.println("instantiating unimplemented function " <> fun.id)
+          io.println(t.function_to_string(fun))
+        }
+        _ -> Nil
+      }
+
       case dict.get(c.out.functions, mono_name) {
         Ok(_) -> #(c, mono_name)
         Error(_) -> {
