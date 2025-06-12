@@ -5,6 +5,14 @@ import gleam
 import gleam/order
 import gleam/list
 
+pub fn length(a: String) -> Int {
+  length_string(a)
+}
+
+pub fn byte_size(a: String) -> Int {
+  length_string(a)
+}
+
 @external(c, "", "append_string")
 pub fn append(to first: String, suffix second: String) -> String
 

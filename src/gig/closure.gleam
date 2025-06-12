@@ -16,11 +16,16 @@ pub type Module {
 }
 
 pub type CustomType {
-  CustomType(name: String, variants: List(Variant), pointer: Bool)
+  CustomType(
+    name: String,
+    display_name: String,
+    variants: List(Variant),
+    pointer: Bool,
+  )
 }
 
 pub type Variant {
-  Variant(name: String, fields: List(Field))
+  Variant(name: String, display_name: String, fields: List(Field))
 }
 
 pub type Field {
@@ -63,7 +68,7 @@ pub fn cc_module(mod: mono.Context) {
             list.index_map(v.fields, fn(f, i) {
               Field(gen_names.get_field_name(i), f)
             })
-          Variant(v.id, fields)
+          Variant(v.id, v.display_name, fields)
         })
       let pointer = case variants {
         [v] ->
@@ -74,7 +79,12 @@ pub fn cc_module(mod: mono.Context) {
         _ -> True
       }
       let custom =
-        CustomType(name: custom.id, variants: variants, pointer: pointer)
+        CustomType(
+          name: custom.id,
+          display_name: custom.display_name,
+          variants: variants,
+          pointer: pointer,
+        )
 
       let mod = Module(..c.mod, types: [custom, ..c.mod.types])
       CC(..c, mod: mod)
@@ -241,8 +251,8 @@ fn cc(c: CC, e: t.Exp) -> #(CC, Exp) {
             ])
 
           let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
-          let variant = Variant(env_type_name, fields)
-          let typedef = CustomType(env_type_name, [variant], True)
+          let variant = Variant(env_type_name, "$", fields)
+          let typedef = CustomType(env_type_name, "$", [variant], True)
 
           let types = [typedef, ..types]
 

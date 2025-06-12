@@ -370,6 +370,8 @@ Bool eq_String(String a, String b) {
   return strncmp(a.bytes, b.bytes, a.byte_length) == 0;
 }
 
+Int length_string(String a) { return a.byte_length; }
+
 String append_string(String a, String b) {
   if (a.byte_length == 0) {
     return b;
@@ -410,6 +412,19 @@ Bool ends_with_string(String string, String with) {
     }
   }
   return True;
+}
+
+String slice_string(String in, Int offset, Int length) {
+  if (offset < 0 || length < 0 || offset + length > in.byte_length) {
+    struct String str;
+    str.byte_length = 0;
+    str.bytes = in.bytes + in.byte_length;
+    return str;
+  }
+  struct String str;
+  str.byte_length = length;
+  str.bytes = in.bytes + offset;
+  return str;
 }
 
 String drop_start_string(String string, Int count) {

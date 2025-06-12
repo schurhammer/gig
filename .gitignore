@@ -5,3 +5,4 @@ samples/*
 samples/nested/*
 !samples/nested/*.gleam
 src/gig.c
+src/gig.exe

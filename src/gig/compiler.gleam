@@ -5,10 +5,8 @@ import gig/mono
 import gig/polyfill
 import gig/typed_ast
 
-import gleam/dict
 import gleam/int
 import gleam/result
-import pprint
 
 import glance
 import shellout
@@ -96,21 +94,6 @@ pub fn compile(
     }
   })
 
-  // let assert Ok(packages) = simplifile.get_files(packages_dir)
-  // packages
-  // |> list.filter(fn(file) { string.ends_with(file, ".gleam") })
-  // |> list.each(fn(src) {
-  //   let relative = src |> string.split("/") |> list.drop(5)
-  //   let relative_file = relative |> string.join("/")
-  //   let relative_path = all_but_last(relative) |> string.join("/")
-
-  //   let dst_path = build_src_dir <> "/" <> relative_path
-  //   let dst_file = build_src_dir <> "/" <> relative_file
-
-  //   let assert Ok(_) = simplifile.create_directory_all(dst_path)
-  //   let assert Ok(_) = simplifile.copy_file(src, dst_file)
-  // })
-
   // copy stdlib polyfills into build dir
   include_sources("./stdlib")
 
@@ -170,7 +153,8 @@ pub fn compile(
   }
 
   // compile the c file
-  let args = ["-o", file_name, c_file]
+  let binary_name = file_name <> ".exe"
+  let args = ["-o", binary_name, c_file]
 
   let args = case gc {
     True -> ["-lgc", ..args]
@@ -182,14 +166,14 @@ pub fn compile(
     False -> args
   }
 
-  io.println("Generating binary ./" <> file_name)
+  io.println("Generating binary ./" <> binary_name)
   case shellout.command(compiler, args, ".", []) {
     Ok(_) -> Nil
     Error(message) ->
       io.println_error("Failed to generate binary:\n" <> message.1)
   }
 
-  file_name
+  binary_name
 }
 
 fn offset_to_line_col(text: String, offset: Int) {

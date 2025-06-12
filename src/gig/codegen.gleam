@@ -400,7 +400,7 @@ fn custom_type(t: CustomType) {
           False -> ""
         }
         <> case v.fields {
-          [] -> "return " <> string_lit(v.name) <> ";\n"
+          [] -> "return " <> string_lit(v.display_name) <> ";\n"
           _ ->
             "return append_string("
             <> v.fields
@@ -413,7 +413,7 @@ fn custom_type(t: CustomType) {
               <> ")"
             })
             |> list.intersperse(string_lit(", "))
-            |> list.fold(string_lit(v.name <> "("), fn(a, f) {
+            |> list.fold(string_lit(v.display_name <> "("), fn(a, f) {
               "append_string(" <> a <> ", " <> f <> ")"
             })
             <> ", "
@@ -433,7 +433,7 @@ fn custom_type(t: CustomType) {
           <> v.name
           <> "* a = a_ptr;\n"
           <> case v.fields {
-            [] -> "return " <> string_lit(v.name) <> ";\n"
+            [] -> "return " <> string_lit(v.display_name) <> ";\n"
             _ ->
               "return append_string("
               <> v.fields
@@ -446,7 +446,7 @@ fn custom_type(t: CustomType) {
                 <> ")"
               })
               |> list.intersperse(string_lit(", "))
-              |> list.fold(string_lit(v.name <> "("), fn(a, f) {
+              |> list.fold(string_lit(v.display_name <> "("), fn(a, f) {
                 "append_string(" <> a <> ", " <> f <> ")"
               })
               <> ", "

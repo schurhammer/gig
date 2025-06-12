@@ -96,6 +96,7 @@ pub fn from_string(string: String) -> StringTree {
 @external(javascript, "../gleam_stdlib.mjs", "identity")
 pub fn to_string(tree: StringTree) -> String {
   case tree {
+    Leaf("") -> ""
     Leaf(string) -> string
     Node(left, right) -> to_string(left) <> to_string(right)
   }
@@ -106,11 +107,11 @@ pub fn to_string(tree: StringTree) -> String {
 @external(erlang, "erlang", "iolist_size")
 @external(javascript, "../gleam_stdlib.mjs", "length")
 pub fn byte_size(tree: StringTree) -> Int {
-  // case tree {
-  //   Leaf(string) -> string.byte_size(string)
-  //   Node(left, right) -> byte_size(left) + byte_size(right)
-  // }
-  todo
+  case tree {
+    Leaf("") -> 0
+    Leaf(string) -> length_string(string)
+    Node(left, right) -> byte_size(left) + byte_size(right)
+  }
 }
 
 /// Joins the given trees into a new tree separated with the given string.
@@ -161,24 +162,52 @@ pub fn reverse(tree: StringTree) -> StringTree {
 @external(javascript, "../gleam_stdlib.mjs", "graphemes")
 fn do_to_graphemes(string: String) -> List(String)
 
-type Direction {
-  All
-}
+@external(c, "", "slice_string")
+pub fn slice_string(str: String, offset: Int, length: Int) -> String
+
+@external(c, "", "length_string")
+fn length_string(str: String) -> Int
 
 /// Splits a `StringTree` on a given pattern into a list of trees.
 ///
-@external(javascript, "../gleam_stdlib.mjs", "split")
 pub fn split(tree: StringTree, on pattern: String) -> List(StringTree) {
-  erl_split(tree, pattern, All)
+  let string = to_string(tree)
+  let pattern_len = length_string(pattern)
+
+  case pattern_len {
+    0 -> [tree]
+    _ -> do_split(string, pattern, pattern_len, 0, [])
+  }
 }
 
-@external(erlang, "string", "split")
-fn erl_split(a: StringTree, b: String, c: Direction) -> List(StringTree) {
-  // a
-  // |> to_string
-  // |> string.split(b)
-  // |> list.map(from_string)
-  todo
+fn do_split(string: String, pattern: String, pattern_len: Int, start: Int, acc: List(StringTree)) -> List(StringTree) {
+  let string_len = length_string(string)
+  case find_pattern(string, pattern, pattern_len, start, string_len) {
+    Ok(index) -> {
+      let part = slice_string(string, start, index - start)
+      let new_acc = [from_string(part), ..acc]
+      do_split(string, pattern, pattern_len, index + pattern_len, new_acc)
+    }
+    Error(Nil) -> {
+      let part = slice_string(string, start, string_len - start)
+      list.reverse([from_string(part), ..acc])
+    }
+  }
+}
+
+fn find_pattern(string: String, pattern: String, pattern_len: Int, start: Int, string_len: Int) -> Result(Int, Nil) {
+  case start + pattern_len > string_len {
+    True -> Error(Nil)
+    False -> {
+      let substr = slice_string(string, start, pattern_len)
+      case substr == pattern {
+        True -> {
+          Ok(start)
+        }
+        False -> find_pattern(string, pattern, pattern_len, start + 1, string_len)
+      }
+    }
+  }
 }
 
 /// Replaces all instances of a pattern with a given string substitute.
@@ -190,11 +219,8 @@ pub fn replace(
   each pattern: String,
   with substitute: String,
 ) -> StringTree {
-  // a
-  // |> to_string
-  // |> string.replace(peattern, substitute)
-  // |> from_string
-  todo
+  split(tree, pattern)
+  |> join(substitute)
 }
 
 /// Compares two string trees to determine if they have the same textual
@@ -242,5 +268,9 @@ pub fn is_equal(a: StringTree, b: StringTree) -> Bool {
 ///
 @external(erlang, "string", "is_empty")
 pub fn is_empty(tree: StringTree) -> Bool {
-  to_string(tree) == ""
+  case tree {
+    Leaf("") -> True
+    Leaf(_) -> False
+    Node(left, right) -> is_empty(left) && is_empty(right)
+  }
 }

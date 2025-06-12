@@ -135,11 +135,17 @@ fn instantiate_type(c: Context, typ: t.Type) {
                   let typ = t.Poly([], sub_type(c, sub, v.typ.typ))
                   let fields =
                     list.map(v.fields, fn(typ) { sub_type(c, sub, typ) })
-                  t.Variant(typ, mono_name, fields)
+                  t.Variant(typ, mono_name, v.display_name, fields)
                 })
 
               // create new custom type
-              let custom = t.CustomType(t.Poly([], mono), mono_name, variants)
+              let custom =
+                t.CustomType(
+                  t.Poly([], mono),
+                  mono_name,
+                  custom.display_name,
+                  variants,
+                )
 
               // add to module
               let types = dict.insert(c.out.types, mono_name, custom)
@@ -178,8 +184,8 @@ fn register_tuple(c: Context, typ: t.Type) {
       let variant_typ =
         t.Poly(vars, t.FunctionType(element_types, custom_typ.typ))
 
-      let variant = t.Variant(variant_typ, variant_id, element_types)
-      let custom = t.CustomType(custom_typ, variant_id, [variant])
+      let variant = t.Variant(variant_typ, variant_id, "#", element_types)
+      let custom = t.CustomType(custom_typ, variant_id, "#", [variant])
       let cin =
         t.Context(..cin, types: dict.insert(cin.types, custom.id, custom))
 

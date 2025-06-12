@@ -106,6 +106,9 @@ pub fn div_float(a: Float, b: Float) -> Float
 
 // String Operators
 
+@external(c, "", "length_string")
+pub fn length_string(a: String) -> Int
+
 @external(c, "", "append_string")
 pub fn append_string(a: String, b: String) -> String
 
