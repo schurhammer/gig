@@ -110,7 +110,7 @@ struct Closure {
   Pointer env;
 };
 
-void panic_exit() {
+_Noreturn void panic_exit() {
   printf("panic\n");
   exit(1);
 }

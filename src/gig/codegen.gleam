@@ -189,6 +189,17 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
           <> ";\n"
           <> gen_term(exp, target, id)
         }
+        _, Call(..) -> {
+          // inline call
+          let escaped_var = escape_if_keyword(var)
+          type_name(val.typ)
+          <> " "
+          <> escaped_var
+          <> " = "
+          <> gen_term(val, "", id)
+          <> ";\n"
+          <> gen_term(exp, target, id)
+        }
         _, _ -> {
           // complex expression
           let escaped_var = escape_if_keyword(var)
@@ -226,12 +237,7 @@ fn function(fun: Function) -> String {
   })
   |> string.join(", ")
   <> ") {\n"
-  // TODO this RETURN isn't needed becase we detect returns using hit_target
-  // but sometimes I get c compiler warnings without it
-  <> type_name(ret)
-  <> " RETURN;\n"
   <> gen_term(body, "RETURN", 1)
-  <> "return RETURN;\n"
   <> "}"
 }
 

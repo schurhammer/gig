@@ -282,8 +282,13 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
           let body = lower_body(c, body)
           Let(body.typ, "_", value, body)
         }
+        t.Assignment(_, _, t.PatternVariable(_, name), _, value) -> {
+          let value = lower_expression(c, value)
+          let body = lower_body(c, body)
+          Let(body.typ, name, value, body)
+        }
         t.Assignment(_, _, pattern, _, value) -> {
-          let subject = t.LocalVariable(value.typ, "Subject")
+          let subject = t.LocalVariable(value.typ, "S")
           let value = lower_expression(c, value)
           let body = lower_body(c, body)
           let bindings = lower_pattern_bindings(c, pattern, subject)
@@ -293,7 +298,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
               let value = lower_expression(c, subject)
               Let(body.typ, name, value, body)
             })
-          Let(body.typ, "Subject", value, body)
+          Let(body.typ, "S", value, body)
         }
         t.Use(..) -> todo
       }
@@ -1019,7 +1024,11 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       // for each field in variant either take the new field or default to field access on subject
       // and call the constructor with that
       let typ = map_type(c, typ)
-      let subject = Local(typ, "Subject")
+      let subject_name = case record {
+        t.LocalVariable(_, name) -> name
+        _ -> "S"
+      }
+      let subject = Local(typ, subject_name)
       let constructor = gen_names.get_id(module, constructor)
       let fields =
         list.index_map(ordered_fields, fn(f, i) {
@@ -1037,7 +1046,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
       let body = Call(typ, Global(constructor_typ, constructor), fields)
-      Let(body.typ, "Subject", record, body)
+      Let(body.typ, subject_name, record, body)
     }
     t.FieldAccess(typ, container, module, variant, label, i) -> {
       let typ = map_type(c, typ)
@@ -1154,7 +1163,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let subject_vars =
         list.index_map(subjects, fn(subject, index) {
           // TODO special case for when subject is already a local
-          let name = "Subject_" <> int.to_string(index)
+          let name = "S" <> int.to_string(index)
           let subject_exp = lower_expression(c, subject)
           #(name, subject, subject_exp)
         })
