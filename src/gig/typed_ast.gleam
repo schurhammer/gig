@@ -1,6 +1,7 @@
 import gig/call_graph
 import gig/graph
 import glance as g
+import listx
 
 import gleam/dict.{type Dict}
 import gleam/int
@@ -1528,10 +1529,10 @@ fn match_labels(args: List(Field(a)), params: List(Option(String))) -> List(a) {
         _ -> panic as "too many arguments"
       }
     [p, ..p_rest] ->
-      case list.pop(args, fn(a) { a.label == p }) {
+      case listx.pop(args, fn(a) { a.label == p }) {
         Ok(#(a, a_rest)) -> [a.item, ..match_labels(a_rest, p_rest)]
         Error(_) ->
-          case list.pop(args, fn(a) { a.label == None }) {
+          case listx.pop(args, fn(a) { a.label == None }) {
             Ok(#(a, a_rest)) -> [a.item, ..match_labels(a_rest, p_rest)]
             Error(_) -> panic as "no matching label"
           }
@@ -1547,7 +1548,7 @@ fn match_labels_optional(
   case params {
     [] -> []
     [p, ..p_rest] ->
-      case list.pop(args, fn(a) { a.label == p }) {
+      case listx.pop(args, fn(a) { a.label == p }) {
         Ok(#(a, a_rest)) -> [
           Some(a.item),
           ..match_labels_optional(a_rest, p_rest)
