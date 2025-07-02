@@ -521,6 +521,28 @@ pub fn infer_module(
       |> list.find(fn(c) { c.definition.name == name })
     })
 
+  // add functions to global env so they are available for recursion
+  let c =
+    list.fold(module.functions, c, fn(c, def) {
+      let fun = def.definition
+      let c = Context(..c, current_definition: fun.name)
+
+      // create placeholder function type based on function signature
+      let #(c, parameters, return) =
+        infer_function_parameters(c, fun.parameters, fun.return)
+
+      let #(c, return_type) = case return {
+        Some(x) -> #(c, x.typ)
+        None -> new_type_var_ref(c)
+      }
+
+      let param_types = list.map(parameters, fn(param) { param.typ })
+      let param_labels = list.map(parameters, fn(f) { f.label })
+      let typ = FunctionType(param_types, return_type)
+
+      register_function(c, def.definition.name, Poly([], typ), param_labels)
+    })
+
   // infer constant expressions
   let c =
     list.fold(constants, c, fn(c, def) {
@@ -547,28 +569,6 @@ pub fn infer_module(
     let assert Ok(group) =
       list.try_map(group, fn(fun_name) {
         list.find(module.functions, fn(f) { f.definition.name == fun_name })
-      })
-
-    // add functions to global env so they are available for recursion
-    let c =
-      list.fold(group, c, fn(c, def) {
-        let fun = def.definition
-        let c = Context(..c, current_definition: fun.name)
-
-        // create placeholder function type based on function signature
-        let #(c, parameters, return) =
-          infer_function_parameters(c, fun.parameters, fun.return)
-
-        let #(c, return_type) = case return {
-          Some(x) -> #(c, x.typ)
-          None -> new_type_var_ref(c)
-        }
-
-        let param_types = list.map(parameters, fn(param) { param.typ })
-        let param_labels = list.map(parameters, fn(f) { f.label })
-        let typ = FunctionType(param_types, return_type)
-
-        register_function(c, def.definition.name, Poly([], typ), param_labels)
       })
 
     // infer types for the group
