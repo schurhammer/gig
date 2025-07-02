@@ -1485,6 +1485,10 @@ fn infer_body(
         }
         g.Use(pats, fun) -> {
           // TODO infer without desugaring
+          let fun = case fun {
+            g.Call(..) -> fun
+            _ -> g.Call(fun, [])
+          }
           case fun {
             g.Call(fun, args) -> {
               let params =
