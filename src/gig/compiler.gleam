@@ -1,9 +1,11 @@
 import gig/closure
 import gig/codegen
 import gig/core
+import gig/headers
 import gig/mono
 import gig/polyfill
 import gig/typed_ast
+import gleam/dict
 
 import gleam/int
 import gleam/result
@@ -27,37 +29,33 @@ fn all_but_last(l: List(a)) -> List(a) {
   }
 }
 
-fn read_file(name) {
-  case simplifile.read(name) {
-    Ok(content) -> content
-    _ -> panic as { "Failed to read file " <> name }
+fn read_source(sources: dict.Dict(String, String), name: String) {
+  case dict.get(sources, name) {
+    Ok(file) ->
+      case simplifile.read(file) {
+        Ok(content) -> Ok(content)
+        _ -> Error("Failed to read source file " <> file)
+      }
+    _ -> Error("No source for module " <> name)
   }
 }
 
-fn include_sources(src_dir: String) {
-  // TODO instead of copying files we could create an index of where to find them
-
+fn include_sources(
+  sources: dict.Dict(String, String),
+  src_dir: String,
+) -> dict.Dict(String, String) {
   io.println("Sources " <> src_dir)
   let assert Ok(files) = simplifile.get_files(src_dir)
 
   files
   |> list.filter(fn(file) { string.ends_with(file, ".gleam") })
-  |> list.each(fn(src) {
-    let dst_file = build_src_dir <> string.replace(src, src_dir, "")
-    let dst_path = all_but_last(string.split(dst_file, "/")) |> string.join("/")
-
-    let assert Ok(_) = simplifile.create_directory_all(dst_path)
-    let assert Ok(_) = simplifile.copy_file(src, dst_file)
+  |> list.fold(sources, fn(sources, src) {
+    let module =
+      src
+      |> string.replace(src_dir, "")
+      |> string.replace(".gleam", "")
+    dict.insert(sources, module, src)
   })
-}
-
-fn read_source_file(path) {
-  case simplifile.read(build_src_dir <> "/" <> path) {
-    Ok(content) -> Ok(content)
-    Error(_) -> {
-      Error("Failed to read module " <> path)
-    }
-  }
 }
 
 // returns the file name of the binary
@@ -76,51 +74,47 @@ pub fn compile(
     |> string.join("/")
 
   let target_path = case target_path {
-    "" -> "."
-    _ -> target_path
+    "" -> "./"
+    _ -> target_path <> "/"
   }
 
   // clear build dir
   let _ = simplifile.delete(build_dir)
 
-  // copy dependencies src into build dir
+  // create a lookup table for package sources
   let packages_dir = "./build/packages"
   let assert Ok(packages) = simplifile.read_directory(packages_dir)
-  list.each(packages, fn(package) {
-    let src_dir = packages_dir <> "/" <> package <> "/src"
-    case simplifile.is_directory(src_dir) {
-      Ok(True) -> include_sources(src_dir)
-      _ -> Nil
-    }
-  })
+  let sources =
+    list.fold(packages, dict.new(), fn(sources, package) {
+      let src_dir = packages_dir <> "/" <> package <> "/src/"
+      case simplifile.is_directory(src_dir) {
+        Ok(True) -> include_sources(sources, src_dir)
+        _ -> sources
+      }
+    })
 
-  // copy stdlib polyfills into build dir
-  include_sources("./stdlib")
-
-  // copy target src into build dir
-  include_sources("./" <> target_path)
+  let sources =
+    sources
+    |> include_sources("./stdlib/")
+    |> include_sources("./" <> target_path)
 
   // process the prelude
-  let prelude = read_file(build_src_dir <> "/gleam.gleam")
+  let assert Ok(prelude) = read_source(sources, "gleam")
   let assert Ok(prelude) = glance.module(prelude)
   let c = typed_ast.new_context()
   let c = typed_ast.infer_module(c, prelude, "gleam")
 
   // parse and typecheck input (recursively)
-  let #(typed, _done) = infer_file(c, ["gleam"], module_id)
+  let #(typed, _done) = infer_file(sources, c, ["gleam"], module_id)
 
-  // generate code
   let core = core.lower_context(typed)
-  // pprint.debug(core.functions |> dict.get("string_example_main"))
   let #(mono, main_name) = mono.run(core, module_id <> "_" <> "main")
   let cc = closure.cc_module(mono)
   let code = codegen.module(cc)
 
   // insert the generated code into the template
-  let template = read_file("./src/template.c")
-
+  let assert Ok(template) = simplifile.read("./src/template.c")
   let main_call = main_name <> "();\n"
-
   let template = case gc {
     True -> {
       // TODO GC_enable_incremental
@@ -144,17 +138,75 @@ pub fn compile(
   let output = string.replace(template, "/// CODEGEN", code)
 
   // output the c file
-  let assert [file_name, ..] = string.split(gleam_file_name, ".gleam")
-  let c_file = file_name <> ".c"
+  let c_file = target_path <> module_id <> ".c"
+  let c_file_h = target_path <> "builtin.h"
+
+  io.println("Generating ./" <> c_file_h)
+  let assert Ok(builtin_h) = simplifile.read("./src/builtin.h")
+  case simplifile.write(c_file_h, builtin_h) {
+    Ok(_) -> Nil
+    _ -> panic as { "Failed to write file " <> c_file_h }
+  }
+
   io.println("Generating ./" <> c_file)
   case simplifile.write(c_file, output) {
     Ok(_) -> Nil
     _ -> panic as { "Failed to write file " <> c_file }
   }
 
+  let external_c_files =
+    core.externals
+    |> dict.values
+    |> list.filter(fn(x) { x.src != "" })
+    |> list.map(fn(x) { x.src })
+    |> list.unique
+    |> list.filter_map(fn(module) {
+      let filepath = case dict.get(sources, module <> ".polyfill") {
+        Ok(path) -> path
+        _ -> {
+          let assert Ok(filepath) = dict.get(sources, module)
+          filepath
+        }
+      }
+      let filepath =
+        filepath
+        |> string.replace(".polyfill.gleam", ".c")
+        |> string.replace(".gleam", ".c")
+
+      case simplifile.is_file(filepath) {
+        Ok(True) -> Ok(filepath)
+        _ -> Error(Nil)
+      }
+    })
+
+  // generate header files for ffi
+  headers.module_headers(core)
+  |> list.each(fn(item) {
+    let #(module, header) = item
+    let filepath = case dict.get(sources, module <> ".polyfill") {
+      Ok(path) -> path
+      _ -> {
+        let assert Ok(filepath) = dict.get(sources, module)
+        filepath
+      }
+    }
+    let filepath =
+      filepath
+      |> string.replace(".polyfill.gleam", ".h")
+      |> string.replace(".gleam", ".h")
+    case header {
+      "" -> Nil
+      _ -> {
+        io.println("Generating " <> filepath)
+        let assert Ok(_) = simplifile.write(filepath, header)
+        Nil
+      }
+    }
+  })
+
   // compile the c file
-  let binary_name = file_name <> ".exe"
-  let args = ["-o", binary_name, c_file]
+  let binary_name = target_path <> module_id <> ".exe"
+  let args = ["-Isrc", "-o", binary_name, c_file, ..external_c_files]
 
   let args = case gc {
     True -> ["-lgc", ..args]
@@ -198,25 +250,25 @@ fn offset_to_line_col(text: String, offset: Int) {
 }
 
 fn infer_file(
+  sources: dict.Dict(String, String),
   c: typed_ast.Context,
   done: List(String),
   module_id: String,
 ) -> #(typed_ast.Context, List(String)) {
-  let file = module_id <> ".gleam"
-  let polyfill_file = module_id <> ".polyfill.gleam"
-  io.println("Read  " <> build_src_dir <> "/" <> file)
-
-  // add file to "done" list
+  // add module to "done" list
   let done = [module_id, ..done]
+  let assert Ok(source) = dict.get(sources, module_id)
 
-  // parse file
+  io.println("Parse " <> source)
+
   let assert Ok(module) =
-    read_source_file(file)
-    |> result.try(parse_module(file, _))
+    read_source(sources, module_id)
+    |> result.try(parse_module(module_id, _))
 
+  let polyfill_module_id = module_id <> ".polyfill"
   let polyfill_module =
-    read_source_file(polyfill_file)
-    |> result.try(parse_module(polyfill_file, _))
+    read_source(sources, polyfill_module_id)
+    |> result.try(parse_module(polyfill_module_id, _))
 
   let module = case polyfill_module {
     Ok(polyfill) -> polyfill.apply(module, polyfill)
@@ -230,12 +282,12 @@ fn infer_file(
       let module_id = i.definition.module
       case list.contains(done, module_id) {
         True -> #(c, done)
-        False -> infer_file(c, done, module_id)
+        False -> infer_file(sources, c, done, module_id)
       }
     })
 
   // infer this file
-  io.println("Check " <> build_src_dir <> "/" <> file)
+  io.println("Check " <> source)
   let c = typed_ast.infer_module(c, module, module_id)
 
   #(c, done)

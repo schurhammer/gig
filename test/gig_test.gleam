@@ -13,7 +13,7 @@ pub fn main() {
 }
 
 pub fn all_samples_tests() {
-  let assert Ok(files) = simplifile.get_files("./samples")
+  let assert Ok(files) = simplifile.get_files("samples")
 
   // remove old binaries so they don't interfere
   files

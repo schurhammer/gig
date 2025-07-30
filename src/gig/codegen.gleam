@@ -241,7 +241,7 @@ fn function(fun: Function) -> String {
   <> "}"
 }
 
-fn function_forward(fun: Function) -> String {
+pub fn function_forward(fun: Function) -> String {
   // io.debug(fun)
   let params = fun.params
   let assert core.FunctionType(param_types, ret) = fun.typ
@@ -258,6 +258,17 @@ fn function_forward(fun: Function) -> String {
   <> ");"
 }
 
+fn custom_type_def(t: CustomType) {
+  case t.pointer {
+    True -> "typedef Pointer " <> t.name <> ";"
+    False ->
+      case t.variants {
+        [v] -> "typedef struct " <> v.name <> " " <> t.name <> ";"
+        _ -> panic as "unexpected struct type with multiple variants"
+      }
+  }
+}
+
 fn custom_type_forward(t: CustomType) {
   let equal =
     "Bool"
@@ -268,17 +279,17 @@ fn custom_type_forward(t: CustomType) {
     <> " a, "
     <> t.name
     <> " b"
-    <> ");\n"
-  let typedef = case t.pointer {
-    True -> "typedef Pointer " <> t.name <> ";\n"
-    False ->
-      case t.variants {
-        [v] -> "typedef struct " <> v.name <> " " <> t.name <> ";\n"
-        _ -> panic as "unexpected struct type with multiple variants"
-      }
-  }
-  let inspect = "String inspect_" <> t.name <> "(" <> t.name <> " a);\n"
-  typedef <> equal <> inspect
+    <> ");"
+  let inspect = "String inspect_" <> t.name <> "(" <> t.name <> " a);"
+
+  let constructors =
+    t.variants
+    |> list.filter(fn(v) { v.fields != [] })
+    |> list.map(constructor_function_header(t, _))
+    |> list.map(fn(con) { con <> ";" })
+
+  [equal, inspect, ..constructors]
+  |> string.join("\n")
 }
 
 fn decode_arg(t: CustomType, var: String) -> String {
@@ -327,23 +338,9 @@ fn custom_type(t: CustomType) {
         list.map(v.fields, fn(f) {
           let field_equal = "eq_" <> type_name(f.typ)
           case t.pointer {
-            True ->
-              "{ struct "
-              <> v.name
-              <> "* a = a_ptr;\n"
-              <> "struct "
-              <> v.name
-              <> "* b = b_ptr;\n"
-              <> "if(!"
-              <> field_equal
-              <> "(a"
-              <> access_op
-              <> f.name
-              <> ", b"
-              <> access_op
-              <> f.name
-              <> ")) { return False; }\n"
-              <> "}"
+            True -> "{ struct " <> v.name <> "* a =
+              (struct " <> v.name <> "*) a_ptr;\n" <> "struct " <> v.name <> "* b =
+              (struct " <> v.name <> "*) b_ptr;\n" <> "if(!" <> field_equal <> "(a" <> access_op <> f.name <> ", b" <> access_op <> f.name <> ")) { return False; }\n" <> "}"
             False -> {
               let escaped_field_name = escape_if_keyword(f.name)
               "if(!"
@@ -367,10 +364,14 @@ fn custom_type(t: CustomType) {
           <> ") {\n"
           <> "struct "
           <> v.name
-          <> "* a = a_ptr;\n"
+          <> "* a = (struct "
+          <> v.name
+          <> "*) a_ptr;\n"
           <> "struct "
           <> v.name
-          <> "* b = b_ptr;\n"
+          <> "* b = (struct "
+          <> v.name
+          <> "*) b_ptr;\n"
           <> list.map(v.fields, fn(f) {
             let field_equal = "eq_" <> type_name(f.typ)
             let escaped_field_name = escape_if_keyword(f.name)
@@ -402,7 +403,8 @@ fn custom_type(t: CustomType) {
     <> case t.variants {
       [v] ->
         case t.pointer {
-          True -> "{ struct " <> v.name <> "* a = a_ptr;\n"
+          True ->
+            "{ struct " <> v.name <> "* a = (struct " <> v.name <> "*) a_ptr;\n"
           False -> ""
         }
         <> case v.fields {
@@ -437,7 +439,9 @@ fn custom_type(t: CustomType) {
           <> ") {\n"
           <> "struct "
           <> v.name
-          <> "* a = a_ptr;\n"
+          <> "* a = (struct "
+          <> v.name
+          <> "*) a_ptr;\n"
           <> case v.fields {
             [] -> "return " <> string_lit(v.display_name) <> ";\n"
             _ ->
@@ -492,21 +496,15 @@ fn custom_type(t: CustomType) {
           <> tag
           <> ");\n"
         _ ->
-          t.name
-          <> " new_"
-          <> v.name
-          <> "("
-          <> v.fields
-          |> list.map(fn(p) {
-            type_name(p.typ) <> " " <> escape_if_keyword(p.name)
-          })
-          |> string.join(", ")
-          <> ") {\n"
+          constructor_function_header(t, v)
+          <> " {\n"
           <> case t.pointer {
             True ->
               "struct "
               <> v.name
-              <> "* _ptr = malloc(sizeof(struct "
+              <> "* _ptr = (struct "
+              <> v.name
+              <> "*) malloc(sizeof(struct "
               <> v.name
               <> "));\n"
               <> "uint16_t _tag = "
@@ -563,7 +561,9 @@ fn custom_type(t: CustomType) {
             True ->
               " struct "
               <> v.name
-              <> "* ptr = decode_pointer(value); return ptr"
+              <> "* ptr = (struct "
+              <> v.name
+              <> "*) decode_pointer(value); return ptr"
               <> access_op
               <> escaped_field_name
             False -> "return value" <> access_op <> escaped_field_name
@@ -578,9 +578,73 @@ fn custom_type(t: CustomType) {
   variant_definitions <> equal <> inspect
 }
 
-pub fn module(mod: Module) -> String {
-  let funs = mod.functions
+fn constructor_function_header(t: CustomType, v: closure.Variant) -> String {
+  t.name
+  <> " new_"
+  <> v.name
+  <> "("
+  <> v.fields
+  |> list.map(fn(p) { type_name(p.typ) <> " " <> escape_if_keyword(p.name) })
+  |> string.join(", ")
+  <> ")"
+}
 
+fn custom_type_structs(t: CustomType) {
+  list.map(t.variants, fn(v) {
+    let fields =
+      list.map(v.fields, fn(f) {
+        type_name(f.typ) <> " " <> escape_if_keyword(f.name) <> ";\n"
+      })
+      |> string.join("")
+
+    "struct " <> v.name <> "{\n" <> fields <> "};"
+  })
+  |> string.join("\n")
+}
+
+pub fn module_header(mod: Module) -> String {
+  // sort types to put them in order of dependency and
+  //  "pointer types" after "struct types"
+  let type_graph = type_graph.create(mod)
+  let type_groups = graph.strongly_connected_components(type_graph)
+
+  let types =
+    list.flatten(type_groups)
+    |> list.map(fn(name) {
+      let assert Ok(x) = list.find(mod.types, fn(x) { x.name == name })
+      x
+    })
+    |> list.sort(fn(a, b) {
+      case a.pointer, b.pointer {
+        True, True -> order.Eq
+        True, False -> order.Gt
+        False, False -> order.Eq
+        False, True -> order.Lt
+      }
+    })
+
+  let type_decl =
+    list.map(types, custom_type_def)
+    |> string.join("\n")
+
+  let type_forward =
+    list.map(types, custom_type_forward)
+    |> string.join("\n")
+
+  let fun_decl =
+    list.map(mod.externals, function_forward)
+    |> string.join("\n")
+
+  let type_structs =
+    list.map(types, custom_type_structs)
+    |> string.join("\n\n")
+
+  [type_decl, type_forward, fun_decl, type_structs]
+  |> list.filter(fn(x) { !string.is_empty(x) })
+  |> string.join("\n\n")
+}
+
+pub fn module(mod: Module) -> String {
   // sort types to put them in order of dependency and
   //  "pointer types" after "struct types"
   let type_groups =
@@ -602,7 +666,11 @@ pub fn module(mod: Module) -> String {
       }
     })
 
-  let type_decl =
+  let type_def =
+    list.map(types, custom_type_def)
+    |> string.join("\n\n")
+
+  let type_forward =
     list.map(types, custom_type_forward)
     |> string.join("\n\n")
 
@@ -610,15 +678,19 @@ pub fn module(mod: Module) -> String {
     list.map(types, custom_type)
     |> string.join("\n\n")
 
+  let ext_fun_decl =
+    list.map(mod.externals, function_forward)
+    |> string.join("\n")
+
   let fun_decl =
-    list.map(funs, function_forward)
+    list.map(mod.functions, function_forward)
     |> string.join("\n\n")
 
   let fun_impl =
-    list.map(funs, function)
+    list.map(mod.functions, function)
     |> string.join("\n\n")
 
-  [type_decl, type_impl, fun_decl, fun_impl]
+  [type_def, type_forward, type_impl, ext_fun_decl, fun_decl, fun_impl]
   |> list.filter(fn(x) { !string.is_empty(x) })
   |> string.join("\n\n")
 }

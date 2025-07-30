@@ -1,3 +1,4 @@
+#include "builtin.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,34 +9,12 @@
 
 #ifdef GC
 
-struct Pointer {
-  uint16_t tag;
-  void *ptr;
-};
-
-typedef struct Pointer Pointer;
-
-#define encode_pointer(ptr, tag) ((Pointer){.ptr = (ptr), .tag = (tag)})
-
-void *decode_pointer(Pointer ptr) { return ptr.ptr; }
-
-uint16_t decode_tag(Pointer ptr) { return ptr.tag; }
-
 // TODO figure out how to use POINTER_MASK so we don't need to use fat pointers
 // or implement a custom GC
 #include <gc.h>
 #define malloc(x) GC_MALLOC(x)
 
 #else
-
-typedef uintptr_t Pointer;
-
-#define encode_pointer(ptr, tag)                                               \
-  (((uintptr_t)ptr & 0x0000FFFFFFFFFFFF) | ((uintptr_t)tag << 48))
-
-void *decode_pointer(Pointer ptr) { return (void *)(ptr & 0x0000FFFFFFFFFFFF); }
-
-uint16_t decode_tag(Pointer ptr) { return (uint16_t)(ptr >> 48); }
 
 #define INITIAL_ARENA_SIZE 8 * 1024 * 1024 // 8 MB
 #define ALIGNMENT 8
@@ -81,41 +60,12 @@ void *arena_malloc(size_t size) {
 
 #endif
 
-/// builtin
-
-#define Nil int
-#define True true
-#define False false
-#define Int int64_t
-#define Float double
-#define Bool bool
-
-typedef struct String String;
-typedef struct BitArray BitArray;
-typedef struct Closure Closure;
-
-struct String {
-  int byte_length;
-  char *bytes;
-};
-
-struct BitArray {
-  uint8_t *bytes;
-  size_t offset; // in bits
-  size_t len;    // in bits
-};
-
-struct Closure {
-  void *fun;
-  Pointer env;
-};
-
-_Noreturn void panic_exit() {
+_Noreturn Nil panic_exit() {
   printf("panic\n");
   exit(1);
 }
 
-#define eq_Nil(a, b) True
+Bool eq_Nil(Nil x, Nil y) { return True; }
 
 Bool eq_Bool(Bool x, Bool y) { return x == y; }
 Bool and_bool(Bool x, Bool y) { return x && y; }
@@ -147,7 +97,6 @@ Float sub_float(Float x, Float y) { return x - y; }
 Float mul_float(Float x, Float y) { return x * y; }
 Float div_float(Float x, Float y) { return x / y; }
 
-#define UtfCodepoint uint32_t
 Bool eq_UtfCodepoint(UtfCodepoint x, UtfCodepoint y) { return x == y; }
 
 String inspect_UtfCodepoint(UtfCodepoint value) {
@@ -250,7 +199,7 @@ Nil write_bit_array_int(Int value, BitArray dst, Int offset, Int len) {
   return 0;
 }
 
-String index_bit_array_string(BitArray ba, size_t bit_offset, int bit_length) {
+String index_bit_array_string(BitArray ba, Int bit_offset, Int bit_length) {
   String result;
   result.byte_length = bit_length / 8;
   result.bytes = malloc(result.byte_length);
@@ -273,7 +222,7 @@ String index_bit_array_string(BitArray ba, size_t bit_offset, int bit_length) {
   return result;
 }
 
-Int index_bit_array_int(BitArray ba, size_t bit_offset, int bit_length) {
+Int index_bit_array_int(BitArray ba, Int bit_offset, Int bit_length) {
   if (bit_length > 64)
     panic_exit();
 
@@ -541,6 +490,7 @@ String inspect_String(String s) {
   buffer[bp] = 0;
   return cstring_to_string(buffer);
 }
+
 String inspect_BitArray(struct BitArray ba) {
   // Calculate the number of bytes
   size_t num_bytes = (ba.len + 7) / 8;
@@ -585,10 +535,6 @@ String inspect_BitArray(struct BitArray ba) {
   return result;
 }
 
-typedef struct Tuple2_String_String Tuple2_String_String;
-typedef Pointer Result_Tuple2_String_String_Nil;
-Result_Tuple2_String_String_Nil pop_grapheme_string(String str);
-
 String inspect_Closure(Closure c) { return String_LIT("Closure", 7); }
 
 Closure create_closure(void *fun, Pointer env) {
@@ -616,57 +562,6 @@ Bool eq_Closure(Closure a, Closure b) { return False; }
 /// CODEGEN
 
 /// end of codegen
-
-Result_Tuple2_String_String_Nil pop_grapheme_string(String str) {
-  // the required types and functions for this are generated during codegen
-
-  if (str.byte_length == 0) {
-    // Return Error(Nil)
-    return new_Error_Tuple2_String_String_Nil(0);
-  }
-
-  // Find the byte length of the first UTF-8 character
-  unsigned char first_byte = (unsigned char)str.bytes[0];
-  int grapheme_len;
-
-  if ((first_byte & 0x80) == 0) {
-    // ASCII: 0xxxxxxx
-    grapheme_len = 1;
-  } else if ((first_byte & 0xE0) == 0xC0) {
-    // 2-byte: 110xxxxx
-    grapheme_len = 2;
-  } else if ((first_byte & 0xF0) == 0xE0) {
-    // 3-byte: 1110xxxx
-    grapheme_len = 3;
-  } else if ((first_byte & 0xF8) == 0xF0) {
-    // 4-byte: 11110xxx
-    grapheme_len = 4;
-  } else {
-    // Invalid UTF-8, treat as single byte
-    grapheme_len = 1;
-  }
-
-  // Ensure we don't read past the string end
-  if (grapheme_len > str.byte_length) {
-    grapheme_len = str.byte_length;
-  }
-
-  // Create the first grapheme string (zero-copy slice)
-  String grapheme;
-  grapheme.byte_length = grapheme_len;
-  grapheme.bytes = str.bytes;
-
-  // Create the rest string (zero-copy slice)
-  String rest;
-  rest.byte_length = str.byte_length - grapheme_len;
-  rest.bytes = str.bytes + grapheme_len;
-
-  // Create tuple #(grapheme, rest)
-  Tuple2_String_String tuple = new_Tuple2_String_String(grapheme, rest);
-
-  // Return Ok(tuple)
-  return new_Ok_Tuple2_String_String_Nil(tuple);
-}
 
 /// main
 

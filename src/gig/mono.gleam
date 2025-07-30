@@ -12,7 +12,7 @@ pub type Context {
 
 pub fn run(c: t.Context, main_name: String) {
   let oc =
-    t.Context(types: dict.new(), functions: dict.new(), externals: dict.new())
+    t.Context(types: dict.new(), functions: dict.new(), externals: c.externals)
   let c = Context(in: c, out: oc)
 
   let main = case dict.get(c.in.functions, main_name) {
@@ -25,7 +25,7 @@ pub fn run(c: t.Context, main_name: String) {
 
   // these types are required for the pop_grapheme implementation
   let c = register_tuple(c, t.TupleType([t.string_type, t.string_type]))
-  let grapheme_tuple = t.NamedType("Tuple2", [t.string_type, t.string_type])
+  let grapheme_tuple = t.TupleType([t.string_type, t.string_type])
   let grapheme_result = t.NamedType("Result", [grapheme_tuple, t.nil_type])
   let c = instantiate_type(c, grapheme_result)
 
@@ -40,10 +40,7 @@ fn sub_type(c: Context, sub: List(#(Int, t.Type)), typ: t.Type) -> t.Type {
         Error(_) -> t.NamedType("Nil", [])
       }
     t.TupleType(elements) -> {
-      // rewrite to named type
-      let variant_id = gen_names.get_tuple_id(list.length(elements))
-      let typ = t.NamedType(variant_id, elements)
-      sub_type(c, sub, typ)
+      t.TupleType(list.map(elements, sub_type(c, sub, _)))
     }
     t.NamedType(name, args) ->
       t.NamedType(name, list.map(args, sub_type(c, sub, _)))
@@ -86,10 +83,9 @@ fn unify_type(c: Context, poly: t.Type, mono: t.Type) -> List(#(Int, t.Type)) {
         list.zip(aa, ba)
           |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) }),
       )
-    t.TupleType(elements), _ -> {
-      let variant_id = gen_names.get_tuple_id(list.length(elements))
-      let poly = t.NamedType(variant_id, elements)
-      unify_type(c, poly, mono)
+    t.TupleType(aa), t.TupleType(ba) -> {
+      list.zip(aa, ba)
+      |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) })
     }
     _, _ -> {
       io.debug(poly)
@@ -105,8 +101,11 @@ pub fn type_name(typ: t.Type) -> String {
     t.NamedType(name, args) ->
       string.join([name, ..list.map(args, type_name)], "_")
     t.FunctionType(..) -> "Closure"
-    t.TupleType(..) -> panic
-    t.Unbound(..) -> panic
+    t.TupleType(args) -> {
+      let name = gen_names.get_tuple_id(list.length(args))
+      string.join([name, ..list.map(args, type_name)], "_")
+    }
+    t.Unbound(..) -> type_name(t.NamedType("Nil", []))
   }
 }
 
@@ -115,7 +114,7 @@ fn get_type_string(sub: List(#(Int, t.Type))) {
   |> string.concat()
 }
 
-fn instantiate_type(c: Context, typ: t.Type) {
+pub fn instantiate_type(c: Context, typ: t.Type) {
   case typ {
     t.NamedType(name, _args) -> {
       case dict.get(c.in.types, name) {
@@ -164,11 +163,36 @@ fn instantiate_type(c: Context, typ: t.Type) {
         Error(_) -> c
       }
     }
+    t.TupleType(elements) -> {
+      let c = register_tuple(c, typ)
+
+      let mono = sub_type(c, [], typ)
+      let sub = list.index_map(elements, fn(x, i) { #(i, x) })
+      let type_string = get_type_string(sub)
+      let id = gen_names.get_tuple_id(list.length(elements))
+      let mono_name = id <> type_string
+
+      case dict.get(c.out.types, mono_name) {
+        Ok(_) -> c
+        Error(_) -> {
+          let typ = t.Poly([], mono)
+          let variants = [t.Variant(typ, mono_name, "#", elements)]
+          let custom = t.CustomType(typ, mono_name, "#", variants)
+
+          // add to module
+          let types = dict.insert(c.out.types, mono_name, custom)
+          let c = Context(..c, out: t.Context(..c.out, types:))
+
+          // also instantiate any types referenced by this type
+          list.fold(elements, c, fn(c, field) { instantiate_type(c, field) })
+        }
+      }
+    }
     t.FunctionType(args, ret) -> {
       let c = list.fold(args, c, instantiate_type)
       instantiate_type(c, ret)
     }
-    _ -> c
+    t.Unbound(_) -> instantiate_type(c, t.NamedType("Nil", []))
   }
 }
 
@@ -180,7 +204,7 @@ fn register_tuple(c: Context, typ: t.Type) {
       let variant_id = gen_names.get_tuple_id(list.length(elements))
       let vars = list.index_map(elements, fn(_, i) { i })
       let element_types = list.index_map(elements, fn(_, i) { t.Unbound(i) })
-      let custom_typ = t.Poly(vars, t.NamedType(variant_id, element_types))
+      let custom_typ = t.Poly(vars, t.TupleType(element_types))
       let variant_typ =
         t.Poly(vars, t.FunctionType(element_types, custom_typ.typ))
 
@@ -193,7 +217,14 @@ fn register_tuple(c: Context, typ: t.Type) {
 
       // create generic tuple constructor
       let fun_typ = t.Poly(vars, t.FunctionType(element_types, custom_typ.typ))
-      let fun = t.External(typ: fun_typ, id: "new_" <> variant_id, mono: True)
+      let fun =
+        t.External(
+          typ: fun_typ,
+          src: "",
+          module: t.builtin,
+          id: "new_" <> variant_id,
+          mono: True,
+        )
       let cin =
         t.Context(..cin, externals: dict.insert(cin.externals, variant_id, fun))
 
@@ -203,7 +234,14 @@ fn register_tuple(c: Context, typ: t.Type) {
           let fun_id = gen_names.get_getter_name(variant_id, i)
           let fun_typ =
             t.Poly(vars, t.FunctionType([custom_typ.typ], field_type))
-          let fun = t.External(typ: fun_typ, id: fun_id, mono: True)
+          let fun =
+            t.External(
+              typ: fun_typ,
+              src: "",
+              module: t.builtin,
+              id: fun_id,
+              mono: True,
+            )
           t.Context(..cin, externals: dict.insert(cin.externals, fun.id, fun))
         })
 

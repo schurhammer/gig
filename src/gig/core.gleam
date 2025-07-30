@@ -4,7 +4,6 @@ import gleam/dict.{type Dict}
 import gleam/io
 import gleam/result
 import gleam/string
-import pprint
 
 import glance as g
 
@@ -70,7 +69,7 @@ pub type Function {
 }
 
 pub type External {
-  External(typ: Poly, id: String, mono: Bool)
+  External(typ: Poly, src: String, module: String, id: String, mono: Bool)
 }
 
 pub type Context {
@@ -81,28 +80,18 @@ pub type Context {
   )
 }
 
-// TODO monadic form
-// pub type Value {
-//   Literal(value: String)
-//   Variable(name: String)
-//   Global(name: String)
-//   Fn(parameters: List(String), body: Computation)
-// }
-
-// pub type Computation {
-//   Value(value: Value)
-//   Call(function: Value, arguments: List(Value))
-//   Let(name: String, value: Computation, body: Computation)
-//   If(condition: Value, then: Computation, els: Computation)
-// }
-
 pub fn lower_context(c: t.Context) {
   // these need registered because they are converted to lieterals
+  let bool_poly = Poly([], bool_type)
+  let nil_constructor =
+    External(Poly([], nil_type), "", t.builtin, "Nil", False)
+  let true_constructor = External(bool_poly, "", t.builtin, "True", False)
+  let false_constructor = External(bool_poly, "", t.builtin, "False", False)
   let externals =
     dict.new()
-    |> dict.insert("Nil", External(Poly([], nil_type), "Nil", False))
-    |> dict.insert("True", External(Poly([], bool_type), "True", False))
-    |> dict.insert("False", External(Poly([], bool_type), "False", False))
+    |> dict.insert("Nil", nil_constructor)
+    |> dict.insert("True", true_constructor)
+    |> dict.insert("False", false_constructor)
 
   let acc = Context(types: dict.new(), functions: dict.new(), externals:)
   dict.fold(c.modules, acc, fn(acc, name, module) {
@@ -164,14 +153,20 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
         Ok(external) -> {
           let assert t.Attribute(
             _,
-            [t.LocalVariable(_, "c"), _, t.String(_, external_id)],
+            [
+              t.LocalVariable(_, "c"),
+              t.String(_, src),
+              t.String(_, external_id),
+            ],
           ) = external
           let typ = map_poly(c, fun.definition.typ)
           let module = c.current_module
           let name = fun.definition.name
           let internal_id = get_id(module, name)
           let mono = list.any(attrs, fn(x) { x.name == "monomorphise" })
-          let fun = External(typ, external_id, mono)
+          // TODO actual src file?
+          let src = module
+          let fun = External(typ, src, module, external_id, mono)
           Context(
             ..acc,
             externals: dict.insert(acc.externals, internal_id, fun),
@@ -236,7 +231,14 @@ pub fn register_variant_functions(
   // constructor function
   let variant_id = get_id(module_name, variant.name)
   let typ = map_poly(c, variant.typ)
-  let fun = External(typ: typ, id: "new_" <> variant_id, mono: True)
+  let fun =
+    External(
+      typ: typ,
+      src: "",
+      module: module_name,
+      id: "new_" <> variant_id,
+      mono: True,
+    )
   let acc =
     Context(..acc, externals: dict.insert(acc.externals, variant_id, fun))
 
@@ -244,7 +246,8 @@ pub fn register_variant_functions(
   let fun_id = gen_names.get_variant_check_name(variant_id)
   let typ = map_poly(c, custom_typ)
   let typ = Poly(typ.vars, FunctionType([typ.typ], bool_type))
-  let fun = External(typ: typ, id: fun_id, mono: True)
+  let fun =
+    External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
   let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
 
   // getter functions
@@ -253,7 +256,8 @@ pub fn register_variant_functions(
     let typ = map_poly(c, custom_typ)
     let field_typ = map_type(c, f.item.typ)
     let typ = Poly(typ.vars, FunctionType([typ.typ], field_typ))
-    let fun = External(typ: typ, id: fun_id, mono: True)
+    let fun =
+      External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
     Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
   })
 }
@@ -910,30 +914,6 @@ fn lower_pattern_match(
       let isa_match = Call(bool_type, isa_ref, [lower_expression(c, subject)])
       and_exp(isa_match, match)
     }
-  }
-}
-
-type OptionState(a) {
-  OptionUnset
-  OptionOpen(exp: a)
-  OptionClosed(exp: a)
-}
-
-fn update_option(old: OptionState(a), new: OptionState(a)) {
-  case old {
-    OptionUnset -> new
-    OptionOpen(_) ->
-      case new {
-        OptionClosed(_) -> new
-        OptionOpen(_) -> new
-        OptionUnset -> old
-      }
-    OptionClosed(_) ->
-      case new {
-        OptionClosed(_) -> panic as "option set twice"
-        OptionOpen(_) -> old
-        OptionUnset -> old
-      }
   }
 }
 
