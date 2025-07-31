@@ -957,7 +957,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let typ = map_type(c, typ)
       let value = case value {
         Some(value) -> lower_expression(c, value)
-        None -> Literal(map_type(c, t.string_type), String("panic"))
+        None -> {
+          let message = "panic: " <> current_location_string(c)
+          Literal(map_type(c, t.string_type), String(message))
+        }
       }
       Panic(typ, value)
     }
@@ -965,7 +968,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let typ = map_type(c, typ)
       let value = case value {
         Some(value) -> lower_expression(c, value)
-        None -> Literal(map_type(c, t.string_type), String("todo"))
+        None -> {
+          let message = "todo: " <> current_location_string(c)
+          Literal(map_type(c, t.string_type), String(message))
+        }
       }
       Panic(typ, value)
     }
@@ -1256,6 +1262,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Call(typ, function, [left, right])
     }
   }
+}
+
+fn current_location_string(c: t.Context) {
+  c.current_module <> "." <> c.current_definition
 }
 
 fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {

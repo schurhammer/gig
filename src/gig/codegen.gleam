@@ -91,6 +91,7 @@ fn string_lit(val: String) {
   // TODO this doesnt work for strings like "\n"
   // for now ive made size -1 check the size at runtime
   // let size = int.to_string(string.byte_size(val))
+  let val = string.replace(val, "\n", "\\n")
   let size = "-1"
   "String_LIT(\"" <> val <> "\", " <> size <> ")"
 }
@@ -171,7 +172,9 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
 
       hit_target(target, ternary(cond, exp_env, exp_no_env))
     }
-    Panic(typ, val) -> "panic_exit();\n"
+    Panic(typ, val) -> {
+      "panic_exit(" <> gen_value(val, "", id) <> ");\n"
+    }
     Let(typ, var, val, exp) ->
       case var, val {
         "_" <> _, _ -> {
@@ -284,7 +287,6 @@ fn custom_type_forward(t: CustomType) {
 
   let constructors =
     t.variants
-    |> list.filter(fn(v) { v.fields != [] })
     |> list.map(constructor_function_header(t, _))
     |> list.map(fn(con) { con <> ";" })
 
@@ -338,9 +340,27 @@ fn custom_type(t: CustomType) {
         list.map(v.fields, fn(f) {
           let field_equal = "eq_" <> type_name(f.typ)
           case t.pointer {
-            True -> "{ struct " <> v.name <> "* a =
-              (struct " <> v.name <> "*) a_ptr;\n" <> "struct " <> v.name <> "* b =
-              (struct " <> v.name <> "*) b_ptr;\n" <> "if(!" <> field_equal <> "(a" <> access_op <> f.name <> ", b" <> access_op <> f.name <> ")) { return False; }\n" <> "}"
+            True ->
+              "{ struct "
+              <> v.name
+              <> "* a = (struct "
+              <> v.name
+              <> "*) a_ptr;\n"
+              <> "struct "
+              <> v.name
+              <> "* b = (struct "
+              <> v.name
+              <> "*) b_ptr;\n"
+              <> "if(!"
+              <> field_equal
+              <> "(a"
+              <> access_op
+              <> f.name
+              <> ", b"
+              <> access_op
+              <> f.name
+              <> ")) { return False; }\n"
+              <> "}"
             False -> {
               let escaped_field_name = escape_if_keyword(f.name)
               "if(!"
@@ -475,18 +495,8 @@ fn custom_type(t: CustomType) {
   let variant_definitions =
     list.index_map(t.variants, fn(v, i) {
       let tag = int.to_string(i)
-      // put in a placeholder field in empty structs
-      let fields = case v.fields {
-        [] -> [Field("placeholder", core.NamedType("Int", []))]
-        x -> x
-      }
-      let fields =
-        list.map(fields, fn(f) {
-          type_name(f.typ) <> " " <> escape_if_keyword(f.name) <> ";\n"
-        })
-        |> string.join("")
 
-      let struct = "struct " <> v.name <> "{\n" <> fields <> "};\n"
+      let struct = custom_type_struct(v)
 
       let constructor = case v.fields {
         [] ->
@@ -579,27 +589,29 @@ fn custom_type(t: CustomType) {
 }
 
 fn constructor_function_header(t: CustomType, v: closure.Variant) -> String {
-  t.name
-  <> " new_"
-  <> v.name
-  <> "("
-  <> v.fields
-  |> list.map(fn(p) { type_name(p.typ) <> " " <> escape_if_keyword(p.name) })
-  |> string.join(", ")
-  <> ")"
+  case v.fields {
+    [] -> "extern const Pointer new_" <> v.name
+    _ ->
+      t.name
+      <> " new_"
+      <> v.name
+      <> "("
+      <> v.fields
+      |> list.map(fn(p) { type_name(p.typ) <> " " <> escape_if_keyword(p.name) })
+      |> string.join(", ")
+      <> ")"
+  }
 }
 
-fn custom_type_structs(t: CustomType) {
-  list.map(t.variants, fn(v) {
-    let fields =
-      list.map(v.fields, fn(f) {
-        type_name(f.typ) <> " " <> escape_if_keyword(f.name) <> ";\n"
-      })
-      |> string.join("")
+fn custom_type_struct(v: closure.Variant) {
+  let fields =
+    v.fields
+    |> list.map(fn(f) {
+      type_name(f.typ) <> " " <> escape_if_keyword(f.name) <> ";\n"
+    })
+    |> string.join("")
 
-    "struct " <> v.name <> "{\n" <> fields <> "};"
-  })
-  |> string.join("\n")
+  "struct " <> v.name <> "{\n" <> fields <> "};"
 }
 
 pub fn module_header(mod: Module) -> String {
@@ -636,7 +648,10 @@ pub fn module_header(mod: Module) -> String {
     |> string.join("\n")
 
   let type_structs =
-    list.map(types, custom_type_structs)
+    list.map(types, fn(t) {
+      list.map(t.variants, custom_type_struct)
+      |> string.join("\n")
+    })
     |> string.join("\n\n")
 
   [type_decl, type_forward, fun_decl, type_structs]

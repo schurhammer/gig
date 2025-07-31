@@ -148,4 +148,4 @@ pub fn length_bit_array(a: BitArray) -> Int
 // Other Functions
 
 @external(c, "", "panic_exit")
-pub fn panic_exit() -> a
+pub fn panic_exit(message: String) -> a

@@ -18,8 +18,6 @@ import gleam/io
 import gleam/list
 import gleam/string
 
-const build_dir = "./build/c"
-
 const build_src_dir = "./build/c/src"
 
 fn all_but_last(l: List(a)) -> List(a) {
@@ -78,9 +76,6 @@ pub fn compile(
     _ -> target_path <> "/"
   }
 
-  // clear build dir
-  let _ = simplifile.delete(build_dir)
-
   // create a lookup table for package sources
   let packages_dir = "./build/packages"
   let assert Ok(packages) = simplifile.read_directory(packages_dir)
@@ -111,48 +106,6 @@ pub fn compile(
   let #(mono, main_name) = mono.run(core, module_id <> "_" <> "main")
   let cc = closure.cc_module(mono)
   let code = codegen.module(cc)
-
-  // insert the generated code into the template
-  let assert Ok(template) = simplifile.read("./src/template.c")
-  let main_call = main_name <> "();\n"
-  let template = case gc {
-    True -> {
-      // TODO GC_enable_incremental
-      // TODO GC_MALLOC_ATOMIC
-      // TODO GC_set_pointer_mask(0x0000FFFFFFFFFFFF)
-      let includes = "#define GC\n"
-      let init = main_call
-      let template = string.replace(template, "/// INIT", init)
-      let template = string.replace(template, "/// INCLUDES", includes)
-      template
-    }
-    False -> {
-      let includes = ""
-      let init = main_call
-      let template = string.replace(template, "/// INIT", init)
-      let template = string.replace(template, "/// INCLUDES", includes)
-      template
-    }
-  }
-
-  let output = string.replace(template, "/// CODEGEN", code)
-
-  // output the c file
-  let c_file = target_path <> module_id <> ".c"
-  let c_file_h = target_path <> "builtin.h"
-
-  io.println("Generating ./" <> c_file_h)
-  let assert Ok(builtin_h) = simplifile.read("./src/builtin.h")
-  case simplifile.write(c_file_h, builtin_h) {
-    Ok(_) -> Nil
-    _ -> panic as { "Failed to write file " <> c_file_h }
-  }
-
-  io.println("Generating ./" <> c_file)
-  case simplifile.write(c_file, output) {
-    Ok(_) -> Nil
-    _ -> panic as { "Failed to write file " <> c_file }
-  }
 
   let external_c_files =
     core.externals
@@ -204,6 +157,40 @@ pub fn compile(
     }
   })
 
+  // insert the generated code into the template
+  let assert Ok(template) = simplifile.read("./src/template.c")
+  let main_call = main_name <> "();\n"
+  let template = case gc {
+    True -> {
+      // TODO GC_enable_incremental
+      // TODO GC_MALLOC_ATOMIC
+      // TODO GC_set_pointer_mask(0x0000FFFFFFFFFFFF)
+      let includes = "#define GC\n"
+      let init = main_call
+      let template = string.replace(template, "/// INIT", init)
+      let template = string.replace(template, "/// INCLUDES", includes)
+      template
+    }
+    False -> {
+      let includes = ""
+      let init = main_call
+      let template = string.replace(template, "/// INIT", init)
+      let template = string.replace(template, "/// INCLUDES", includes)
+      template
+    }
+  }
+
+  let output = string.replace(template, "/// CODEGEN", code)
+
+  // output the c file
+  let c_file = target_path <> module_id <> ".c"
+
+  io.println("Generating ./" <> c_file)
+  case simplifile.write(c_file, output) {
+    Ok(_) -> Nil
+    _ -> panic as { "Failed to write file " <> c_file }
+  }
+
   // compile the c file
   let binary_name = target_path <> module_id <> ".exe"
   let args = ["-Isrc", "-o", binary_name, c_file, ..external_c_files]
@@ -218,7 +205,7 @@ pub fn compile(
     False -> args
   }
 
-  io.println("Generating binary ./" <> binary_name)
+  io.println("Generating ./" <> binary_name)
   case shellout.command(compiler, args, ".", []) {
     Ok(_) -> Nil
     Error(message) ->

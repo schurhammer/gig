@@ -7,7 +7,7 @@ pub fn main() {
     [file, ..flags] -> {
       // TODO flags
       let gc = False
-      let release = True
+      let release = False
       let compiler = "clang"
       compiler.compile(file, compiler, gc, release)
     }

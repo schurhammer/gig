@@ -101,7 +101,7 @@ pub fn cc_module(mod: mono.Context) {
       let assert core.FunctionType(param_types, ret) = external.typ.typ
       let params =
         list.index_map(param_types, fn(_, i) { "a" <> int.to_string(i) })
-      let todo_val = Literal(core.string_type, core.String("todo"))
+      let todo_val = Literal(core.string_type, core.String(""))
       let body = Panic(ret, todo_val)
       Function(
         name: external.id,

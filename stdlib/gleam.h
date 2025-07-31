@@ -6,7 +6,7 @@
 
 Int negate_int(Int a0);
 Bool gte_int(Int a0, Int a1);
-Nil panic_exit();
+Nil panic_exit(String a0);
 Bool starts_with_string(String a0, String a1);
 Bool gte_float(Float a0, Float a1);
 Bool lte_int(Int a0, Int a1);

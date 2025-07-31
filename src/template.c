@@ -60,8 +60,9 @@ void *arena_malloc(size_t size) {
 
 #endif
 
-_Noreturn Nil panic_exit() {
-  printf("panic\n");
+_Noreturn Nil panic_exit(String a) {
+  print_string(a);
+  printf("\n");
   exit(1);
 }
 
@@ -224,7 +225,7 @@ String index_bit_array_string(BitArray ba, Int bit_offset, Int bit_length) {
 
 Int index_bit_array_int(BitArray ba, Int bit_offset, Int bit_length) {
   if (bit_length > 64)
-    panic_exit();
+    panic_exit(String_LIT("bit array index too large", -1));
 
   bit_offset = bit_offset + ba.offset;
 
@@ -565,10 +566,19 @@ Bool eq_Closure(Closure a, Closure b) { return False; }
 
 /// main
 
-int main() {
+// Global variables to store command line arguments
+int global_argc = 0;
+char **global_argv = NULL;
+
+int main(int argc, char **argv) {
 #ifdef GC
   GC_INIT();
 #endif
+
+  // Store global argv
+  global_argc = argc;
+  global_argv = argv;
+
   /// INIT
   return 0;
 }

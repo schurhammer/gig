@@ -5,6 +5,9 @@
 #ifndef GLEAM_BUILTIN
 #define GLEAM_BUILTIN
 
+extern int global_argc;
+extern char **global_argv;
+
 #ifdef GC
 struct Pointer {
   uint16_t tag;
@@ -54,7 +57,7 @@ struct Closure {
   Pointer env;
 };
 
-_Noreturn Nil panic_exit();
+_Noreturn Nil panic_exit(String message);
 
 Bool eq_Nil(Nil x, Nil y);
 
