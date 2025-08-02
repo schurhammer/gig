@@ -54,7 +54,7 @@ fn sample_test(file) {
     }),
     it("with gc", fn() {
       let binary =
-        compiler.compile(file, compiler: "clang", gc: False, release: True)
+        compiler.compile(file, compiler: "clang", gc: True, release: True)
 
       // parse the expected output out of the file's doc comment
       let assert Ok(content) = simplifile.read(file)

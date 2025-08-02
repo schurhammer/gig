@@ -25,6 +25,9 @@ pub fn ends_with(string: String, suffix: String) -> Bool
 @external(c, "", "compare_string")
 fn do_compare(a: String, b: String) -> Int
 
+@external(c, "", "slice_string")
+fn do_slice(string: String, idx: Int, len: Int) -> String
+
 pub fn compare(a: String, b: String) -> order.Order {
     case do_compare(a, b) {
         x if x < 0 -> order.Lt

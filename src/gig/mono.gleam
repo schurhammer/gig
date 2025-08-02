@@ -20,14 +20,17 @@ pub fn run(c: t.Context, main_name: String) {
     Error(_) -> panic as "main function not found"
   }
 
+  // instantiate types and functions reachable from main
   let typ = sub_type(c, [], main.typ.typ)
   let #(c, main_name) = instantiate_function(c, main_name, typ)
 
-  // these types are required for the pop_grapheme implementation
-  let c = register_tuple(c, t.TupleType([t.string_type, t.string_type]))
-  let grapheme_tuple = t.TupleType([t.string_type, t.string_type])
-  let grapheme_result = t.NamedType("Result", [grapheme_tuple, t.nil_type])
-  let c = instantiate_type(c, grapheme_result)
+  // instantiate types used by externals
+  // TODO don't include unused externals?
+  let c =
+    c.out.externals
+    |> dict.values()
+    |> list.filter(fn(x) { !x.mono })
+    |> list.fold(c, fn(c, external) { instantiate_type(c, external.typ.typ) })
 
   #(c, main_name)
 }

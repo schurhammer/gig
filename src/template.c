@@ -9,53 +9,12 @@
 
 #ifdef GC
 
-// TODO figure out how to use POINTER_MASK so we don't need to use fat pointers
-// or implement a custom GC
 #include <gc.h>
 #define malloc(x) GC_MALLOC(x)
 
 #else
 
-#define INITIAL_ARENA_SIZE 8 * 1024 * 1024 // 8 MB
-#define ALIGNMENT 8
-
-typedef struct Arena {
-  size_t size;
-  size_t used;
-  struct Arena *next;
-  char data[];
-} Arena;
-
-static Arena *current_arena = NULL;
-
-static size_t align_up(size_t size, size_t alignment) {
-  return (size + alignment - 1) & ~(alignment - 1);
-}
-
-void *arena_malloc(size_t size) {
-  size = align_up(size, ALIGNMENT);
-
-  if (!current_arena || current_arena->used + size > current_arena->size) {
-    size_t arena_size =
-        INITIAL_ARENA_SIZE > size ? INITIAL_ARENA_SIZE : size + sizeof(Arena);
-    Arena *new_arena = (Arena *)malloc(sizeof(Arena) + arena_size);
-
-    if (!new_arena) {
-      return NULL; // Allocation failed
-    }
-
-    new_arena->size = arena_size;
-    new_arena->used = 0;
-    new_arena->next = current_arena;
-    current_arena = new_arena;
-  }
-
-  void *ptr = current_arena->data + current_arena->used;
-  current_arena->used += size;
-
-  return ptr;
-}
-
+#include "arena.h"
 #define malloc(x) arena_malloc(x)
 
 #endif
@@ -67,8 +26,10 @@ _Noreturn Nil panic_exit(String a) {
 }
 
 Bool eq_Nil(Nil x, Nil y) { return True; }
+Bool lt_Nil(Nil x, Nil y) { return False; }
 
 Bool eq_Bool(Bool x, Bool y) { return x == y; }
+Bool lt_Bool(Bool x, Bool y) { return x < y; }
 Bool and_bool(Bool x, Bool y) { return x && y; }
 Bool or_bool(Bool x, Bool y) { return x || y; }
 Bool negate_bool(Bool x) { return !x; }
@@ -77,28 +38,29 @@ Bool isa_False(Bool x) { return x == False; }
 Bool isa_Nil(Nil x) { return True; }
 
 Bool eq_Int(Int x, Int y) { return x == y; }
-Bool lt_int(Int x, Int y) { return x < y; }
-Bool gt_int(Int x, Int y) { return x > y; }
-Bool lte_int(Int x, Int y) { return x <= y; }
-Bool gte_int(Int x, Int y) { return x >= y; }
-Int add_int(Int x, Int y) { return x + y; }
-Int sub_int(Int x, Int y) { return x - y; }
-Int mul_int(Int x, Int y) { return x * y; }
-Int div_int(Int x, Int y) { return x / y; }
-Int rem_int(Int x, Int y) { return x % y; }
-Int negate_int(Int x) { return -x; }
+Bool lt_Int(Int x, Int y) { return x < y; }
+Bool gt_Int(Int x, Int y) { return x > y; }
+Bool lte_Int(Int x, Int y) { return x <= y; }
+Bool gte_Int(Int x, Int y) { return x >= y; }
+Int add_Int(Int x, Int y) { return x + y; }
+Int sub_Int(Int x, Int y) { return x - y; }
+Int mul_Int(Int x, Int y) { return x * y; }
+Int div_Int(Int x, Int y) { return x / y; }
+Int rem_Int(Int x, Int y) { return x % y; }
+Int negate_Int(Int x) { return -x; }
 
 Bool eq_Float(Float x, Float y) { return x == y; }
-Bool lt_float(Float x, Float y) { return x < y; }
-Bool gt_float(Float x, Float y) { return x > y; }
-Bool lte_float(Float x, Float y) { return x <= y; }
-Bool gte_float(Float x, Float y) { return x >= y; }
-Float add_float(Float x, Float y) { return x + y; }
-Float sub_float(Float x, Float y) { return x - y; }
-Float mul_float(Float x, Float y) { return x * y; }
-Float div_float(Float x, Float y) { return x / y; }
+Bool lt_Float(Float x, Float y) { return x < y; }
+Bool gt_Float(Float x, Float y) { return x > y; }
+Bool lte_Float(Float x, Float y) { return x <= y; }
+Bool gte_Float(Float x, Float y) { return x >= y; }
+Float add_Float(Float x, Float y) { return x + y; }
+Float sub_Float(Float x, Float y) { return x - y; }
+Float mul_Float(Float x, Float y) { return x * y; }
+Float div_Float(Float x, Float y) { return x / y; }
 
 Bool eq_UtfCodepoint(UtfCodepoint x, UtfCodepoint y) { return x == y; }
+Bool lt_UtfCodepoint(UtfCodepoint x, UtfCodepoint y) { return x < y; }
 
 String inspect_UtfCodepoint(UtfCodepoint value) {
   char buffer[16];
@@ -302,6 +264,40 @@ Bool eq_BitArray(BitArray a, BitArray b) {
   return True;
 }
 
+Bool lt_BitArray(BitArray a, BitArray b) {
+  if (a.len < b.len) {
+    return True;
+  }
+
+  if (a.len > b.len) {
+    return False;
+  }
+
+  if (a.len == 0) {
+    return False;
+  }
+
+  // Compare bit by bit
+  for (size_t i = 0; i < a.len; i++) {
+    size_t a_byte_index = (a.offset + i) / 8;
+    size_t a_bit_index = (a.offset + i) % 8;
+    size_t b_byte_index = (b.offset + i) / 8;
+    size_t b_bit_index = (b.offset + i) % 8;
+
+    bool a_bit = (a.bytes[a_byte_index] & (1 << (7 - a_bit_index))) != 0;
+    bool b_bit = (b.bytes[b_byte_index] & (1 << (7 - b_bit_index))) != 0;
+
+    if (a_bit < b_bit) {
+      return True;
+    }
+    if (a_bit > b_bit) {
+      return True;
+    }
+  }
+
+  return True;
+}
+
 String String_LIT(char *bytes, int byte_length) {
   if (byte_length < 0) {
     byte_length = strlen(bytes);
@@ -318,6 +314,16 @@ Bool eq_String(String a, String b) {
     return False;
   }
   return strncmp(a.bytes, b.bytes, a.byte_length) == 0;
+}
+
+Bool lt_String(String a, String b) {
+  if (a.byte_length < b.byte_length) {
+    return True;
+  }
+  if (a.byte_length > b.byte_length) {
+    return False;
+  }
+  return strncmp(a.bytes, b.bytes, a.byte_length) < 0;
 }
 
 Int length_string(String a) { return a.byte_length; }
@@ -538,7 +544,7 @@ String inspect_BitArray(struct BitArray ba) {
 
 String inspect_Closure(Closure c) { return String_LIT("Closure", 7); }
 
-Closure create_closure(void *fun, Pointer env) {
+Closure create_closure(void *fun, void *env) {
   struct Closure RETURN;
   RETURN.fun = fun;
   RETURN.env = env;
@@ -548,13 +554,14 @@ Closure create_closure(void *fun, Pointer env) {
 Closure create_function(void *fun) {
   struct Closure RETURN;
   RETURN.fun = fun;
-  RETURN.env = encode_pointer(0, 65535);
+  RETURN.env = 0;
   return RETURN;
 }
 
-Bool is_closure(Closure c) { return decode_tag(c.env) != 65535; }
+Bool is_closure(Closure c) { return c.env != 0; }
 
 Bool eq_Closure(Closure a, Closure b) { return False; }
+Bool lt_Closure(Closure a, Closure b) { return a.fun < b.fun; }
 
 /// end of builtin
 

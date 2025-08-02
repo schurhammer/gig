@@ -226,5 +226,12 @@ fn do_foldr(node: Node(k, v), acc: a, fun: fn(a, k, v) -> a) -> a {
 }
 
 fn compare(a: a, b: a) -> order.Order {
-  todo
+  case eq(a, b) {
+    True -> order.Eq
+    False ->
+      case lt(a, b) {
+        True -> order.Lt
+        False -> order.Gt
+      }
+  }
 }

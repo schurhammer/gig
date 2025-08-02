@@ -193,7 +193,7 @@ pub fn compile(
 
   // compile the c file
   let binary_name = target_path <> module_id <> ".exe"
-  let args = ["-Isrc", "-o", binary_name, c_file, ..external_c_files]
+  let args = ["-g3", "-Isrc", "-o", binary_name, c_file, ..external_c_files]
 
   let args = case gc {
     True -> ["-lgc", ..args]
@@ -204,6 +204,8 @@ pub fn compile(
     True -> ["-O3", ..args]
     False -> args
   }
+
+  io.println(compiler <> " " <> string.inspect(args))
 
   io.println("Generating ./" <> binary_name)
   case shellout.command(compiler, args, ".", []) {

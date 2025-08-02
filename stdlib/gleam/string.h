@@ -5,18 +5,21 @@
 #include "builtin.h"
 
 typedef struct Tuple2_String_String Tuple2_String_String;
-typedef Pointer Result_Tuple2_String_String_Nil;
+typedef struct { enum {Ok_Tuple2_String_String_Nil_TAG, Error_Tuple2_String_String_Nil_TAG} tag; union {struct Ok_Tuple2_String_String_Nil *v0; struct Error_Tuple2_String_String_Nil *v1;} ptr; } Result_Tuple2_String_String_Nil;
 
 Bool eq_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
+Bool lt_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 String inspect_Tuple2_String_String(Tuple2_String_String a);
 Tuple2_String_String new_Tuple2_String_String(String f0, String f1);
 Bool eq_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
+Bool lt_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
 String inspect_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a);
 Result_Tuple2_String_String_Nil new_Ok_Tuple2_String_String_Nil(Tuple2_String_String f0);
 Result_Tuple2_String_String_Nil new_Error_Tuple2_String_String_Nil(Nil f0);
 
 String append_string(String a0, String a1);
 Int compare_string(String a0, String a1);
+String slice_string(String a0, Int a1, Int a2);
 Bool ends_with_string(String a0, String a1);
 Result_Tuple2_String_String_Nil pop_grapheme_string(String a0);
 Bool starts_with_string(String a0, String a1);

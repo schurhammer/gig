@@ -1142,7 +1142,10 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let else_body =
         Panic(
           typ,
-          Literal(map_type(c, t.string_type), String("No matching clause")),
+          Literal(
+            map_type(c, t.string_type),
+            String("No matching clause in " <> current_location_string(c)),
+          ),
         )
 
       // Create bindings for each subject

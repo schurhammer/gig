@@ -8,27 +8,6 @@
 extern int global_argc;
 extern char **global_argv;
 
-#ifdef GC
-struct Pointer {
-  uint16_t tag;
-  void *ptr;
-};
-typedef struct Pointer Pointer;
-
-#define encode_pointer(ptr, tag) ((Pointer){.ptr = (ptr), .tag = (tag)})
-#define decode_pointer(ptr) ptr.ptr
-#define decode_tag(ptr) ptr.tag
-
-#else
-typedef uintptr_t Pointer;
-
-#define encode_pointer(ptr, tag)                                               \
-  (((uintptr_t)ptr & 0x0000FFFFFFFFFFFF) | ((uintptr_t)tag << 48))
-#define decode_pointer(ptr) (void *)(ptr & 0x0000FFFFFFFFFFFF)
-#define decode_tag(ptr) (uint16_t)(ptr >> 48)
-
-#endif
-
 #define Nil int
 #define True true
 #define False false
@@ -54,14 +33,27 @@ struct BitArray {
 
 struct Closure {
   void *fun;
-  Pointer env;
+  void *env;
 };
 
 _Noreturn Nil panic_exit(String message);
 
 Bool eq_Nil(Nil x, Nil y);
-
 Bool eq_Bool(Bool x, Bool y);
+Bool eq_Int(Int x, Int y);
+Bool eq_Float(Float x, Float y);
+Bool eq_UtfCodepoint(UtfCodepoint x, UtfCodepoint y);
+Bool eq_BitArray(BitArray a, BitArray b);
+Bool eq_String(String a, String b);
+Bool eq_Closure(Closure a, Closure b);
+
+Bool lt_Nil(Nil x, Nil y);
+Bool lt_Bool(Bool x, Bool y);
+Bool lt_UtfCodepoint(UtfCodepoint x, UtfCodepoint y);
+Bool lt_BitArray(BitArray a, BitArray b);
+Bool lt_String(String a, String b);
+Bool lt_Closure(Closure a, Closure b);
+
 Bool and_bool(Bool x, Bool y);
 Bool or_bool(Bool x, Bool y);
 Bool negate_bool(Bool x);
@@ -69,29 +61,25 @@ Bool isa_True(Bool x);
 Bool isa_False(Bool x);
 Bool isa_Nil(Nil x);
 
-Bool eq_Int(Int x, Int y);
-Bool lt_int(Int x, Int y);
-Bool gt_int(Int x, Int y);
-Bool lte_int(Int x, Int y);
-Bool gte_int(Int x, Int y);
-Int add_int(Int x, Int y);
-Int sub_int(Int x, Int y);
-Int mul_int(Int x, Int y);
-Int div_int(Int x, Int y);
-Int rem_int(Int x, Int y);
-Int negate_int(Int x);
+Bool lt_Int(Int x, Int y);
+Bool gt_Int(Int x, Int y);
+Bool lte_Int(Int x, Int y);
+Bool gte_Int(Int x, Int y);
+Int add_Int(Int x, Int y);
+Int sub_Int(Int x, Int y);
+Int mul_Int(Int x, Int y);
+Int div_Int(Int x, Int y);
+Int rem_Int(Int x, Int y);
+Int negate_Int(Int x);
 
-Bool eq_Float(Float x, Float y);
-Bool lt_float(Float x, Float y);
-Bool gt_float(Float x, Float y);
-Bool lte_float(Float x, Float y);
-Bool gte_float(Float x, Float y);
-Float add_float(Float x, Float y);
-Float sub_float(Float x, Float y);
-Float mul_float(Float x, Float y);
-Float div_float(Float x, Float y);
-
-Bool eq_UtfCodepoint(UtfCodepoint x, UtfCodepoint y);
+Bool lt_Float(Float x, Float y);
+Bool gt_Float(Float x, Float y);
+Bool lte_Float(Float x, Float y);
+Bool gte_Float(Float x, Float y);
+Float add_Float(Float x, Float y);
+Float sub_Float(Float x, Float y);
+Float mul_Float(Float x, Float y);
+Float div_Float(Float x, Float y);
 
 BitArray new_bit_array(size_t len);
 Nil write_bit_array(BitArray src, BitArray dst, Int offset, Int len);
@@ -101,13 +89,11 @@ String index_bit_array_string(BitArray ba, Int bit_offset, Int bit_length);
 Int index_bit_array_int(BitArray ba, Int bit_offset, Int bit_length);
 BitArray slice_bit_array(BitArray ba, Int offset, Int len);
 Int length_bit_array(BitArray ba);
-Bool eq_BitArray(BitArray a, BitArray b);
 
 u_int16_t splice_bits(u_int16_t src, u_int16_t dst, int src_offset,
                       int dst_offset, int n);
 
 String String_LIT(char *bytes, int byte_length);
-Bool eq_String(String a, String b);
 Int length_string(String a);
 String append_string(String a, String b);
 Bool starts_with_string(String string, String with);
@@ -128,8 +114,7 @@ String inspect_BitArray(BitArray ba);
 String inspect_Closure(Closure c);
 String inspect_UtfCodepoint(UtfCodepoint value);
 
-Closure create_closure(void *fun, Pointer env);
+Closure create_closure(void *fun, void *env);
 Closure create_function(void *fun);
 Bool is_closure(Closure c);
-Bool eq_Closure(Closure a, Closure b);
 #endif

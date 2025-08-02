@@ -115,6 +115,25 @@ fn gen_value(arg: Value, target: String, id: Int) {
   }
 }
 
+fn pointer(t: CustomType) {
+  case t.variants {
+    [_] -> "struct " <> t.name <> "*"
+    _ ->
+      "struct { enum {"
+      <> t.variants
+      |> list.map(fn(v) { v.name <> "_TAG" })
+      |> string.join(", ")
+      <> "} tag; union {"
+      <> t.variants
+      |> list.index_map(fn(v, i) {
+        "struct " <> v.name <> " *v" <> int.to_string(i) <> ";"
+      })
+      |> string.join(" ")
+      <> "} ptr; "
+      <> "}"
+  }
+}
+
 fn gen_term(arg: Term, target: String, id: Int) -> String {
   // TODO is "id" used?
   case arg {
@@ -146,7 +165,7 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
         <> type_name(typ)
         <> "(*)"
         <> "("
-        <> string.join(["Pointer", ..param_types], ", ")
+        <> string.join(["void*", ..param_types], ", ")
         <> ")"
         <> ")"
         <> fun
@@ -263,7 +282,7 @@ pub fn function_forward(fun: Function) -> String {
 
 fn custom_type_def(t: CustomType) {
   case t.pointer {
-    True -> "typedef Pointer " <> t.name <> ";"
+    True -> "typedef " <> pointer(t) <> " " <> t.name <> ";"
     False ->
       case t.variants {
         [v] -> "typedef struct " <> v.name <> " " <> t.name <> ";"
@@ -274,15 +293,11 @@ fn custom_type_def(t: CustomType) {
 
 fn custom_type_forward(t: CustomType) {
   let equal =
-    "Bool"
-    <> " eq_"
-    <> t.name
-    <> "("
-    <> t.name
-    <> " a, "
-    <> t.name
-    <> " b"
-    <> ");"
+    "Bool eq_" <> t.name <> "(" <> t.name <> " a, " <> t.name <> " b" <> ");"
+
+  let less_than =
+    "Bool lt_" <> t.name <> "(" <> t.name <> " a, " <> t.name <> " b" <> ");"
+
   let inspect = "String inspect_" <> t.name <> "(" <> t.name <> " a);"
 
   let constructors =
@@ -290,25 +305,34 @@ fn custom_type_forward(t: CustomType) {
     |> list.map(constructor_function_header(t, _))
     |> list.map(fn(con) { con <> ";" })
 
-  [equal, inspect, ..constructors]
+  [equal, less_than, inspect, ..constructors]
   |> string.join("\n")
 }
 
-fn decode_arg(t: CustomType, var: String) -> String {
-  case t.pointer {
-    True ->
-      "uint16_t "
-      <> var
-      <> "_tag = decode_tag("
-      <> var
-      <> ");\n"
-      <> "void* "
-      <> var
-      <> "_ptr = decode_pointer("
-      <> var
-      <> ");\n"
-    False -> ""
+fn unwrap_pointer(ptr: String, v: closure.Variant, vi: Int) {
+  case v.fields {
+    [] -> ""
+    _ ->
+      "struct "
+      <> v.name
+      <> " s"
+      <> ptr
+      <> " = *"
+      <> ptr
+      <> ".ptr.v"
+      <> int.to_string(vi)
+      <> ";\n"
   }
+}
+
+fn struct_literal(v: closure.Variant) {
+  { "((struct " <> v.name <> "){" }
+  <> {
+    v.fields
+    |> list.map(fn(f) { "." <> f.name <> " = " <> f.name })
+    |> string.join(",")
+  }
+  <> "})"
 }
 
 fn custom_type(t: CustomType) {
@@ -333,75 +357,38 @@ fn custom_type(t: CustomType) {
     <> t.name
     <> " b"
     <> ") {\n"
-    <> decode_arg(t, "a")
-    <> decode_arg(t, "b")
     <> case t.variants {
       [v] ->
         list.map(v.fields, fn(f) {
-          let field_equal = "eq_" <> type_name(f.typ)
-          case t.pointer {
-            True ->
-              "{ struct "
-              <> v.name
-              <> "* a = (struct "
-              <> v.name
-              <> "*) a_ptr;\n"
-              <> "struct "
-              <> v.name
-              <> "* b = (struct "
-              <> v.name
-              <> "*) b_ptr;\n"
-              <> "if(!"
-              <> field_equal
-              <> "(a"
-              <> access_op
-              <> f.name
-              <> ", b"
-              <> access_op
-              <> f.name
-              <> ")) { return False; }\n"
-              <> "}"
-            False -> {
-              let escaped_field_name = escape_if_keyword(f.name)
-              "if(!"
-              <> field_equal
-              <> "(a"
-              <> access_op
-              <> escaped_field_name
-              <> ", b"
-              <> access_op
-              <> escaped_field_name
-              <> ")) { return False; }\n"
-            }
-          }
+          let field_name = escape_if_keyword(f.name)
+          "if(!"
+          <> "eq_"
+          <> type_name(f.typ)
+          <> "(a"
+          <> access_op
+          <> field_name
+          <> ", b"
+          <> access_op
+          <> field_name
+          <> ")) { return False; }\n"
         })
         |> string.concat
       variants ->
-        "if (a_tag != b_tag) { return False; }\n"
-        <> list.index_map(variants, fn(v, i) {
-          "if (a_tag == "
-          <> int.to_string(i)
-          <> ") {\n"
-          <> "struct "
+        "if (a.tag != b.tag) { return False; }\n"
+        <> list.index_map(variants, fn(v, vi) {
+          "if (a.tag == "
           <> v.name
-          <> "* a = (struct "
-          <> v.name
-          <> "*) a_ptr;\n"
-          <> "struct "
-          <> v.name
-          <> "* b = (struct "
-          <> v.name
-          <> "*) b_ptr;\n"
+          <> "_TAG) {\n"
+          <> unwrap_pointer("a", v, vi)
+          <> unwrap_pointer("b", v, vi)
           <> list.map(v.fields, fn(f) {
             let field_equal = "eq_" <> type_name(f.typ)
             let escaped_field_name = escape_if_keyword(f.name)
             "if(!"
             <> field_equal
-            <> "(a"
-            <> access_op
+            <> "(sa."
             <> escaped_field_name
-            <> ", b"
-            <> access_op
+            <> ", sb."
             <> escaped_field_name
             <> ")) { return False; }\n"
           })
@@ -413,21 +400,84 @@ fn custom_type(t: CustomType) {
     <> "return True;\n"
     <> "}\n"
 
+  let less_than =
+    "Bool lt_"
+    <> t.name
+    <> "("
+    <> t.name
+    <> " a, "
+    <> t.name
+    <> " b"
+    <> ") {\n"
+    <> case t.variants {
+      [v] ->
+        list.map(v.fields, fn(f) {
+          let field_lt = "lt_" <> type_name(f.typ)
+          let field_name = escape_if_keyword(f.name)
+          "if("
+          <> field_lt
+          <> "(a"
+          <> access_op
+          <> field_name
+          <> ", b"
+          <> access_op
+          <> field_name
+          <> ")) { return True; }\n"
+          <> "if("
+          <> field_lt
+          <> "(b"
+          <> access_op
+          <> field_name
+          <> ", a"
+          <> access_op
+          <> field_name
+          <> ")) { return False; }\n"
+        })
+        |> string.concat
+      variants ->
+        "if (a.tag < b.tag) { return True; }\n"
+        <> "if (a.tag > b.tag) { return False; }\n"
+        <> list.index_map(variants, fn(v, vi) {
+          "if (a.tag == "
+          <> v.name
+          <> "_TAG) {\n"
+          <> unwrap_pointer("a", v, vi)
+          <> unwrap_pointer("b", v, vi)
+          <> list.map(v.fields, fn(f) {
+            let field_lt = "lt_" <> type_name(f.typ)
+            let escaped_field_name = escape_if_keyword(f.name)
+            "if("
+            <> field_lt
+            <> "(sa."
+            <> escaped_field_name
+            <> ", sb."
+            <> escaped_field_name
+            <> ")) { return True; }\n"
+            <> "if("
+            <> field_lt
+            <> "(sb."
+            <> escaped_field_name
+            <> ", sa."
+            <> escaped_field_name
+            <> ")) { return False; }\n"
+          })
+          |> string.concat
+          <> "}\n"
+        })
+        |> string.join("else ")
+    }
+    <> "return False;\n"
+    <> "}\n"
+
   let inspect =
     "String inspect_"
     <> t.name
     <> "("
     <> t.name
     <> " a) {\n"
-    <> decode_arg(t, "a")
     <> case t.variants {
       [v] ->
-        case t.pointer {
-          True ->
-            "{ struct " <> v.name <> "* a = (struct " <> v.name <> "*) a_ptr;\n"
-          False -> ""
-        }
-        <> case v.fields {
+        case v.fields {
           [] -> "return " <> string_lit(v.display_name) <> ";\n"
           _ ->
             "return append_string("
@@ -448,20 +498,12 @@ fn custom_type(t: CustomType) {
             <> string_lit(")")
             <> ");\n"
         }
-        <> case t.pointer {
-          True -> "}\n"
-          False -> ""
-        }
       variants ->
-        list.index_map(variants, fn(v, i) {
-          "if (a_tag == "
-          <> int.to_string(i)
-          <> ") {\n"
-          <> "struct "
+        list.index_map(variants, fn(v, vi) {
+          "if (a.tag == "
           <> v.name
-          <> "* a = (struct "
-          <> v.name
-          <> "*) a_ptr;\n"
+          <> "_TAG) {\n"
+          <> unwrap_pointer("a", v, vi)
           <> case v.fields {
             [] -> "return " <> string_lit(v.display_name) <> ";\n"
             _ ->
@@ -470,8 +512,7 @@ fn custom_type(t: CustomType) {
               |> list.map(fn(f) {
                 "inspect_"
                 <> type_name(f.typ)
-                <> "(a"
-                <> access_op
+                <> "(sa."
                 <> escape_if_keyword(f.name)
                 <> ")"
               })
@@ -493,18 +534,20 @@ fn custom_type(t: CustomType) {
     <> "}\n"
 
   let variant_definitions =
-    list.index_map(t.variants, fn(v, i) {
-      let tag = int.to_string(i)
+    list.index_map(t.variants, fn(v, vi) {
+      let tag = v.name <> "_TAG"
 
-      let struct = custom_type_struct(v)
+      let struct = custom_type_struct(v) <> "\n"
 
       let constructor = case v.fields {
         [] ->
-          "const Pointer new_"
+          "const "
+          <> t.name
+          <> " new_"
           <> v.name
-          <> " = encode_pointer(0, "
+          <> " = {.tag="
           <> tag
-          <> ");\n"
+          <> ", .ptr=0};\n"
         _ ->
           constructor_function_header(t, v)
           <> " {\n"
@@ -512,33 +555,22 @@ fn custom_type(t: CustomType) {
             True ->
               "struct "
               <> v.name
-              <> "* _ptr = (struct "
-              <> v.name
-              <> "*) malloc(sizeof(struct "
+              <> " *_ptr = malloc(sizeof(struct "
               <> v.name
               <> "));\n"
-              <> "uint16_t _tag = "
-              <> tag
+              <> "*_ptr = "
+              <> struct_literal(v)
               <> ";\n"
-            _ -> t.name <> " _value;\n"
-          }
-          <> v.fields
-          |> list.map(fn(p) {
-            let escaped_name = escape_if_keyword(p.name)
-            case t.pointer {
-              True -> "_ptr"
-              False -> "_value"
-            }
-            <> access_op
-            <> escaped_name
-            <> " = "
-            <> escaped_name
-            <> ";\n"
-          })
-          |> string.join("")
-          <> case t.pointer {
-            True -> "return encode_pointer(_ptr, _tag);\n"
-            False -> "return _value;\n"
+              <> case t.variants {
+                [_] -> "return _ptr;"
+                _ ->
+                  "return (("
+                  <> t.name
+                  <> "){.tag="
+                  <> tag
+                  <> ", .ptr=_ptr});\n"
+              }
+            False -> "return " <> struct_literal(v) <> ";\n"
           }
           <> "}\n"
       }
@@ -551,32 +583,29 @@ fn custom_type(t: CustomType) {
         <> " a) {\n"
         <> case is_record {
           True -> "return True;\n"
-          False -> decode_arg(t, "a") <> "return a_tag == " <> tag <> ";\n"
+          False -> "return a.tag == " <> tag <> ";\n"
         }
         <> "}\n"
       let getters =
-        list.index_map(v.fields, fn(f, i) {
-          // TODO getters probably broken for record types
+        list.index_map(v.fields, fn(f, fi) {
           let escaped_field_name = escape_if_keyword(f.name)
           type_name(f.typ)
           <> " "
-          <> gen_names.get_getter_name(v.name, i)
-          // <> v.name
-          // <> "_"
-          // <> f.name
+          <> gen_names.get_getter_name(v.name, fi)
           <> "("
           <> t.name
           <> " value) {"
-          <> case t.pointer {
-            True ->
+          <> case t.pointer, t.variants {
+            True, [_] -> "return value->" <> escaped_field_name
+            False, _ -> "return value." <> escaped_field_name
+            True, _ ->
               " struct "
               <> v.name
-              <> "* ptr = (struct "
-              <> v.name
-              <> "*) decode_pointer(value); return ptr"
+              <> "* ptr = value.ptr.v"
+              <> int.to_string(vi)
+              <> "; return ptr"
               <> access_op
               <> escaped_field_name
-            False -> "return value" <> access_op <> escaped_field_name
           }
           <> "; }\n"
         })
@@ -585,12 +614,12 @@ fn custom_type(t: CustomType) {
     })
     |> string.concat
 
-  variant_definitions <> equal <> inspect
+  variant_definitions <> equal <> less_than <> inspect
 }
 
 fn constructor_function_header(t: CustomType, v: closure.Variant) -> String {
   case v.fields {
-    [] -> "extern const Pointer new_" <> v.name
+    [] -> "extern const " <> t.name <> " new_" <> v.name
     _ ->
       t.name
       <> " new_"

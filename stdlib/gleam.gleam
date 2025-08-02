@@ -27,6 +27,20 @@ pub type List(a) {
   Cons(item: a, next: List(a))
 }
 
+// Auto Generated Functions
+
+@monomorphise()
+@external(c, "", "eq")
+pub fn eq(a: a, b: a) -> Bool
+
+@monomorphise()
+@external(c, "", "lt")
+pub fn lt(a: a, b: a) -> Bool
+
+@monomorphise()
+@external(c, "", "inspect")
+pub fn inspect(a: a) -> String
+
 // Bool Operators
 
 @external(c, "", "and_bool")
@@ -38,70 +52,62 @@ pub fn or_bool(a: Bool, b: Bool) -> Bool
 @external(c, "", "negate_bool")
 pub fn negate_bool(b: Bool) -> Bool
 
-@monomorphise()
-@external(c, "", "eq")
-pub fn eq(a: a, b: a) -> Bool
-
-@monomorphise()
-@external(c, "", "builtin_compare")
-pub fn builtin_compare(a: a, b: a) -> Int
-
 // Int Operators
 
-@external(c, "", "lt_int")
+@external(c, "", "lt_Int")
 pub fn lt_int(a: Int, b: Int) -> Bool
 
-@external(c, "", "gt_int")
+@external(c, "", "gt_Int")
 pub fn gt_int(a: Int, b: Int) -> Bool
 
-@external(c, "", "lte_int")
+@external(c, "", "lte_Int")
 pub fn lte_int(a: Int, b: Int) -> Bool
 
-@external(c, "", "gte_int")
+@external(c, "", "gte_Int")
 pub fn gte_int(a: Int, b: Int) -> Bool
 
-@external(c, "", "add_int")
+@external(c, "", "add_Int")
 pub fn add_int(a: Int, b: Int) -> Int
 
-@external(c, "", "sub_int")
+@external(c, "", "sub_Int")
 pub fn sub_int(a: Int, b: Int) -> Int
 
-@external(c, "", "mul_int")
+@external(c, "", "mul_Int")
 pub fn mul_int(a: Int, b: Int) -> Int
 
-@external(c, "", "div_int")
+@external(c, "", "div_Int")
 pub fn div_int(a: Int, b: Int) -> Int
 
-@external(c, "", "rem_int")
+@external(c, "", "rem_Int")
 pub fn rem_int(a: Int, b: Int) -> Int
 
-@external(c, "", "negate_int")
+@external(c, "", "negate_Int")
 pub fn negate_int(a: Int) -> Int
 
 // Float Operators
 
-@external(c, "", "lt_float")
+@external(c, "", "lt_Float")
 pub fn lt_float(a: Float, b: Float) -> Bool
 
-@external(c, "", "gt_float")
+@external(c, "", "gt_Float")
 pub fn gt_float(a: Float, b: Float) -> Bool
 
-@external(c, "", "lte_float")
+@external(c, "", "lte_Float")
 pub fn lte_float(a: Float, b: Float) -> Bool
 
-@external(c, "", "gte_float")
+@external(c, "", "gte_Float")
 pub fn gte_float(a: Float, b: Float) -> Bool
 
-@external(c, "", "add_float")
+@external(c, "", "add_Float")
 pub fn add_float(a: Float, b: Float) -> Float
 
-@external(c, "", "sub_float")
+@external(c, "", "sub_Float")
 pub fn sub_float(a: Float, b: Float) -> Float
 
-@external(c, "", "mul_float")
+@external(c, "", "mul_Float")
 pub fn mul_float(a: Float, b: Float) -> Float
 
-@external(c, "", "div_float")
+@external(c, "", "div_Float")
 pub fn div_float(a: Float, b: Float) -> Float
 
 // String Operators
@@ -117,10 +123,6 @@ pub fn starts_with_string(string: String, prefix: String) -> Bool
 
 @external(c, "", "drop_start_string")
 pub fn drop_start_string(string: String, count: Int) -> String
-
-@monomorphise()
-@external(c, "", "inspect")
-pub fn inspect(a: a) -> String
 
 // BitArray Operators
 
