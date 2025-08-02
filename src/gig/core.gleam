@@ -61,7 +61,7 @@ pub type CustomType {
 
 pub type Variant {
   // TODO bring back field names?
-  Variant(typ: Poly, id: String, display_name: String, fields: List(Type))
+  Variant(typ: Poly, id: String, display_name: String, fields: List(Parameter))
 }
 
 pub type Function {
@@ -190,7 +190,13 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
     list.map(custom.variants, fn(variant) {
       let typ = map_poly(c, variant.typ)
       let fields =
-        list.map(variant.fields, fn(field) { map_type(c, field.item.typ) })
+        list.index_map(variant.fields, fn(field, i) {
+          let name = case field.label {
+            Some(label) -> label
+            None -> "field" <> int.to_string(i)
+          }
+          Parameter(map_type(c, field.item.typ), name)
+        })
       let id = get_id(module, variant.name)
       Variant(typ, id, variant.name, fields)
     })

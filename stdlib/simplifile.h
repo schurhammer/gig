@@ -16,12 +16,12 @@ typedef struct { enum {Ok_simplifile_FileInfo_simplifile_FileError_TAG, Error_si
 Bool eq_simplifile_FileInfo(simplifile_FileInfo a, simplifile_FileInfo b);
 Bool lt_simplifile_FileInfo(simplifile_FileInfo a, simplifile_FileInfo b);
 String inspect_simplifile_FileInfo(simplifile_FileInfo a);
-simplifile_FileInfo new_simplifile_FileInfo(Int f0, Int f1, Int f2, Int f3, Int f4, Int f5, Int f6, Int f7, Int f8, Int f9);
+simplifile_FileInfo new_simplifile_FileInfo(Int size, Int mode, Int nlinks, Int inode, Int user_id, Int group_id, Int dev, Int atime_seconds, Int mtime_seconds, Int ctime_seconds);
 Bool eq_List_String(List_String a, List_String b);
 Bool lt_List_String(List_String a, List_String b);
 String inspect_List_String(List_String a);
 extern const List_String new_Empty_String;
-List_String new_Cons_String(String f0, List_String f1);
+List_String new_Cons_String(String item, List_String next);
 Bool eq_simplifile_FileError(simplifile_FileError a, simplifile_FileError b);
 Bool lt_simplifile_FileError(simplifile_FileError a, simplifile_FileError b);
 String inspect_simplifile_FileError(simplifile_FileError a);
@@ -73,32 +73,32 @@ extern const simplifile_FileError new_simplifile_Estale;
 extern const simplifile_FileError new_simplifile_Etxtbsy;
 extern const simplifile_FileError new_simplifile_Exdev;
 extern const simplifile_FileError new_simplifile_NotUtf8;
-simplifile_FileError new_simplifile_Unknown(String f0);
+simplifile_FileError new_simplifile_Unknown(String inner);
 Bool eq_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a, Result_BitArray_simplifile_FileError b);
 Bool lt_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a, Result_BitArray_simplifile_FileError b);
 String inspect_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a);
-Result_BitArray_simplifile_FileError new_Ok_BitArray_simplifile_FileError(BitArray f0);
-Result_BitArray_simplifile_FileError new_Error_BitArray_simplifile_FileError(simplifile_FileError f0);
+Result_BitArray_simplifile_FileError new_Ok_BitArray_simplifile_FileError(BitArray value);
+Result_BitArray_simplifile_FileError new_Error_BitArray_simplifile_FileError(simplifile_FileError value);
 Bool eq_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a, Result_Bool_simplifile_FileError b);
 Bool lt_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a, Result_Bool_simplifile_FileError b);
 String inspect_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a);
-Result_Bool_simplifile_FileError new_Ok_Bool_simplifile_FileError(Bool f0);
-Result_Bool_simplifile_FileError new_Error_Bool_simplifile_FileError(simplifile_FileError f0);
+Result_Bool_simplifile_FileError new_Ok_Bool_simplifile_FileError(Bool value);
+Result_Bool_simplifile_FileError new_Error_Bool_simplifile_FileError(simplifile_FileError value);
 Bool eq_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a, Result_List_String_simplifile_FileError b);
 Bool lt_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a, Result_List_String_simplifile_FileError b);
 String inspect_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a);
-Result_List_String_simplifile_FileError new_Ok_List_String_simplifile_FileError(List_String f0);
-Result_List_String_simplifile_FileError new_Error_List_String_simplifile_FileError(simplifile_FileError f0);
+Result_List_String_simplifile_FileError new_Ok_List_String_simplifile_FileError(List_String value);
+Result_List_String_simplifile_FileError new_Error_List_String_simplifile_FileError(simplifile_FileError value);
 Bool eq_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a, Result_Nil_simplifile_FileError b);
 Bool lt_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a, Result_Nil_simplifile_FileError b);
 String inspect_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a);
-Result_Nil_simplifile_FileError new_Ok_Nil_simplifile_FileError(Nil f0);
-Result_Nil_simplifile_FileError new_Error_Nil_simplifile_FileError(simplifile_FileError f0);
+Result_Nil_simplifile_FileError new_Ok_Nil_simplifile_FileError(Nil value);
+Result_Nil_simplifile_FileError new_Error_Nil_simplifile_FileError(simplifile_FileError value);
 Bool eq_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a, Result_simplifile_FileInfo_simplifile_FileError b);
 Bool lt_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a, Result_simplifile_FileInfo_simplifile_FileError b);
 String inspect_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a);
-Result_simplifile_FileInfo_simplifile_FileError new_Ok_simplifile_FileInfo_simplifile_FileError(simplifile_FileInfo f0);
-Result_simplifile_FileInfo_simplifile_FileError new_Error_simplifile_FileInfo_simplifile_FileError(simplifile_FileError f0);
+Result_simplifile_FileInfo_simplifile_FileError new_Ok_simplifile_FileInfo_simplifile_FileError(simplifile_FileInfo value);
+Result_simplifile_FileInfo_simplifile_FileError new_Error_simplifile_FileInfo_simplifile_FileError(simplifile_FileError value);
 
 Result_simplifile_FileInfo_simplifile_FileError simplifile_file_info(String a0);
 Result_Bool_simplifile_FileError simplifile_is_directory(String a0);
@@ -108,23 +108,23 @@ Result_List_String_simplifile_FileError simplifile_read_directory(String a0);
 Result_Nil_simplifile_FileError simplifile_write_bits(String a0, BitArray a1);
 
 struct simplifile_FileInfo{
-Int f0;
-Int f1;
-Int f2;
-Int f3;
-Int f4;
-Int f5;
-Int f6;
-Int f7;
-Int f8;
-Int f9;
+Int size;
+Int mode;
+Int nlinks;
+Int inode;
+Int user_id;
+Int group_id;
+Int dev;
+Int atime_seconds;
+Int mtime_seconds;
+Int ctime_seconds;
 };
 
 struct Empty_String{
 };
 struct Cons_String{
-String f0;
-List_String f1;
+String item;
+List_String next;
 };
 
 struct simplifile_Eacces{
@@ -224,40 +224,40 @@ struct simplifile_Exdev{
 struct simplifile_NotUtf8{
 };
 struct simplifile_Unknown{
-String f0;
+String inner;
 };
 
 struct Ok_BitArray_simplifile_FileError{
-BitArray f0;
+BitArray value;
 };
 struct Error_BitArray_simplifile_FileError{
-simplifile_FileError f0;
+simplifile_FileError value;
 };
 
 struct Ok_Bool_simplifile_FileError{
-Bool f0;
+Bool value;
 };
 struct Error_Bool_simplifile_FileError{
-simplifile_FileError f0;
+simplifile_FileError value;
 };
 
 struct Ok_List_String_simplifile_FileError{
-List_String f0;
+List_String value;
 };
 struct Error_List_String_simplifile_FileError{
-simplifile_FileError f0;
+simplifile_FileError value;
 };
 
 struct Ok_Nil_simplifile_FileError{
-Nil f0;
+Nil value;
 };
 struct Error_Nil_simplifile_FileError{
-simplifile_FileError f0;
+simplifile_FileError value;
 };
 
 struct Ok_simplifile_FileInfo_simplifile_FileError{
-simplifile_FileInfo f0;
+simplifile_FileInfo value;
 };
 struct Error_simplifile_FileInfo_simplifile_FileError{
-simplifile_FileError f0;
+simplifile_FileError value;
 };

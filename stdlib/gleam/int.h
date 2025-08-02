@@ -9,8 +9,8 @@ typedef struct { enum {Ok_Int_Nil_TAG, Error_Int_Nil_TAG} tag; union {struct Ok_
 Bool eq_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
 Bool lt_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
 String inspect_Result_Int_Nil(Result_Int_Nil a);
-Result_Int_Nil new_Ok_Int_Nil(Int f0);
-Result_Int_Nil new_Error_Int_Nil(Nil f0);
+Result_Int_Nil new_Ok_Int_Nil(Int value);
+Result_Int_Nil new_Error_Int_Nil(Nil value);
 
 Int gleam_int_bitwise_and(Int a0, Int a1);
 Result_Int_Nil gleam_int_do_base_parse(String a0, Int a1);
@@ -18,8 +18,8 @@ Result_Int_Nil gleam_int_parse(String a0);
 String gleam_int_to_string(Int a0);
 
 struct Ok_Int_Nil{
-Int f0;
+Int value;
 };
 struct Error_Int_Nil{
-Nil f0;
+Nil value;
 };

@@ -77,7 +77,7 @@ String gleam_int_to_string(Int value) {
   char *result_bytes = malloc(len);
   if (!result_bytes) {
     // Return empty string on allocation failure
-    return String_LIT("", 0);
+    return new_String("", 0);
   }
 
   // Copy the formatted string

@@ -10,24 +10,24 @@ typedef struct { enum {Empty_String_TAG, Cons_String_TAG} tag; union {struct Emp
 Bool eq_Tuple3_String_String_List_String(Tuple3_String_String_List_String a, Tuple3_String_String_List_String b);
 Bool lt_Tuple3_String_String_List_String(Tuple3_String_String_List_String a, Tuple3_String_String_List_String b);
 String inspect_Tuple3_String_String_List_String(Tuple3_String_String_List_String a);
-Tuple3_String_String_List_String new_Tuple3_String_String_List_String(String f0, String f1, List_String f2);
+Tuple3_String_String_List_String new_Tuple3_String_String_List_String(String el0, String el1, List_String el2);
 Bool eq_List_String(List_String a, List_String b);
 Bool lt_List_String(List_String a, List_String b);
 String inspect_List_String(List_String a);
 extern const List_String new_Empty_String;
-List_String new_Cons_String(String f0, List_String f1);
+List_String new_Cons_String(String item, List_String next);
 
 Tuple3_String_String_List_String argv_do();
 
 struct Tuple3_String_String_List_String{
-String f0;
-String f1;
-List_String f2;
+String el0;
+String el1;
+List_String el2;
 };
 
 struct Empty_String{
 };
 struct Cons_String{
-String f0;
-List_String f1;
+String item;
+List_String next;
 };

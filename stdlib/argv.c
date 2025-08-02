@@ -24,7 +24,7 @@ Tuple3_String_String_List_String argv_do() {
   if (global_argc >= 1) {
     executable_path = cstring_to_string(global_argv[0]);
   } else {
-    executable_path = String_LIT("<unknown>", 9);
+    executable_path = new_String("<unknown>", 9);
   }
 
   // no script path since this is a binary

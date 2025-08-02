@@ -1,9 +1,11 @@
 import gig/core as t
 import gig/gen_names
 import gleam/dict
+import gleam/int
 
 import gleam/io
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
 
 pub type Context {
@@ -136,7 +138,9 @@ pub fn instantiate_type(c: Context, typ: t.Type) {
                   let mono_name = v.id <> type_string
                   let typ = t.Poly([], sub_type(c, sub, v.typ.typ))
                   let fields =
-                    list.map(v.fields, fn(typ) { sub_type(c, sub, typ) })
+                    list.map(v.fields, fn(field) {
+                      t.Parameter(sub_type(c, sub, field.typ), field.name)
+                    })
                   t.Variant(typ, mono_name, v.display_name, fields)
                 })
 
@@ -157,7 +161,7 @@ pub fn instantiate_type(c: Context, typ: t.Type) {
               // also instantiate any types referenced by this type
               list.fold(variants, c, fn(c, variant) {
                 list.fold(variant.fields, c, fn(c, field) {
-                  instantiate_type(c, field)
+                  instantiate_type(c, field.typ)
                 })
               })
             }
@@ -179,7 +183,12 @@ pub fn instantiate_type(c: Context, typ: t.Type) {
         Ok(_) -> c
         Error(_) -> {
           let typ = t.Poly([], mono)
-          let variants = [t.Variant(typ, mono_name, "#", elements)]
+
+          let element_fields =
+            list.index_map(elements, fn(typ, i) {
+              t.Parameter(typ, "el" <> int.to_string(i))
+            })
+          let variants = [t.Variant(typ, mono_name, "#", element_fields)]
           let custom = t.CustomType(typ, mono_name, "#", variants)
 
           // add to module
@@ -211,7 +220,11 @@ fn register_tuple(c: Context, typ: t.Type) {
       let variant_typ =
         t.Poly(vars, t.FunctionType(element_types, custom_typ.typ))
 
-      let variant = t.Variant(variant_typ, variant_id, "#", element_types)
+      let element_fields =
+        list.index_map(elements, fn(typ, i) {
+          t.Parameter(typ, "el" <> int.to_string(i))
+        })
+      let variant = t.Variant(variant_typ, variant_id, "#", element_fields)
       let custom = t.CustomType(custom_typ, variant_id, "#", [variant])
       let cin =
         t.Context(..cin, types: dict.insert(cin.types, custom.id, custom))

@@ -93,7 +93,7 @@ fn string_lit(val: String) {
   // let size = int.to_string(string.byte_size(val))
   let val = string.replace(val, "\n", "\\n")
   let size = "-1"
-  "String_LIT(\"" <> val <> "\", " <> size <> ")"
+  "new_String(\"" <> val <> "\", " <> size <> ")"
 }
 
 fn gen_value(arg: Value, target: String, id: Int) {
@@ -329,7 +329,10 @@ fn struct_literal(v: closure.Variant) {
   { "((struct " <> v.name <> "){" }
   <> {
     v.fields
-    |> list.map(fn(f) { "." <> f.name <> " = " <> f.name })
+    |> list.map(fn(f) {
+      let field_name = escape_if_keyword(f.name)
+      "." <> field_name <> " = " <> field_name
+    })
     |> string.join(",")
   }
   <> "})"
@@ -445,20 +448,20 @@ fn custom_type(t: CustomType) {
           <> unwrap_pointer("b", v, vi)
           <> list.map(v.fields, fn(f) {
             let field_lt = "lt_" <> type_name(f.typ)
-            let escaped_field_name = escape_if_keyword(f.name)
+            let field_name = escape_if_keyword(f.name)
             "if("
             <> field_lt
             <> "(sa."
-            <> escaped_field_name
+            <> field_name
             <> ", sb."
-            <> escaped_field_name
+            <> field_name
             <> ")) { return True; }\n"
             <> "if("
             <> field_lt
             <> "(sb."
-            <> escaped_field_name
+            <> field_name
             <> ", sa."
-            <> escaped_field_name
+            <> field_name
             <> ")) { return False; }\n"
           })
           |> string.concat
@@ -568,7 +571,9 @@ fn custom_type(t: CustomType) {
                   <> t.name
                   <> "){.tag="
                   <> tag
-                  <> ", .ptr=_ptr});\n"
+                  <> ", .ptr.v"
+                  <> int.to_string(vi)
+                  <> "=_ptr});\n"
               }
             False -> "return " <> struct_literal(v) <> ";\n"
           }
@@ -588,7 +593,7 @@ fn custom_type(t: CustomType) {
         <> "}\n"
       let getters =
         list.index_map(v.fields, fn(f, fi) {
-          let escaped_field_name = escape_if_keyword(f.name)
+          let field_name = escape_if_keyword(f.name)
           type_name(f.typ)
           <> " "
           <> gen_names.get_getter_name(v.name, fi)
@@ -596,8 +601,8 @@ fn custom_type(t: CustomType) {
           <> t.name
           <> " value) {"
           <> case t.pointer, t.variants {
-            True, [_] -> "return value->" <> escaped_field_name
-            False, _ -> "return value." <> escaped_field_name
+            True, [_] -> "return value->" <> field_name
+            False, _ -> "return value." <> field_name
             True, _ ->
               " struct "
               <> v.name
@@ -605,7 +610,7 @@ fn custom_type(t: CustomType) {
               <> int.to_string(vi)
               <> "; return ptr"
               <> access_op
-              <> escaped_field_name
+              <> field_name
           }
           <> "; }\n"
         })

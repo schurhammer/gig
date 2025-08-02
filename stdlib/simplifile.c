@@ -201,8 +201,8 @@ Result_List_String_simplifile_FileError simplifile_read_directory(String path) {
   List_String reversed = new_Empty_String;
   while (result.tag == Cons_String_TAG) {
     struct Cons_String *cons = result.ptr.v1;
-    String head = cons->f0;
-    List_String tail = cons->f1;
+    String head = cons->item;
+    List_String tail = cons->next;
 
     reversed = new_Cons_String(head, reversed);
     result = tail;

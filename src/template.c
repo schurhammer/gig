@@ -65,14 +65,7 @@ Bool lt_UtfCodepoint(UtfCodepoint x, UtfCodepoint y) { return x < y; }
 String inspect_UtfCodepoint(UtfCodepoint value) {
   char buffer[16];
   snprintf(buffer, sizeof(buffer), "%d", value);
-
-  struct String result;
-  result.byte_length = strlen(buffer);
-  result.bytes = malloc(result.byte_length);
-
-  memcpy(result.bytes, buffer, result.byte_length);
-
-  return result;
+  return cstring_to_string(buffer);
 }
 
 u_int16_t splice_bits(u_int16_t src, u_int16_t dst, int src_offset,
@@ -96,6 +89,9 @@ BitArray new_bit_array(size_t len) {
 
   struct BitArray ba;
   ba.bytes = malloc(byte_size);
+  if (ba.bytes == NULL) {
+    panic_exit(new_String("malloc failed in new_bit_array", -1));
+  }
   ba.offset = 0;
   ba.len = len;
 
@@ -163,15 +159,17 @@ Nil write_bit_array_int(Int value, BitArray dst, Int offset, Int len) {
 }
 
 String index_bit_array_string(BitArray ba, Int bit_offset, Int bit_length) {
-  String result;
-  result.byte_length = bit_length / 8;
-  result.bytes = malloc(result.byte_length);
+  int byte_length = bit_length / 8;
+  String result = new_String(malloc(byte_length), byte_length);
+  if (result.bytes == NULL) {
+    panic_exit(new_String("malloc failed in index_bit_array_string", -1));
+  }
 
   bit_offset = bit_offset + ba.offset;
   int byte_offset = bit_offset / 8;
   int bits_into_byte = bit_offset % 8;
 
-  for (int i = 0; i < result.byte_length; i++) {
+  for (int i = 0; i < byte_length; i++) {
     uint16_t current_byte = ba.bytes[byte_offset + i];
     uint16_t next_byte = ba.bytes[byte_offset + i + 1];
 
@@ -187,7 +185,7 @@ String index_bit_array_string(BitArray ba, Int bit_offset, Int bit_length) {
 
 Int index_bit_array_int(BitArray ba, Int bit_offset, Int bit_length) {
   if (bit_length > 64)
-    panic_exit(String_LIT("bit array index too large", -1));
+    panic_exit(new_String("bit array index too large", -1));
 
   bit_offset = bit_offset + ba.offset;
 
@@ -298,14 +296,16 @@ Bool lt_BitArray(BitArray a, BitArray b) {
   return True;
 }
 
-String String_LIT(char *bytes, int byte_length) {
+String new_String(char *bytes, int byte_length) {
   if (byte_length < 0) {
     byte_length = strlen(bytes);
   }
-  struct String str;
+  String str;
   str.byte_length = byte_length;
   str.bytes = bytes;
-
+  if (bytes == NULL) {
+    panic_exit(new_String("null string", -1));
+  }
   return str;
 }
 
@@ -335,10 +335,11 @@ String append_string(String a, String b) {
   if (b.byte_length == 0) {
     return a;
   }
-  struct String str;
   int byte_length = a.byte_length + b.byte_length;
-  str.bytes = malloc(byte_length);
-  str.byte_length = byte_length;
+  String str = new_String(malloc(byte_length), byte_length);
+  if (str.bytes == NULL) {
+    panic_exit(new_String("malloc failed in append_string", -1));
+  }
   memcpy(str.bytes, a.bytes, a.byte_length);
   memcpy(str.bytes + a.byte_length, b.bytes, b.byte_length);
   return str;
@@ -372,15 +373,9 @@ Bool ends_with_string(String string, String with) {
 
 String slice_string(String in, Int offset, Int length) {
   if (offset < 0 || length < 0 || offset + length > in.byte_length) {
-    struct String str;
-    str.byte_length = 0;
-    str.bytes = in.bytes + in.byte_length;
-    return str;
+    return new_String(in.bytes + in.byte_length, 0);
   }
-  struct String str;
-  str.byte_length = length;
-  str.bytes = in.bytes + offset;
-  return str;
+  return new_String(in.bytes + offset, length);
 }
 
 String drop_start_string(String string, Int count) {
@@ -388,29 +383,25 @@ String drop_start_string(String string, Int count) {
     return string;
   }
   if (count >= string.byte_length) {
-    struct String str;
-    str.byte_length = 0;
-    str.bytes = string.bytes + string.byte_length;
-    return str;
+    return new_String(string.bytes + string.byte_length, 0);
   }
 
-  struct String str;
-  str.byte_length = string.byte_length - count;
-  str.bytes = string.bytes + count;
-  return str;
+  return new_String(string.bytes + count, string.byte_length - count);
 }
 
-Int compare_string(struct String str1, struct String str2) {
+Int compare_string(String str1, String str2) {
   if (str1.byte_length != str2.byte_length) {
-    return str1.byte_length - str2.byte_length;
+    return str1.byte_length < str2.byte_length ? -1 : 1;
   }
   return memcmp(str1.bytes, str2.bytes, str1.byte_length);
 }
 
 String cstring_to_string(char *bytes) {
-  struct String str;
-  str.byte_length = strlen(bytes);
-  str.bytes = malloc(str.byte_length);
+  int byte_length = strlen(bytes);
+  String str = new_String(malloc(byte_length), byte_length);
+  if (str.bytes == NULL) {
+    panic_exit(new_String("malloc failed in cstring_to_string", -1));
+  }
   memcpy(str.bytes, bytes, str.byte_length);
   return str;
 }
@@ -427,46 +418,29 @@ String gets_string(Int max_length) {
   if (fgets(buffer, max_length, stdin) != NULL) {
     return cstring_to_string(buffer);
   } else {
-    struct String str;
-    str.byte_length = 0;
-    str.bytes = NULL;
-    return str;
+    return new_String(NULL, 0);
   }
 }
 
-String inspect_Nil(Nil value) { return String_LIT("Nil", 3); }
+String inspect_Nil(Nil value) { return new_String("Nil", 3); }
 
 String inspect_Bool(Bool b) {
   if (b)
-    return String_LIT("True", 4);
+    return new_String("True", 4);
   else
-    return String_LIT("False", 5);
+    return new_String("False", 5);
 }
 
 String inspect_Int(Int value) {
   char buffer[32];
   snprintf(buffer, sizeof(buffer), "%ld", value);
-
-  struct String result;
-  result.byte_length = strlen(buffer);
-  result.bytes = malloc(result.byte_length);
-
-  memcpy(result.bytes, buffer, result.byte_length);
-
-  return result;
+  return cstring_to_string(buffer);
 }
 
 String inspect_Float(Float value) {
   char buffer[32];
   snprintf(buffer, sizeof(buffer), "%g", value);
-
-  struct String result;
-  result.byte_length = strlen(buffer);
-  result.bytes = malloc(result.byte_length);
-
-  memcpy(result.bytes, buffer, result.byte_length);
-
-  return result;
+  return cstring_to_string(buffer);
 }
 
 String inspect_String(String s) {
@@ -538,11 +512,10 @@ String inspect_BitArray(struct BitArray ba) {
   buffer[bp++] = '>';
   buffer[bp] = '\0';
 
-  String result = cstring_to_string(buffer);
-  return result;
+  return cstring_to_string(buffer);
 }
 
-String inspect_Closure(Closure c) { return String_LIT("Closure", 7); }
+String inspect_Closure(Closure c) { return new_String("Closure", 7); }
 
 Closure create_closure(void *fun, void *env) {
   struct Closure RETURN;

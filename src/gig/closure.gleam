@@ -67,10 +67,7 @@ pub fn cc_module(mod: mono.Context) {
     dict.fold(mod.out.types, c, fn(c, _, custom) {
       let variants =
         list.map(custom.variants, fn(v) {
-          let fields =
-            list.index_map(v.fields, fn(f, i) {
-              Field(gen_names.get_field_name(i), f)
-            })
+          let fields = list.map(v.fields, fn(f) { Field(f.name, f.typ) })
           Variant(v.id, v.display_name, fields)
         })
       let pointer = case variants {

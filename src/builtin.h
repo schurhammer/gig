@@ -93,7 +93,7 @@ Int length_bit_array(BitArray ba);
 u_int16_t splice_bits(u_int16_t src, u_int16_t dst, int src_offset,
                       int dst_offset, int n);
 
-String String_LIT(char *bytes, int byte_length);
+String new_String(char *bytes, int byte_length);
 Int length_string(String a);
 String append_string(String a, String b);
 Bool starts_with_string(String string, String with);
