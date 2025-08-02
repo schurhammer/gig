@@ -874,7 +874,9 @@ fn lower_pattern_match(
         })
       lower_pattern_match(c, list, subject)
     }
-    t.PatternAssignment(typ, pattern, name) -> true_value
+    t.PatternAssignment(typ, pattern, name) -> {
+      lower_pattern_match(c, pattern, subject)
+    }
     t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
       let prefix_str = t.String(t.string_type, prefix)
       let match =
