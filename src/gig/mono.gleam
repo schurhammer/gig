@@ -279,7 +279,7 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
     Ok(fun) -> {
       let sub = unify_poly(c, fun.typ, mono)
       let type_string = get_type_string(sub)
-      let mono_name = "F_" <> fun.id <> type_string
+      let mono_name = fun.id <> type_string
 
       case fun.body {
         t.Panic(_, _) -> {

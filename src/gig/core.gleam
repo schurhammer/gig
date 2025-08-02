@@ -4,6 +4,7 @@ import gleam/dict.{type Dict}
 import gleam/io
 import gleam/result
 import gleam/string
+import glexer
 
 import glance as g
 
@@ -282,7 +283,20 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
     [statement] ->
       case statement {
         t.Expression(_, exp) -> lower_expression(c, exp)
-        t.Assignment(_, _, _, _, value) -> lower_expression(c, value)
+        t.Assignment(_, kind, pattern, _, value) -> {
+          let body = lower_expression(c, value)
+
+          // check assertions
+          case kind {
+            t.Assert -> {
+              let subject = t.LocalVariable(value.typ, "S")
+              let value = lower_expression(c, value)
+              let body = check_assertions(c, pattern, subject, value, body)
+              Let(body.typ, "S", value, body)
+            }
+            t.Let -> body
+          }
+        }
         t.Use(..) -> todo
       }
     [statement, ..body] ->
@@ -297,10 +311,11 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
           let body = lower_body(c, body)
           Let(body.typ, name, value, body)
         }
-        t.Assignment(_, _, pattern, _, value) -> {
+        t.Assignment(_, kind, pattern, _, value) -> {
           let subject = t.LocalVariable(value.typ, "S")
           let value = lower_expression(c, value)
           let body = lower_body(c, body)
+
           let bindings = lower_pattern_bindings(c, pattern, subject)
           let body =
             list.fold(bindings, body, fn(body, binding) {
@@ -308,11 +323,38 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
               let value = lower_expression(c, subject)
               Let(body.typ, name, value, body)
             })
+
+          // check assertions
+          let body = case kind {
+            t.Assert -> check_assertions(c, pattern, subject, value, body)
+            t.Let -> body
+          }
+
           Let(body.typ, "S", value, body)
         }
         t.Use(..) -> todo
       }
   }
+}
+
+fn check_assertions(
+  c: t.Context,
+  pattern: t.Pattern,
+  subject: t.Expression,
+  value: Exp,
+  body: Exp,
+) -> Exp {
+  let match = lower_pattern_match(c, pattern, subject)
+  let message = "Assertion failed in " <> current_location_string(c) <> "\n"
+  let inspect_typ = FunctionType([value.typ], string_type)
+  let append_typ = FunctionType([string_type, string_type], string_type)
+  let m =
+    Call(string_type, Global(append_typ, "append_string"), [
+      Literal(string_type, String(message)),
+      Call(string_type, Global(inspect_typ, "inspect"), [Local(value.typ, "S")]),
+    ])
+  let els = Panic(body.typ, m)
+  If(body.typ, match, body, els)
 }
 
 type BitArrayMode {
@@ -585,8 +627,11 @@ fn index_bit_array(
         Sized(_size) -> panic as "size not supported"
         Unsized ->
           case expr {
-            t.PatternString(_typ, s) ->
-              t.Int(t.int_type, int.to_string(8 * string.byte_size(s)))
+            t.PatternString(_typ, s) -> {
+              let assert Ok(unescaped) = glexer.unescape_string(s)
+              let size = string.byte_size(unescaped)
+              t.Int(t.int_type, int.to_string(8 * size))
+            }
             _ -> {
               // TODO actually need to read a utf8 char (variable size)?
               t.Int(t.int_type, "8")
@@ -661,8 +706,10 @@ fn lower_pattern_bindings(
       let suffix_binding = case suffix_name {
         t.Named(name) -> {
           // Create a call to drop the prefix from the subject string
-          let prefix_len =
-            t.Int(t.int_type, int.to_string(string.length(prefix)))
+          // We have to unescape the prefix to get the real size
+          let assert Ok(unescaped_prefix) = glexer.unescape_string(prefix)
+          let size = string.byte_size(unescaped_prefix)
+          let prefix_len = t.Int(t.int_type, int.to_string(size))
           let drop_fun =
             t.Function(
               t.FunctionType([t.string_type, t.int_type], t.string_type),
@@ -1087,11 +1134,11 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
                 }
                 Utf8Mode ->
                   case exp {
-                    Literal(_, String(s)) ->
-                      Literal(
-                        int_type,
-                        Int(int.to_string(8 * string.byte_size(s))),
-                      )
+                    Literal(_, String(s)) -> {
+                      let assert Ok(unescaped) = glexer.unescape_string(s)
+                      let size = string.byte_size(unescaped)
+                      Literal(int_type, Int(int.to_string(8 * size)))
+                    }
                     _ -> panic as "expected string value for utf8"
                   }
               }

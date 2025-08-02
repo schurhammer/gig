@@ -18,8 +18,6 @@ import gleam/io
 import gleam/list
 import gleam/string
 
-const build_src_dir = "./build/c/src"
-
 fn all_but_last(l: List(a)) -> List(a) {
   case l {
     [] | [_] -> []
@@ -158,29 +156,19 @@ pub fn compile(
   })
 
   // insert the generated code into the template
-  let assert Ok(template) = simplifile.read("./src/template.c")
-  let main_call = main_name <> "();\n"
-  let template = case gc {
-    True -> {
-      // TODO GC_enable_incremental
-      // TODO GC_MALLOC_ATOMIC
-      // TODO GC_set_pointer_mask(0x0000FFFFFFFFFFFF)
-      let includes = "#define GC\n"
-      let init = main_call
-      let template = string.replace(template, "/// INIT", init)
-      let template = string.replace(template, "/// INCLUDES", includes)
-      template
-    }
-    False -> {
-      let includes = ""
-      let init = main_call
-      let template = string.replace(template, "/// INIT", init)
-      let template = string.replace(template, "/// INCLUDES", includes)
-      template
-    }
-  }
+  let output =
+    "#include <builtin.h>
 
-  let output = string.replace(template, "/// CODEGEN", code)
+$code
+
+int main(int argc, char **argv) {
+  init(argc, argv);
+  $main
+  return 0;
+}
+"
+    |> string.replace("$main", main_name <> "();")
+    |> string.replace("$code", code)
 
   // output the c file
   let c_file = target_path <> module_id <> ".c"
@@ -193,10 +181,18 @@ pub fn compile(
 
   // compile the c file
   let binary_name = target_path <> module_id <> ".exe"
-  let args = ["-g3", "-Isrc", "-o", binary_name, c_file, ..external_c_files]
+  let args = [
+    "-g3",
+    "-Isrc",
+    "-o",
+    binary_name,
+    c_file,
+    "./src/builtin.c",
+    ..external_c_files
+  ]
 
   let args = case gc {
-    True -> ["-lgc", ..args]
+    True -> ["-DGC", "-lgc", ..args]
     False -> args
   }
 
@@ -250,9 +246,13 @@ fn infer_file(
 
   io.println("Parse " <> source)
 
-  let assert Ok(module) =
+  let module =
     read_source(sources, module_id)
     |> result.try(parse_module(module_id, _))
+  let module = case module {
+    Ok(module) -> module
+    Error(error) -> panic as error
+  }
 
   let polyfill_module_id = module_id <> ".polyfill"
   let polyfill_module =
@@ -296,8 +296,6 @@ fn parse_module(file: String, input: String) {
             <> ". Unexpected token "
             <> string.inspect(t)
             <> "\n\nat "
-            <> build_src_dir
-            <> "/"
             <> file
             <> ":"
             <> offset_to_line_col(input, p.byte_offset),

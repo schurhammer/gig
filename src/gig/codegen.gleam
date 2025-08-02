@@ -1,4 +1,4 @@
-import gig/closure.{type CustomType, type Function, type Module, Field}
+import gig/closure.{type CustomType, type Function, type Module}
 import gig/core.{BitArray, Float, Int, String}
 import gig/gen_names
 import gig/mono.{type_name}
@@ -7,6 +7,7 @@ import gig/normalise.{
   Variable,
 }
 import gig/type_graph
+import gleam/io
 import gleam/order
 
 import gig/graph
@@ -88,7 +89,6 @@ fn ternary(cond: String, then: String, els: String) -> String {
 }
 
 fn string_lit(val: String) {
-  // TODO this doesnt work for strings like "\n"
   // for now ive made size -1 check the size at runtime
   // let size = int.to_string(string.byte_size(val))
   let val = string.replace(val, "\n", "\\n")

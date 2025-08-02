@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/// INCLUDES
-
 #ifdef GC
 
 #include <gc.h>
@@ -536,29 +534,15 @@ Bool is_closure(Closure c) { return c.env != 0; }
 Bool eq_Closure(Closure a, Closure b) { return False; }
 Bool lt_Closure(Closure a, Closure b) { return a.fun < b.fun; }
 
-/// end of builtin
-
-/// codegen
-
-/// CODEGEN
-
-/// end of codegen
-
-/// main
-
 // Global variables to store command line arguments
 int global_argc = 0;
 char **global_argv = NULL;
 
-int main(int argc, char **argv) {
+void init(int argc, char **argv) {
 #ifdef GC
   GC_INIT();
 #endif
 
-  // Store global argv
   global_argc = argc;
   global_argv = argv;
-
-  /// INIT
-  return 0;
 }

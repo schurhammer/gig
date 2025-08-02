@@ -117,4 +117,6 @@ String inspect_UtfCodepoint(UtfCodepoint value);
 Closure create_closure(void *fun, void *env);
 Closure create_function(void *fun);
 Bool is_closure(Closure c);
+
+void init(int argc, char **argv);
 #endif

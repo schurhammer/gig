@@ -7,18 +7,20 @@ Gig is a gleam compiler written in gleam.
 ```
 git clone https://github.com/schurhammer/gig
 cd gig
-gleam run -m gig samples/hello_world.gleam
-./samples/hello_world
+gleam run samples/hello_world.gleam
+./samples/hello_world.exe
 ```
 
 This will compile the file `samples/hello_world.gleam` to `samples/hello_world.c` and then use a c compiler to create a binary at `samples/hello_world`.
 
 Optional flags:
+
 - `--release`: enable optimisation
-- `--gc`: enable garbage collection
+- `--gc`: enable garbage collection (otherwise no garbage collection)
 - `--compiler=name`: the name/path of the c compiler
 
 Dependencies:
+
 - clang/gcc/tcc is needed to compile to binary (clang seems to work best for gc)
 - Boehm GC library needs to be available for --gc
 
@@ -31,7 +33,7 @@ You may wish to increase your stack size `ulimit -s unlimited` to avoid stack ov
 - [x] Bools
 - [x] Ints
 - [x] Floats
-- [ ] Number formats (other than decimal)
+- [x] Number formats (other than decimal)
 - [x] Strings
 - [x] Lists
 - [x] Equality
@@ -40,11 +42,11 @@ You may wish to increase your stack size `ulimit -s unlimited` to avoid stack ov
 - [x] Type inference
 - [x] Type annotations
 - [x] Modules (note: modules are resolved relative to the root file)
-- [ ] Dependencies
-- [ ] Unqualified imports
-- [ ] Type aliases
+- [x] Dependencies
+- [x] Unqualified imports
+- [x] Type aliases
 - [x] Blocks
-- [ ] Constants
+- [x] Constants
 - [x] Memory Management (GC/RC)
 
 ### Functions
@@ -64,7 +66,7 @@ You may wish to increase your stack size `ulimit -s unlimited` to avoid stack ov
 - [x] Case expressions
 - [x] Variable patterns
 - [x] Constructor patterns
-- [ ] String patterns
+- [x] String patterns
 - [x] List patterns
 - [x] Recursion
 - [ ] Tail calls (note: the c compiler may do this for us)
@@ -80,10 +82,10 @@ You may wish to increase your stack size `ulimit -s unlimited` to avoid stack ov
 - [x] Custom types
 - [x] Records
 - [x] Record accessors
-- [ ] Record updates
+- [x] Record updates
 - [x] Generic custom types
 - [x] Results
-- [ ] Bit arrays
+- [ ] Bit arrays (partial support)
 
 ### Standard library
 
@@ -92,7 +94,7 @@ There is limited support for standard library functions, see `stdlib/`.
 ### Advanced features
 
 - [ ] Opaque types
-- [ ] Use
+- [x] Use
 - [x] Todo
 - [x] Panic
 - [x] Let assert

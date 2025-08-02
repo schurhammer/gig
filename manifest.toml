@@ -33,6 +33,7 @@ packages = [
 argv = { version = ">= 1.0.2 and < 2.0.0" }
 glance = { version = ">= 3.0.0 and < 4.0.0" }
 gleam_stdlib = { version = "0.59.0" }
+glexer = { version = ">= 2.2.1 and < 3.0.0" }
 pprint = { version = ">= 1.0.3 and < 2.0.0" }
 shellout = { version = ">= 1.6.0 and < 2.0.0" }
 simplifile = { version = ">= 2.0.0" }
