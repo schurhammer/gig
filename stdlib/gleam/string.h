@@ -5,12 +5,18 @@
 #include "builtin.h"
 
 typedef struct Tuple2_String_String Tuple2_String_String;
+typedef struct { enum {Empty_UtfCodepoint_TAG, Cons_UtfCodepoint_TAG} tag; union {struct Empty_UtfCodepoint *v0; struct Cons_UtfCodepoint *v1;} ptr; } List_UtfCodepoint;
 typedef struct { enum {Ok_Tuple2_String_String_Nil_TAG, Error_Tuple2_String_String_Nil_TAG} tag; union {struct Ok_Tuple2_String_String_Nil *v0; struct Error_Tuple2_String_String_Nil *v1;} ptr; } Result_Tuple2_String_String_Nil;
 
 Bool eq_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 Bool lt_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 String inspect_Tuple2_String_String(Tuple2_String_String a);
 Tuple2_String_String new_Tuple2_String_String(String el0, String el1);
+Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
+Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
+String inspect_List_UtfCodepoint(List_UtfCodepoint a);
+extern const List_UtfCodepoint new_Empty_UtfCodepoint;
+List_UtfCodepoint new_Cons_UtfCodepoint(UtfCodepoint item, List_UtfCodepoint next);
 Bool eq_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
 Bool lt_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
 String inspect_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a);
@@ -20,13 +26,23 @@ Result_Tuple2_String_String_Nil new_Error_Tuple2_String_String_Nil(Nil value);
 String append_string(String a0, String a1);
 Int compare_string(String a0, String a1);
 String slice_string(String a0, Int a1, Int a2);
+List_UtfCodepoint gleam_string_do_to_utf_codepoints(String a0);
 Bool ends_with_string(String a0, String a1);
+String gleam_string_from_utf_codepoints(List_UtfCodepoint a0);
 Result_Tuple2_String_String_Nil pop_grapheme_string(String a0);
 Bool starts_with_string(String a0, String a1);
+UtfCodepoint gleam_string_unsafe_int_to_utf_codepoint(Int a0);
 
 struct Tuple2_String_String{
 String el0;
 String el1;
+};
+
+struct Empty_UtfCodepoint{
+};
+struct Cons_UtfCodepoint{
+UtfCodepoint item;
+List_UtfCodepoint next;
 };
 
 struct Ok_Tuple2_String_String_Nil{

@@ -60,15 +60,18 @@ pub fn concat(strings: List(String)) -> String {
     }
 }
 
+@external(c, "", "gleam_string_unsafe_int_to_utf_codepoint")
 fn unsafe_int_to_utf_codepoint(a: Int) -> UtfCodepoint
 
-fn do_to_utf_codepoints(string: String) -> List(UtfCodepoint) {
-  todo
-}
+@external(c, "", "gleam_string_from_utf_codepoints")
+fn from_utf_codepoints(utf_codepoints: List(UtfCodepoint)) -> String
+
+@external(c, "", "gleam_string_do_to_utf_codepoints")
+fn do_to_utf_codepoints(string: String) -> List(UtfCodepoint)
 
 fn to_utf_codepoints_loop(
   bit_array: BitArray,
   acc: List(UtfCodepoint),
 ) -> List(UtfCodepoint) {
-  todo
+  panic as "should not be used"
 }

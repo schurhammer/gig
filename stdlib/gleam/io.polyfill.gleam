@@ -20,10 +20,15 @@ pub fn print(s: String) -> Nil {
     Nil
 }
 
-pub fn println(s: String) -> Nil {
-    do_print(s)
+pub fn println(string: String) -> Nil {
+    do_print(string)
     do_print("\n")
     Nil
+}
+
+fn println_error(string: String) -> Nil {
+  // TODO print to error stderr
+  println(string)
 }
 
 pub fn debug(value: a) -> a {
