@@ -1921,7 +1921,7 @@ fn infer_expression(
                 g.BytesOption -> #(c, BytesOption, Some(bit_array_type))
                 g.BitsOption -> #(c, BitsOption, Some(bit_array_type))
                 g.FloatOption -> todo
-                g.IntOption -> todo
+                g.IntOption -> #(c, IntOption, Some(int_type))
                 g.LittleOption -> todo
                 g.NativeOption -> todo
                 g.SignedOption -> todo
@@ -2035,10 +2035,6 @@ fn infer_expression(
       case right {
         g.Call(fun, args) ->
           infer_expression(c, n, g.Call(fun, [g.UnlabelledField(left), ..args]))
-        g.Variable(_name) ->
-          infer_expression(c, n, g.Call(right, [g.UnlabelledField(left)]))
-        g.FieldAccess(_value, _field) ->
-          infer_expression(c, n, g.Call(right, [g.UnlabelledField(left)]))
         g.FnCapture(label, fun, before, after) -> {
           let args = case label {
             Some(label) -> [before, [g.LabelledField(label, left)], after]
@@ -2046,10 +2042,7 @@ fn infer_expression(
           }
           infer_expression(c, n, g.Call(fun, list.flatten(args)))
         }
-        _ -> {
-          io.debug(right)
-          panic as "pipe to unexpected expression"
-        }
+        _ -> infer_expression(c, n, g.Call(right, [g.UnlabelledField(left)]))
       }
     }
     g.BinaryOperator(name, left, right) -> {
