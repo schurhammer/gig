@@ -7,6 +7,16 @@
 
 Int gleam_int_bitwise_and(Int a0, Int a1) { return a0 & a1; }
 
+Int gleam_int_bitwise_exclusive_or(Int a0, Int a1) { return a0 ^ a1; }
+
+Int gleam_int_bitwise_not(Int a0) { return ~a0; }
+
+Int gleam_int_bitwise_or(Int a0, Int a1) { return a0 | a1; }
+
+Int gleam_int_bitwise_shift_left(Int a0, Int a1) { return a0 << a1; }
+
+Int gleam_int_bitwise_shift_right(Int a0, Int a1) { return a0 >> a1; }
+
 Result_Int_Nil gleam_int_do_base_parse(String str, Int base) {
   // Check for empty string
   if (str.byte_length == 0) {
@@ -66,27 +76,35 @@ Result_Int_Nil gleam_int_parse(String str) {
   return gleam_int_do_base_parse(str, 10);
 }
 
+String gleam_int_do_to_base_string(Int value, Int base) {
+  // Check if base is valid
+  if (base < 2 || base > 36) {
+    // Return an empty string for invalid base
+    return new_String("", 0);
+  }
+
+  // Calculate the maximum size needed for int64_t
+  char buffer[70];
+
+  // Use signed long long to handle negative numbers
+  int len = snprintf(
+      buffer, sizeof(buffer),
+      base == 10 ? "%lld"
+                 : (base == 16 ? "%llx" : (base == 2 ? "%llb" : "%llo")),
+      (long long)value);
+
+  // Return the string using cstring_to_string
+  return cstring_to_string(buffer);
+}
+
+Float gleam_int_to_float(Int value) { return (Float)value; }
+
 String gleam_int_to_string(Int value) {
   // Calculate the maximum size needed for int64_t
-  // Worst case: -9223372036854775808 (20 digits + sign + null terminator)
   char buffer[32];
 
   int len = snprintf(buffer, sizeof(buffer), "%lld", (long long)value);
 
-  // Allocate memory for the result string
-  char *result_bytes = malloc(len);
-  if (!result_bytes) {
-    // Return empty string on allocation failure
-    return new_String("", 0);
-  }
-
-  // Copy the formatted string
-  memcpy(result_bytes, buffer, len);
-
-  // Create Gleam String
-  String result;
-  result.byte_length = len;
-  result.bytes = result_bytes;
-
-  return result;
+  // Return the string using cstring_to_string
+  return cstring_to_string(buffer);
 }

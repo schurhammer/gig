@@ -13,8 +13,15 @@ Result_Int_Nil new_Ok_Int_Nil(Int value);
 Result_Int_Nil new_Error_Int_Nil(Nil value);
 
 Int gleam_int_bitwise_and(Int a0, Int a1);
+Int gleam_int_bitwise_exclusive_or(Int a0, Int a1);
+Int gleam_int_bitwise_not(Int a0);
+Int gleam_int_bitwise_or(Int a0, Int a1);
+Int gleam_int_bitwise_shift_left(Int a0, Int a1);
+Int gleam_int_bitwise_shift_right(Int a0, Int a1);
 Result_Int_Nil gleam_int_do_base_parse(String a0, Int a1);
+String gleam_int_do_to_base_string(Int a0, Int a1);
 Result_Int_Nil gleam_int_parse(String a0);
+Float gleam_int_to_float(Int a0);
 String gleam_int_to_string(Int a0);
 
 struct Ok_Int_Nil{
