@@ -1,6 +1,7 @@
 #include "shellout.h"
-#include <errno.h>
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -339,4 +340,119 @@ shellout_c_do_command(String command, List_String args, String dir,
       return new_Error_String_Tuple2_Int_String(error);
     }
   }
+}
+
+/*
+ * Implementation of shellout_arguments function
+ *
+ * Returns the command line arguments passed to the program as a List_String.
+ * Uses the global_argc and global_argv variables from builtin.h.
+ */
+List_String shellout_arguments() {
+  List_String result = new_Empty_String;
+
+  // Build list in reverse order, then we'll get it in correct order
+  // Skip argv[0] (program name) and start from argv[1]
+  for (int i = global_argc - 1; i >= 1; i--) {
+    String arg = cstring_to_string(global_argv[i]);
+    result = new_Cons_String(arg, result);
+  }
+
+  return result;
+}
+
+/*
+ * Implementation of shellout_exit function
+ *
+ * Halts the runtime and passes the given status code to the operating system.
+ * A status code of 0 typically indicates success, while any other integer
+ * represents an error.
+ */
+Nil shellout_exit(Int status) {
+  exit((int)status);
+  return 0; // This will never be reached, but satisfies the return type
+}
+
+/*
+ * Implementation of shellout_which function
+ *
+ * Finds the path to the given executable by searching the PATH environment
+ * variable. Returns Ok(path) if found, Error(message) if not found.
+ */
+Result_String_String shellout_which(String executable) {
+  // Convert Gleam String to C string
+  char *exe_name = malloc(executable.byte_length + 1);
+  if (!exe_name) {
+    return new_Error_String_String(new_String("Memory allocation failed", 23));
+  }
+  memcpy(exe_name, executable.bytes, executable.byte_length);
+  exe_name[executable.byte_length] = '\0';
+
+  // If executable contains a path separator, check if it exists as-is
+  if (strchr(exe_name, '/') != NULL) {
+    if (access(exe_name, X_OK) == 0) {
+      String result = new_String(exe_name, executable.byte_length);
+      free(exe_name);
+      return new_Ok_String_String(result);
+    } else {
+      free(exe_name);
+      char error_msg[256];
+      snprintf(error_msg, sizeof(error_msg), "command `%.*s` not found",
+               executable.byte_length, executable.bytes);
+      return new_Error_String_String(cstring_to_string(error_msg));
+    }
+  }
+
+  // Get PATH environment variable
+  char *path_env = getenv("PATH");
+  if (!path_env) {
+    free(exe_name);
+    char error_msg[256];
+    snprintf(error_msg, sizeof(error_msg), "command `%.*s` not found",
+             executable.byte_length, executable.bytes);
+    return new_Error_String_String(cstring_to_string(error_msg));
+  }
+
+  // Make a copy of PATH to tokenize
+  char *path_copy = strdup(path_env);
+  if (!path_copy) {
+    free(exe_name);
+    return new_Error_String_String(new_String("Memory allocation failed", 23));
+  }
+
+  char *dir = strtok(path_copy, ":");
+  while (dir != NULL) {
+    // Build full path: dir + "/" + exe_name
+    size_t dir_len = strlen(dir);
+    size_t full_path_len = dir_len + 1 + executable.byte_length + 1;
+    char *full_path = malloc(full_path_len);
+    if (!full_path) {
+      free(exe_name);
+      free(path_copy);
+      return new_Error_String_String(
+          new_String("Memory allocation failed", 23));
+    }
+
+    snprintf(full_path, full_path_len, "%s/%s", dir, exe_name);
+
+    // Check if file exists and is executable
+    if (access(full_path, X_OK) == 0) {
+      String result = cstring_to_string(full_path);
+      free(exe_name);
+      free(path_copy);
+      free(full_path);
+      return new_Ok_String_String(result);
+    }
+
+    free(full_path);
+    dir = strtok(NULL, ":");
+  }
+
+  // Not found in any PATH directory
+  free(exe_name);
+  free(path_copy);
+  char error_msg[256];
+  snprintf(error_msg, sizeof(error_msg), "command `%.*s` not found",
+           executable.byte_length, executable.bytes);
+  return new_Error_String_String(cstring_to_string(error_msg));
 }

@@ -17,3 +17,12 @@ fn c_do_command(
   options: List(#(CommandOpt, Bool)),
   environment: List(#(String, String)),
 ) -> Result(String, #(Int, String))
+
+@external(c, "", "shellout_arguments")
+pub fn arguments() -> List(String)
+
+@external(c, "", "shellout_exit")
+pub fn exit(status: Int) -> Nil
+
+@external(c, "", "shellout_which")
+pub fn which(executable: String) -> Result(String, String)
