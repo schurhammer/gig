@@ -1,9 +1,12 @@
 import gleam/string
 
-@external(c, "", "print_string")
-fn do_print(s: String) -> Int
+@external(c, "", "gleam_io_do_print")
+fn do_print(s: String) -> Nil
 
-@external(c, "", "gets_string")
+@external(c, "", "gleam_io_do_print_error")
+fn do_print_error(s: String) -> Nil
+
+@external(c, "", "gleam_io_do_get_line")
 fn do_get_line(length: Int) -> String
 
 // Read a line from stdin.
@@ -17,21 +20,27 @@ pub fn get_line() -> String {
 
 pub fn print(s: String) -> Nil {
     do_print(s)
-    Nil
 }
 
 pub fn println(string: String) -> Nil {
     do_print(string)
     do_print("\n")
-    Nil
 }
 
 fn println_error(string: String) -> Nil {
-  // TODO print to error stderr
-  println(string)
+  do_print_error(string)
+  do_print_error("\n")
+}
+
+fn do_debug_println(string string: String) -> Nil {
+  println_error(string)
+}
+
+pub fn print_error(string: String) -> Nil {
+  do_print_error(string)
 }
 
 pub fn debug(value: a) -> a {
-    println(string.inspect(value))
+    println_error(string.inspect(value))
     value
 }

@@ -4,5 +4,6 @@
 
 #include "builtin.h"
 
-String gets_string(Int a0);
-Int print_string(String a0);
+String gleam_io_gets_string(Int a0);
+Nil gleam_io_do_print(String a0);
+Nil gleam_io_do_print_error(String a0);
