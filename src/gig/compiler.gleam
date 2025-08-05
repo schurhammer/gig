@@ -182,6 +182,7 @@ int main(int argc, char **argv) {
   // compile the c file
   let binary_name = target_path <> module_id <> ".exe"
   let args = [
+    "-lm",
     "-g3",
     "-Isrc",
     "-o",
