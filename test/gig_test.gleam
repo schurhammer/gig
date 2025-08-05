@@ -29,25 +29,25 @@ pub fn all_samples_tests() {
   describe("samples", tests)
 }
 
+fn expected_output(file: String) {
+  let assert Ok(content) = simplifile.read(file)
+
+  string.split(content, "\n")
+  |> list.filter_map(fn(x) {
+    case string.starts_with(x, "//// ") {
+      True -> Ok(string.drop_start(x, 5))
+      False -> Error(Nil)
+    }
+  })
+  |> string.join("\n")
+}
+
 fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
     it("without gc", fn() {
       let binary =
         compiler.compile(file, compiler: "clang", gc: False, release: True)
-
-      // parse the expected output out of the file's doc comment
-      let assert Ok(content) = simplifile.read(file)
-      let expected_output =
-        string.split(content, "\n")
-        |> list.filter_map(fn(x) {
-          case string.starts_with(x, "//// ") {
-            True -> Ok(string.drop_start(x, 5))
-            False -> Error(Nil)
-          }
-        })
-        |> string.join("\n")
-
-      // run the program
+      let expected_output = expected_output(file)
       let assert Ok(output) = shellout.command(binary, [], ".", [])
 
       expect.to_equal(string.trim(output), string.trim(expected_output))
@@ -55,20 +55,16 @@ fn sample_test(file) {
     it("with gc", fn() {
       let binary =
         compiler.compile(file, compiler: "clang", gc: True, release: True)
+      let expected_output = expected_output(file)
+      let assert Ok(output) = shellout.command(binary, [], ".", [])
 
-      // parse the expected output out of the file's doc comment
-      let assert Ok(content) = simplifile.read(file)
-      let expected_output =
-        string.split(content, "\n")
-        |> list.filter_map(fn(x) {
-          case string.starts_with(x, "//// ") {
-            True -> Ok(string.drop_start(x, 5))
-            False -> Error(Nil)
-          }
-        })
-        |> string.join("\n")
+      expect.to_equal(string.trim(output), string.trim(expected_output))
+    }),
+    it("self compiled", fn() {
+      let assert Ok(_) = shellout.command("src/gig.exe", [file], ".", [])
 
-      // run the program
+      let binary = string.replace(file, ".gleam", ".exe")
+      let expected_output = expected_output(file)
       let assert Ok(output) = shellout.command(binary, [], ".", [])
 
       expect.to_equal(string.trim(output), string.trim(expected_output))
