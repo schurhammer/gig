@@ -45,7 +45,22 @@ static char **list_string_to_argv(List_String args, int *argc) {
   for (int i = 0; i < *argc; i++) {
     if (current.tag != Cons_String_TAG)
       break;
-    argv[i] = current.ptr.v1->item.bytes;
+
+    // Create null-terminated string for each argument
+    String arg_string = current.ptr.v1->item;
+    char *null_terminated_arg = malloc(arg_string.byte_length + 1);
+    if (!null_terminated_arg) {
+      // Cleanup previously allocated strings on error
+      for (int j = 0; j < i; j++) {
+        free(argv[j]);
+      }
+      free(argv);
+      return NULL;
+    }
+    memcpy(null_terminated_arg, arg_string.bytes, arg_string.byte_length);
+    null_terminated_arg[arg_string.byte_length] = '\0';
+
+    argv[i] = null_terminated_arg;
     current = current.ptr.v1->next;
   }
   argv[*argc] = NULL;
@@ -187,7 +202,14 @@ shellout_c_do_command(String command, List_String args, String dir,
   // Create pipes for stdout and stderr
   int stdout_pipe[2], stderr_pipe[2];
   if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1) {
-    free(argv);
+    // Clean up - free null-terminated strings we allocated in
+    // list_string_to_argv
+    if (argv) {
+      for (int i = 0; i < argc; i++) {
+        free(argv[i]);
+      }
+      free(argv);
+    }
     if (envp) {
       for (int i = 0; i < envc; i++)
         free(envp[i]);
@@ -205,7 +227,14 @@ shellout_c_do_command(String command, List_String args, String dir,
     close(stdout_pipe[1]);
     close(stderr_pipe[0]);
     close(stderr_pipe[1]);
-    free(argv);
+    // Clean up - free null-terminated strings we allocated in
+    // list_string_to_argv
+    if (argv) {
+      for (int i = 0; i < argc; i++) {
+        free(argv[i]);
+      }
+      free(argv);
+    }
     if (envp) {
       for (int i = 0; i < envc; i++)
         free(envp[i]);
@@ -307,8 +336,14 @@ shellout_c_do_command(String command, List_String args, String dir,
     int status;
     waitpid(pid, &status, 0);
 
-    // Clean up
-    free(argv);
+    // Clean up - free null-terminated strings we allocated in
+    // list_string_to_argv
+    if (argv) {
+      for (int i = 0; i < argc; i++) {
+        free(argv[i]);
+      }
+      free(argv);
+    }
     if (envp) {
       // Only free the newly allocated environment strings, not the copied ones
       extern char **environ;
