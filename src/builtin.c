@@ -409,6 +409,11 @@ Int print_string(String a) {
   return 0;
 }
 
+Int print_string_error(String a) {
+  fprintf(stderr, "%.*s", a.byte_length, a.bytes);
+  return 0;
+}
+
 String gets_string(Int max_length) {
   // extra space for null terminator
   max_length += 1;

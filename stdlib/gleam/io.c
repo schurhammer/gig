@@ -1,7 +1,7 @@
 #include "io.h"
 #include <stdio.h>
 
-String gets_string(Int max_length) {
+String gleam_io_do_get_line(Int max_length) {
   // extra space for null terminator
   max_length += 1;
   char buffer[max_length];

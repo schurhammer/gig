@@ -103,7 +103,7 @@ String drop_start_string(String string, Int count);
 Int compare_string(String str1, String str2);
 String cstring_to_string(char *bytes);
 Int print_string(String a);
-String gets_string(Int max_length);
+Int print_string_error(String a);
 
 String inspect_Nil(Nil value);
 String inspect_Bool(Bool b);
