@@ -1246,7 +1246,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
                     let value = lower_expression(c, value)
                     replace_var(name, value, guard)
                   })
-                list.append(conditions, [guard])
+                [guard, ..conditions]
               }
               None -> conditions
             }

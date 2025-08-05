@@ -35,7 +35,7 @@ fn is_keyword(name: String) -> Bool {
 /// If the name is not a keyword, return it unchanged
 fn escape_if_keyword(name: String) -> String {
   case is_keyword(name) {
-    True -> "_" <> name
+    True -> name <> "_"
     False -> name
   }
 }
