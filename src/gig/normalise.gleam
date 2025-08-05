@@ -19,21 +19,27 @@ pub type Term {
   Panic(typ: Type, e: Value)
 }
 
-fn exp_to_val(exp: closure.Exp) {
-  case exp {
-    closure.Literal(typ, val) -> Literal(typ, val)
-    closure.Var(typ, val) -> Variable(typ, val)
-    _ -> panic
-  }
-}
-
 fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
   case exp {
     closure.Literal(typ, val) -> #(uid, Value(typ, Literal(typ, val)))
     closure.Var(typ, val) -> #(uid, Value(typ, Variable(typ, val)))
     closure.Call(typ, fun, args) -> {
-      // expect fun to be a value already
-      let fun = exp_to_val(fun)
+      // normalize the function expression
+      let #(uid, fun_exp) = do_exp(uid, fun)
+
+      let #(uid, call) = case fun_exp {
+        Value(_, fun_val) -> #(uid, fn(arg_refs) {
+          Call(typ, fun_val, arg_refs)
+        })
+        _ -> {
+          let fun_name = "F" <> int.to_string(uid)
+          let uid = uid + 1
+          let fun_val = Variable(fun_exp.typ, fun_name)
+          #(uid, fn(arg_refs) {
+            Let(fun_exp.typ, fun_name, fun_exp, Call(typ, fun_val, arg_refs))
+          })
+        }
+      }
 
       // assign variable names to each argument (recursively)
       let #(uid, args) =
@@ -61,7 +67,7 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
         |> list.reverse()
 
       // build the call using the variables instead of expressions arguments
-      let call = Call(typ, fun, arg_refs)
+      let call = call(arg_refs)
 
       // add the let bindings for each argument variable
       let call =
@@ -76,8 +82,27 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
       #(uid, call)
     }
     closure.CallClosure(typ, fun, args) -> {
-      // expect fun to be a value already
-      let fun = exp_to_val(fun)
+      // normalize the function expression
+      let #(uid, fun_exp) = do_exp(uid, fun)
+
+      let #(uid, call) = case fun_exp {
+        Value(_, fun_val) -> #(uid, fn(arg_refs) {
+          CallClosure(typ, fun_val, arg_refs)
+        })
+        _ -> {
+          let fun_name = "F" <> int.to_string(uid)
+          let uid = uid + 1
+          let fun_val = Variable(fun_exp.typ, fun_name)
+          #(uid, fn(arg_refs) {
+            Let(
+              fun_exp.typ,
+              fun_name,
+              fun_exp,
+              CallClosure(typ, fun_val, arg_refs),
+            )
+          })
+        }
+      }
 
       // assign variable names to each argument (recursively)
       let #(uid, args) =
@@ -98,7 +123,7 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
         |> list.reverse()
 
       // build the call using the variables instead of expressions arguments
-      let call = CallClosure(typ, fun, arg_refs)
+      let call = call(arg_refs)
 
       // add the let bindings for each argument variable
       let call =

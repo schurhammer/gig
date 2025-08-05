@@ -8,5 +8,5 @@ pub fn main() {
   let x = "hello"
   let y = "world"
   io.println(x <> " " <> y)
-  io.debug(string.pop_grapheme(x))
+  io.println(string.inspect(string.pop_grapheme(x)))
 }
