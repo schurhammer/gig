@@ -5,6 +5,14 @@
 #ifndef GLEAM_BUILTIN
 #define GLEAM_BUILTIN
 
+#ifdef GC
+
+#include <gc.h>
+#define malloc(x) GC_MALLOC(x)
+#define free(x) GC_FREE(x)
+
+#endif
+
 extern int global_argc;
 extern char **global_argv;
 

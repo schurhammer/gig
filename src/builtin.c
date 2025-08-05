@@ -5,18 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef GC
-
-#include <gc.h>
-#define malloc(x) GC_MALLOC(x)
-
-#else
-
-#include "arena.h"
-#define malloc(x) arena_malloc(x)
-
-#endif
-
 _Noreturn Nil panic_exit(String a) {
   print_string(a);
   printf("\n");
