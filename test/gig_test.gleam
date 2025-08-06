@@ -44,24 +44,9 @@ fn expected_output(file: String) {
 
 fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
-    it("without gc", fn() {
-      let binary =
-        compiler.compile(file, compiler: "clang", gc: False, release: True)
-      let expected_output = expected_output(file)
-      let assert Ok(output) = shellout.command(binary, [], ".", [])
-
-      expect.to_equal(string.trim(output), string.trim(expected_output))
-    }),
-    it("with gc", fn() {
-      let binary =
-        compiler.compile(file, compiler: "clang", gc: True, release: True)
-      let expected_output = expected_output(file)
-      let assert Ok(output) = shellout.command(binary, [], ".", [])
-
-      expect.to_equal(string.trim(output), string.trim(expected_output))
-    }),
     it("self compiled", fn() {
-      let assert Ok(_) = shellout.command("src/gig.exe", [file], ".", [])
+      let assert Ok(_) =
+        shellout.command("src/gig.exe", ["--gc", "--release", file], ".", [])
 
       let binary = string.replace(file, ".gleam", ".exe")
       let expected_output = expected_output(file)
@@ -69,9 +54,43 @@ fn sample_test(file) {
 
       expect.to_equal(string.trim(output), string.trim(expected_output))
     }),
+    it("without gc", fn() {
+      let binary =
+        compiler.compile(
+          file,
+          compiler: "clang",
+          gc: False,
+          release: True,
+          debug: False,
+        )
+      let expected_output = expected_output(file)
+      let assert Ok(output) = shellout.command(binary, [], ".", [])
+
+      expect.to_equal(string.trim(output), string.trim(expected_output))
+    }),
+    it("with gc", fn() {
+      let binary =
+        compiler.compile(
+          file,
+          compiler: "clang",
+          gc: True,
+          release: True,
+          debug: False,
+        )
+      let expected_output = expected_output(file)
+      let assert Ok(output) = shellout.command(binary, [], ".", [])
+
+      expect.to_equal(string.trim(output), string.trim(expected_output))
+    }),
     xit("passes valgrind", fn() {
       let binary =
-        compiler.compile(file, compiler: "clang", gc: False, release: True)
+        compiler.compile(
+          file,
+          compiler: "clang",
+          gc: False,
+          release: True,
+          debug: False,
+        )
       let args = ["--error-exitcode=1", binary]
       let output = shellout.command("valgrind", args, ".", [])
       expect.to_be_ok(output)

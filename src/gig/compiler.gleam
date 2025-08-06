@@ -60,6 +60,7 @@ pub fn compile(
   compiler compiler: String,
   gc gc: Bool,
   release release: Bool,
+  debug debug: Bool,
 ) {
   let split = string.split(gleam_file_name, "/")
   let assert Ok(target_file) = list.last(split)
@@ -183,7 +184,6 @@ int main(int argc, char **argv) {
   let binary_name = target_path <> module_id <> ".exe"
   let args = [
     "-lm",
-    "-g3",
     "-Isrc",
     "-o",
     binary_name,
@@ -199,6 +199,11 @@ int main(int argc, char **argv) {
 
   let args = case release {
     True -> ["-O3", ..args]
+    False -> args
+  }
+
+  let args = case debug {
+    True -> ["-g3", ..args]
     False -> args
   }
 

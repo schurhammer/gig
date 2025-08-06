@@ -17,6 +17,7 @@ Optional flags:
 
 - `--release`: enable optimisation
 - `--gc`: enable garbage collection (otherwise no garbage collection)
+- `--debug`: include debug symbols
 - `--compiler=name`: the name/path of the c compiler
 
 Dependencies:
@@ -24,7 +25,7 @@ Dependencies:
 - clang/gcc/tcc is needed to compile to binary (clang seems to work best for gc)
 - Boehm GC library needs to be available for --gc
 
-You may wish to increase your stack size `ulimit -s unlimited` to avoid stack overflows.
+You may wish to increase your stack size `ulimit -s unlimited` to avoid stack overflows. (Highly recommended)
 
 ## Feature / Todo List
 
