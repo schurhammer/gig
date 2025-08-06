@@ -19,9 +19,9 @@ extern char **global_argv;
 #define Nil int
 #define True true
 #define False false
+#define Bool bool
 #define Int int64_t
 #define Float double
-#define Bool bool
 #define UtfCodepoint uint32_t
 
 typedef struct String String;

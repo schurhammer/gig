@@ -40,11 +40,6 @@ fn walk_type(g: Graph, t: CustomType, f: core.Type) -> Graph {
       let g = walk_type(g, t, ret)
       list.fold(args, g, fn(g, arg) { walk_type(g, t, arg) })
     }
-    core.TupleType(args) -> {
-      let name = type_name(f)
-      let g = graph.insert_edge(g, t.name, name)
-      list.fold(args, g, fn(g, arg) { walk_type(g, t, arg) })
-    }
     core.Unbound(..) -> panic
   }
 }

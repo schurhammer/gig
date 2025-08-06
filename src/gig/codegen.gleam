@@ -339,8 +339,6 @@ fn struct_literal(v: closure.Variant) {
 }
 
 fn custom_type(t: CustomType) {
-  // TODO align naming conventions with rest of code
-  // TODO handle union types
   let is_record = case t.variants {
     [_] -> True
     _ -> False

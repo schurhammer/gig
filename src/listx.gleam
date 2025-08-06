@@ -1,5 +1,16 @@
 import gleam/list
 
+pub fn sane_range(n) {
+  list.reverse(do_sane_range(n))
+}
+
+fn do_sane_range(n) {
+  case n {
+    0 -> []
+    _ -> [n, ..sane_range(n - 1)]
+  }
+}
+
 pub fn pop(
   in list: List(a),
   one_that is_desired: fn(a) -> Bool,

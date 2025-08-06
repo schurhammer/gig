@@ -5,6 +5,7 @@ import gleam/io
 import gleam/result
 import gleam/string
 import glexer
+import listx
 
 import glance as g
 
@@ -16,7 +17,6 @@ pub const builtin = t.builtin
 
 pub type Type {
   NamedType(id: String, parameters: List(Type))
-  TupleType(elements: List(Type))
   FunctionType(parameters: List(Type), return: Type)
   Unbound(id: Int)
 }
@@ -103,29 +103,34 @@ pub fn lower_context(c: t.Context) {
 fn lower_module(c: t.Context, acc: Context, module: t.Module) {
   let c = t.Context(..c, current_module: module.name)
 
-  // create type related builtin functions
-  let acc =
-    list.fold(module.custom_types, acc, fn(acc, def) {
-      let custom = def.definition
-      list.fold(custom.variants, acc, fn(acc, variant) {
-        register_variant_functions(c, acc, module.name, custom.typ, variant)
-      })
-    })
-
   // remove some types that are replaced with builtins
-  let custom_types = case module.name == t.builtin {
+  let #(acc, custom_types) = case module.name == t.builtin {
     True -> {
-      module.custom_types
-      |> list.filter(fn(c) {
-        case c.definition.name {
-          "Nil" -> False
-          "Bool" -> False
-          _ -> True
-        }
-      })
+      let #(normal_types, special_types) =
+        list.partition(module.custom_types, fn(c) {
+          case c.definition.name {
+            "Nil" | "Bool" -> False
+            _ -> True
+          }
+        })
+
+      let acc =
+        list.fold(special_types, acc, fn(acc, custom) {
+          let custom = lower_custom_type(c, custom.definition)
+          list.fold(custom.variants, acc, fn(acc, variant) {
+            register_variant_functions(acc, module.name, custom.typ, variant)
+          })
+        })
+
+      #(acc, normal_types)
     }
-    False -> module.custom_types
+    False -> #(acc, module.custom_types)
   }
+
+  // TODO detect what tuples are actually used
+  let acc =
+    listx.sane_range(10)
+    |> list.fold(acc, register_tuple)
 
   let acc =
     list.fold(custom_types, acc, fn(acc, custom) {
@@ -137,6 +142,14 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
           Context(..acc, types: dict.insert(acc.types, custom.id, custom))
         }
       }
+    })
+
+  // create type related builtin functions
+  let acc =
+    list.fold(dict.values(acc.types), acc, fn(acc, custom) {
+      list.fold(custom.variants, acc, fn(acc, variant) {
+        register_variant_functions(acc, module.name, custom.typ, variant)
+      })
     })
 
   let acc =
@@ -229,40 +242,33 @@ fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
 }
 
 pub fn register_variant_functions(
-  c: t.Context,
-  acc: Context,
+  c: Context,
   module_name: String,
-  custom_typ: t.Poly,
-  variant: t.Variant,
+  custom_typ: Poly,
+  variant: Variant,
 ) {
   // constructor function
-  let variant_id = get_id(module_name, variant.name)
-  let typ = map_poly(c, variant.typ)
   let fun =
     External(
-      typ: typ,
+      typ: variant.typ,
       src: "",
       module: module_name,
-      id: "new_" <> variant_id,
+      id: "new_" <> variant.id,
       mono: True,
     )
-  let acc =
-    Context(..acc, externals: dict.insert(acc.externals, variant_id, fun))
+  let acc = Context(..c, externals: dict.insert(c.externals, variant.id, fun))
 
   // variant check function
-  let fun_id = gen_names.get_variant_check_name(variant_id)
-  let typ = map_poly(c, custom_typ)
-  let typ = Poly(typ.vars, FunctionType([typ.typ], bool_type))
+  let fun_id = gen_names.get_variant_check_name(variant.id)
+  let typ = Poly(custom_typ.vars, FunctionType([custom_typ.typ], bool_type))
   let fun =
     External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
   let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
 
   // getter functions
   list.index_fold(variant.fields, acc, fn(acc, f, i) {
-    let fun_id = gen_names.get_getter_name(variant_id, i)
-    let typ = map_poly(c, custom_typ)
-    let field_typ = map_type(c, f.item.typ)
-    let typ = Poly(typ.vars, FunctionType([typ.typ], field_typ))
+    let fun_id = gen_names.get_getter_name(variant.id, i)
+    let typ = Poly(custom_typ.vars, FunctionType([custom_typ.typ], f.typ))
     let fun =
       External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
     Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
@@ -819,13 +825,6 @@ fn add_exp(first: Exp, second: Exp) {
   }
 }
 
-fn tuple_type_name(typ: Type) {
-  case typ {
-    TupleType(e) -> "Tuple" <> int.to_string(list.length(e))
-    _ -> panic as "expected tuple type"
-  }
-}
-
 fn lower_pattern_match(
   c: t.Context,
   pattern: t.Pattern,
@@ -1106,7 +1105,8 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.TupleIndex(typ, tuple, index) -> {
       let typ = map_type(c, typ)
       let tuple = lower_expression(c, tuple)
-      let constructor = tuple_type_name(tuple.typ)
+      let assert NamedType(_, elements) = tuple.typ
+      let constructor = gen_names.get_tuple_id(list.length(elements))
       let getter_name = gen_names.get_getter_name(constructor, index)
       let getter_typ = FunctionType([tuple.typ], typ)
       let getter = Global(getter_typ, getter_name)
@@ -1379,6 +1379,25 @@ fn map_poly(c: t.Context, typ: t.Poly) {
   Poly(typ.vars, map_type(c, typ.typ))
 }
 
+fn register_tuple(c: Context, size: Int) {
+  let id = gen_names.get_tuple_id(size)
+  let vars = listx.sane_range(size)
+  let element_types = list.map(vars, fn(i) { Unbound(i) })
+  let custom_typ = Poly(vars, NamedType(id, element_types))
+  let constructor_typ = Poly(vars, FunctionType(element_types, custom_typ.typ))
+
+  let element_fields =
+    list.index_map(element_types, fn(typ, i) {
+      Parameter(typ, "el" <> int.to_string(i))
+    })
+
+  let variant = Variant(constructor_typ, id, "#", element_fields)
+  let custom = CustomType(custom_typ, id, "#", [variant])
+
+  let c = Context(..c, types: dict.insert(c.types, custom.id, custom))
+  register_variant_functions(c, t.builtin, custom.typ, variant)
+}
+
 fn map_type(c: t.Context, typ: t.Type) {
   case typ {
     t.NamedType(name:, module:, parameters:) -> {
@@ -1391,8 +1410,8 @@ fn map_type(c: t.Context, typ: t.Type) {
       FunctionType(parameters, return)
     }
     t.TupleType(elements) -> {
-      let elements = list.map(elements, map_type(c, _))
-      TupleType(elements)
+      let parameters = list.map(elements, map_type(c, _))
+      NamedType(gen_names.get_tuple_id(list.length(elements)), parameters)
     }
     t.VariableType(ref) -> {
       let assert Ok(x) = dict.get(c.type_vars, ref)
@@ -1486,10 +1505,6 @@ pub fn type_to_string(typ: Type) -> String {
       <> "("
       <> string.join(list.map(parameters, type_to_string), ", ")
       <> ")"
-    TupleType([]) -> "()"
-    TupleType([single]) -> "(" <> type_to_string(single) <> ",)"
-    TupleType(elements) ->
-      "(" <> string.join(list.map(elements, type_to_string), ", ") <> ")"
     FunctionType([], return) -> "fn() -> " <> type_to_string(return)
     FunctionType(parameters, return) ->
       "fn("
