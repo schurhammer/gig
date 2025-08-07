@@ -4,6 +4,7 @@ import gig/core
 import gig/mono
 import gleam/dict
 import gleam/list
+import gleam/set
 import gleam/string
 
 pub fn module_headers(c: core.Context) {
@@ -22,6 +23,7 @@ pub fn module_headers(c: core.Context) {
           functions: dict.new(),
           externals: dict.from_list(externals),
         ),
+        used_modules: set.new(),
       )
     let header =
       list.fold(externals, module, fn(c, external) {

@@ -6,6 +6,7 @@ import gig/mono
 import gig/polyfill
 import gig/typed_ast
 import gleam/dict
+import gleam/set
 
 import gleam/int
 import gleam/result
@@ -107,11 +108,9 @@ pub fn compile(
   let code = codegen.module(cc)
 
   let external_c_files =
-    core.externals
-    |> dict.values
-    |> list.filter(fn(x) { x.src != "" })
-    |> list.map(fn(x) { x.src })
-    |> list.unique
+    mono.used_modules
+    |> set.delete("")
+    |> set.to_list()
     |> list.filter_map(fn(module) {
       let filepath = case dict.get(sources, module <> ".polyfill") {
         Ok(path) -> path

@@ -1,21 +1,18 @@
 import gig/core as t
-import gig/gen_names
 import gleam/dict
-import gleam/int
-
 import gleam/io
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/set
 import gleam/string
 
 pub type Context {
-  Context(in: t.Context, out: t.Context)
+  Context(in: t.Context, out: t.Context, used_modules: set.Set(String))
 }
 
 pub fn run(c: t.Context, main_name: String) {
   let oc =
-    t.Context(types: dict.new(), functions: dict.new(), externals: c.externals)
-  let c = Context(in: c, out: oc)
+    t.Context(types: dict.new(), functions: dict.new(), externals: dict.new())
+  let c = Context(in: c, out: oc, used_modules: set.new())
 
   let main = case dict.get(c.in.functions, main_name) {
     Ok(main) -> main
@@ -27,10 +24,10 @@ pub fn run(c: t.Context, main_name: String) {
   let #(c, main_name) = instantiate_function(c, main_name, typ)
 
   // instantiate types used by externals
-  // TODO don't include unused externals?
   let c =
-    c.out.externals
+    c.in.externals
     |> dict.values()
+    |> list.filter(fn(x) { set.contains(c.used_modules, x.module) })
     |> list.filter(fn(x) { !x.mono })
     |> list.fold(c, fn(c, external) { instantiate_type(c, external.typ.typ) })
 
@@ -218,7 +215,19 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
           let sub = unify_poly(c, external.typ, mono)
           case external.mono {
             True -> #(c, external.id <> get_type_string(sub))
-            False -> #(c, external.id)
+            False -> {
+              // add the external to output
+              let externals =
+                dict.insert(c.out.externals, external.id, external)
+              let c = instantiate_type(c, external.typ.typ)
+              let out = t.Context(..c.out, externals:)
+
+              // set the module as being used
+              let used_modules = set.insert(c.used_modules, external.module)
+              let c = Context(..c, out:, used_modules:)
+
+              #(c, external.id)
+            }
           }
         }
         Error(_) -> {

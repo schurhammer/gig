@@ -1,5 +1,4 @@
 import gig/core
-import gig/gen_names
 import gig/mono
 import gleam/dict
 

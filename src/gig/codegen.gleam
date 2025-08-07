@@ -1,20 +1,19 @@
 import gig/closure.{type CustomType, type Function, type Module}
 import gig/core.{BitArray, Float, Int, String}
-import gig/gen_names
 import gig/mono.{type_name}
 import gig/normalise.{
   type Term, type Value, Call, CallClosure, If, Let, Literal, Op, Value,
   Variable,
 }
-import gig/type_graph
+
 import gleam/dict
-import gleam/order
-
-import gig/graph
-
 import gleam/int
 import gleam/list
+import gleam/order
 import gleam/string
+
+import gig/graph
+import gig/type_graph
 
 /// List of C keywords that cannot be used as variable names or function parameters
 const c_keywords = [
@@ -100,7 +99,7 @@ fn string_lit(val: String) {
   "new_String(\"" <> val <> "\", " <> size <> ")"
 }
 
-fn gen_value(arg: Value, target: String, id: Int) {
+fn gen_value(arg: Value, target: String) {
   case arg {
     Literal(_, val) ->
       case val {
@@ -136,26 +135,26 @@ fn pointer(t: CustomType) {
   }
 }
 
-fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
+fn gen_term(c: Context, arg: Term, target: String) -> String {
   // TODO is "id" used?
   case arg {
-    Value(typ, value) -> gen_value(value, target, id)
-    Call(typ, fun, args) -> {
+    Value(_, value) -> gen_value(value, target)
+    Call(_, fun, args) -> {
       hit_target(
         target,
-        gen_value(fun, "", id)
+        gen_value(fun, "")
           <> "("
-          <> list.map(args, gen_value(_, "", id)) |> string.join(", ")
+          <> list.map(args, gen_value(_, "")) |> string.join(", ")
           <> ")",
       )
     }
     CallClosure(typ, fun, args) -> {
-      let closure = gen_value(fun, "", id)
+      let closure = gen_value(fun, "")
       let param_types = list.map(args, fn(x) { type_name(x.typ) })
 
       let fun = closure <> ".fun"
       let env_param = closure <> ".env"
-      let params = list.map(args, gen_value(_, "", id))
+      let params = list.map(args, gen_value(_, ""))
 
       // the closure may or may not have an env parameter
       // determined by if env is a null pointer
@@ -206,9 +205,9 @@ fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
 
           // access the field
           case custom.pointer, custom.variants {
-            True, [_] -> gen_value(arg, "", id) <> "->" <> field
-            True, _ -> gen_value(arg, "", id) <> ".ptr." <> v <> "->" <> field
-            False, _ -> gen_value(arg, "", id) <> "." <> field
+            True, [_] -> gen_value(arg, "") <> "->" <> field
+            True, _ -> gen_value(arg, "") <> ".ptr." <> v <> "->" <> field
+            False, _ -> gen_value(arg, "") <> "." <> field
           }
           |> hit_target(target, _)
         }
@@ -221,32 +220,32 @@ fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
 
           case custom.variants {
             [_] -> "True"
-            _ -> gen_value(arg, "", id) <> ".tag == " <> variant.name <> "_TAG"
+            _ -> gen_value(arg, "") <> ".tag == " <> variant.name <> "_TAG"
           }
           |> hit_target(target, _)
         }
-        core.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "", id) <> ");\n"
+        core.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "") <> ");\n"
         _, _ -> {
           panic as "invalid operation"
         }
       }
     }
-    Let(typ, var, val, exp) ->
+    Let(_, var, val, exp) ->
       case var, val {
         "_" <> _, _ -> {
           // discarded, no need to make a variable
-          gen_term(c, val, var, id) <> gen_term(c, exp, target, id)
+          gen_term(c, val, var) <> gen_term(c, exp, target)
         }
-        _, Value(typ, val) -> {
+        _, Value(_, val) -> {
           // inline value
           let escaped_var = escape_if_keyword(var)
           type_name(val.typ)
           <> " "
           <> escaped_var
           <> " = "
-          <> gen_value(val, "", id)
+          <> gen_value(val, "")
           <> ";\n"
-          <> gen_term(c, exp, target, id)
+          <> gen_term(c, exp, target)
         }
         _, Call(..) -> {
           // inline call
@@ -255,9 +254,9 @@ fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
           <> " "
           <> escaped_var
           <> " = "
-          <> gen_term(c, val, "", id)
+          <> gen_term(c, val, "")
           <> ";\n"
-          <> gen_term(c, exp, target, id)
+          <> gen_term(c, exp, target)
         }
         _, _ -> {
           // complex expression
@@ -266,17 +265,17 @@ fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
           <> " "
           <> escaped_var
           <> ";\n"
-          <> gen_term(c, val, escaped_var, id)
-          <> gen_term(c, exp, target, id)
+          <> gen_term(c, val, escaped_var)
+          <> gen_term(c, exp, target)
         }
       }
-    If(typ, cond, then_exp, else_exp) ->
+    If(_, cond, then_exp, else_exp) ->
       "if ("
-      <> gen_value(cond, "", id)
+      <> gen_value(cond, "")
       <> ") {\n"
-      <> gen_term(c, then_exp, target, id + 1)
+      <> gen_term(c, then_exp, target)
       <> "} else {\n"
-      <> gen_term(c, else_exp, target, id + 1)
+      <> gen_term(c, else_exp, target)
       <> "}\n"
   }
 }
@@ -296,7 +295,7 @@ fn function(c: Context, fun: Function) -> String {
   })
   |> string.join(", ")
   <> ") {\n"
-  <> gen_term(c, body, "RETURN", 1)
+  <> gen_term(c, body, "RETURN")
   <> "}"
 }
 
@@ -346,7 +345,7 @@ fn custom_type_forward(t: CustomType) {
   |> string.join("\n")
 }
 
-fn unwrap_pointer(ptr: String, v: closure.Variant, vi: Int) {
+fn unwrap_pointer(ptr: String, v: closure.Variant) {
   case v.fields {
     [] -> ""
     _ ->
@@ -376,10 +375,6 @@ fn struct_literal(v: closure.Variant) {
 }
 
 fn custom_type(t: CustomType) {
-  let is_record = case t.variants {
-    [_] -> True
-    _ -> False
-  }
   let access_op = case t.pointer {
     True -> "->"
     False -> "."
@@ -413,12 +408,12 @@ fn custom_type(t: CustomType) {
         |> string.concat
       variants ->
         "if (a.tag != b.tag) { return False; }\n"
-        <> list.index_map(variants, fn(v, vi) {
+        <> list.map(variants, fn(v) {
           "if (a.tag == "
           <> v.name
           <> "_TAG) {\n"
-          <> unwrap_pointer("a", v, vi)
-          <> unwrap_pointer("b", v, vi)
+          <> unwrap_pointer("a", v)
+          <> unwrap_pointer("b", v)
           <> list.map(v.fields, fn(f) {
             let field_equal = "eq_" <> type_name(f.typ)
             let escaped_field_name = escape_if_keyword(f.name)
@@ -475,12 +470,12 @@ fn custom_type(t: CustomType) {
       variants ->
         "if (a.tag < b.tag) { return True; }\n"
         <> "if (a.tag > b.tag) { return False; }\n"
-        <> list.index_map(variants, fn(v, vi) {
+        <> list.map(variants, fn(v) {
           "if (a.tag == "
           <> v.name
           <> "_TAG) {\n"
-          <> unwrap_pointer("a", v, vi)
-          <> unwrap_pointer("b", v, vi)
+          <> unwrap_pointer("a", v)
+          <> unwrap_pointer("b", v)
           <> list.map(v.fields, fn(f) {
             let field_lt = "lt_" <> type_name(f.typ)
             let field_name = escape_if_keyword(f.name)
@@ -537,11 +532,11 @@ fn custom_type(t: CustomType) {
             <> ");\n"
         }
       variants ->
-        list.index_map(variants, fn(v, vi) {
+        list.map(variants, fn(v) {
           "if (a.tag == "
           <> v.name
           <> "_TAG) {\n"
-          <> unwrap_pointer("a", v, vi)
+          <> unwrap_pointer("a", v)
           <> case v.fields {
             [] -> "return " <> string_lit(v.display_name) <> ";\n"
             _ ->
@@ -572,7 +567,7 @@ fn custom_type(t: CustomType) {
     <> "}\n"
 
   let variant_definitions =
-    list.index_map(t.variants, fn(v, vi) {
+    list.map(t.variants, fn(v) {
       let tag = v.name <> "_TAG"
 
       let struct = custom_type_struct(v) <> "\n"

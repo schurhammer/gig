@@ -19,9 +19,6 @@ Bool lt_Bool(Bool x, Bool y) { return x < y; }
 Bool and_bool(Bool x, Bool y) { return x && y; }
 Bool or_bool(Bool x, Bool y) { return x || y; }
 Bool negate_bool(Bool x) { return !x; }
-Bool isa_True(Bool x) { return x == True; }
-Bool isa_False(Bool x) { return x == False; }
-Bool isa_Nil(Nil x) { return True; }
 
 Bool eq_Int(Int x, Int y) { return x == y; }
 Bool lt_Int(Int x, Int y) { return x < y; }

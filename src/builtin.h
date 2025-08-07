@@ -65,9 +65,6 @@ Bool lt_Closure(Closure a, Closure b);
 Bool and_bool(Bool x, Bool y);
 Bool or_bool(Bool x, Bool y);
 Bool negate_bool(Bool x);
-Bool isa_True(Bool x);
-Bool isa_False(Bool x);
-Bool isa_Nil(Nil x);
 
 Bool lt_Int(Int x, Int y);
 Bool gt_Int(Int x, Int y);
