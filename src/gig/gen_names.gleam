@@ -13,10 +13,6 @@ pub fn get_tuple_id(size: Int) {
   "Tuple" <> int.to_string(size)
 }
 
-pub fn get_variant_check_name(variant: String) {
-  "isa_" <> variant
-}
-
 pub fn get_id(module: String, name: String) -> String {
   case module == t.builtin {
     True -> name

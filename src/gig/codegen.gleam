@@ -212,9 +212,23 @@ fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
           }
           |> hit_target(target, _)
         }
+        core.VariantCheck(v), [arg] -> {
+          // get details from the type definition
+          let name = type_name(arg.typ)
+          let assert Ok(custom) = dict.get(c.types, name)
+          let assert Ok(variant) =
+            list.find(custom.variants, fn(x) { x.display_name == v })
 
+          case custom.variants {
+            [_] -> "True"
+            _ -> gen_value(arg, "", id) <> ".tag == " <> variant.name <> "_TAG"
+          }
+          |> hit_target(target, _)
+        }
         core.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "", id) <> ");\n"
-        _, _ -> panic as "invalid operation"
+        _, _ -> {
+          panic as "invalid operation"
+        }
       }
     }
     Let(typ, var, val, exp) ->
@@ -600,19 +614,7 @@ fn custom_type(t: CustomType) {
           }
           <> "}\n"
       }
-
-      let isa =
-        "Bool "
-        <> gen_names.get_variant_check_name(v.name)
-        <> "("
-        <> t.name
-        <> " a) {\n"
-        <> case is_record {
-          True -> "return True;\n"
-          False -> "return a.tag == " <> tag <> ";\n"
-        }
-        <> "}\n"
-      [struct, constructor, isa]
+      [struct, constructor]
       |> string.concat
     })
     |> string.concat
@@ -667,6 +669,8 @@ pub fn module_header(mod: Module) -> String {
       }
     })
 
+  let types = list.filter(types, fn(t) { t.name != "Bool" && t.name != "Nil" })
+
   let type_decl =
     list.map(types, custom_type_def)
     |> string.join("\n")
@@ -713,6 +717,12 @@ pub fn module(mod: Module) -> String {
       }
     })
 
+  let types_dict =
+    list.map(types, fn(t) { #(t.name, t) })
+    |> dict.from_list()
+
+  let types = list.filter(types, fn(t) { t.name != "Bool" && t.name != "Nil" })
+
   let type_def =
     list.map(types, custom_type_def)
     |> string.join("\n\n")
@@ -733,11 +743,7 @@ pub fn module(mod: Module) -> String {
     list.map(mod.functions, function_forward)
     |> string.join("\n\n")
 
-  let c =
-    Context(
-      types: list.map(types, fn(t) { #(t.name, t) })
-      |> dict.from_list(),
-    )
+  let c = Context(types: types_dict)
   let fun_impl =
     list.map(mod.functions, function(c, _))
     |> string.join("\n\n")

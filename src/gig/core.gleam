@@ -40,6 +40,7 @@ pub type LiteralKind {
 
 pub type Op {
   FieldAccess(variant: String, index: Int)
+  VariantCheck(variant: String)
   Panic
 }
 
@@ -87,19 +88,8 @@ pub type Context {
 }
 
 pub fn lower_context(c: t.Context) {
-  // these need registered because they are converted to lieterals
-  let bool_poly = Poly([], bool_type)
-  let nil_constructor =
-    External(Poly([], nil_type), "", t.builtin, "Nil", False)
-  let true_constructor = External(bool_poly, "", t.builtin, "True", False)
-  let false_constructor = External(bool_poly, "", t.builtin, "False", False)
-  let externals =
-    dict.new()
-    |> dict.insert("Nil", nil_constructor)
-    |> dict.insert("True", true_constructor)
-    |> dict.insert("False", false_constructor)
-
-  let acc = Context(types: dict.new(), functions: dict.new(), externals:)
+  let acc =
+    Context(types: dict.new(), functions: dict.new(), externals: dict.new())
   dict.fold(c.modules, acc, fn(acc, name, module) {
     lower_module(c, acc, module)
   })
@@ -108,37 +98,13 @@ pub fn lower_context(c: t.Context) {
 fn lower_module(c: t.Context, acc: Context, module: t.Module) {
   let c = t.Context(..c, current_module: module.name)
 
-  // remove some types that are replaced with builtins
-  let #(acc, custom_types) = case module.name == t.builtin {
-    True -> {
-      let #(normal_types, special_types) =
-        list.partition(module.custom_types, fn(c) {
-          case c.definition.name {
-            "Nil" | "Bool" -> False
-            _ -> True
-          }
-        })
-
-      let acc =
-        list.fold(special_types, acc, fn(acc, custom) {
-          let custom = lower_custom_type(c, custom.definition)
-          list.fold(custom.variants, acc, fn(acc, variant) {
-            register_variant_functions(acc, module.name, custom.typ, variant)
-          })
-        })
-
-      #(acc, normal_types)
-    }
-    False -> #(acc, module.custom_types)
-  }
-
   // TODO detect what tuples are actually used
   let acc =
     listx.sane_range(10)
     |> list.fold(acc, register_tuple)
 
   let acc =
-    list.fold(custom_types, acc, fn(acc, custom) {
+    list.fold(module.custom_types, acc, fn(acc, custom) {
       case custom.definition.variants {
         // no variants is considered external
         [] -> acc
@@ -261,14 +227,7 @@ pub fn register_variant_functions(
       id: "new_" <> variant.id,
       mono: True,
     )
-  let acc = Context(..c, externals: dict.insert(c.externals, variant.id, fun))
-
-  // variant check function
-  let fun_id = gen_names.get_variant_check_name(variant.id)
-  let typ = Poly(custom_typ.vars, FunctionType([custom_typ.typ], bool_type))
-  let fun =
-    External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
-  Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
+  Context(..c, externals: dict.insert(c.externals, variant.id, fun))
 }
 
 fn lower_body(c: t.Context, body: List(t.Statement)) {
@@ -774,6 +733,8 @@ pub const string_type = NamedType("String", [])
 
 pub const true_value = Literal(bool_type, Bool("True"))
 
+pub const false_value = Literal(bool_type, Bool("False"))
+
 fn if_exp(cond: Exp, then: Exp, els: Exp) -> Exp {
   case cond {
     Literal(_, Bool("True")) -> then
@@ -947,22 +908,30 @@ fn lower_pattern_match(
       _,
       _,
     ) -> {
-      let typ = map_type(c, typ)
-      let elems = ordered_arguments
-      let match =
-        list.index_fold(elems, true_value, fn(match, elem, i) {
-          let subject =
-            t.FieldAccess(elem.typ, subject, module, constructor, "", i)
-          let elem_match = lower_pattern_match(c, elem, subject)
-          and_exp(elem_match, match)
-        })
-      // TODO special case for single variant no need to check
-      let isa_name =
-        gen_names.get_variant_check_name(get_id(module, constructor))
-      let isa_typ = FunctionType([typ], bool_type)
-      let isa_ref = Global(isa_typ, isa_name)
-      let isa_match = Call(bool_type, isa_ref, [lower_expression(c, subject)])
-      and_exp(isa_match, match)
+      case module, constructor {
+        // handle special cases
+        "gleam", "Nil" -> true_value
+        "gleam", "True" -> lower_expression(c, subject)
+        "gleam", "False" -> {
+          let not_subject = t.NegateBool(t.bool_type, subject)
+          lower_expression(c, not_subject)
+        }
+        _, _ -> {
+          let elems = ordered_arguments
+          let match =
+            list.index_fold(elems, true_value, fn(match, elem, i) {
+              let subject =
+                t.FieldAccess(elem.typ, subject, module, constructor, "", i)
+              let elem_match = lower_pattern_match(c, elem, subject)
+              and_exp(elem_match, match)
+            })
+          // TODO special case for single variant no need to check ?
+          let subject = lower_expression(c, subject)
+          let variant_match =
+            Op(bool_type, VariantCheck(constructor), [subject])
+          and_exp(variant_match, match)
+        }
+      }
     }
   }
 }
@@ -1606,6 +1575,7 @@ fn exp_to_string_with_indent(exp: Exp, indent: Int) -> String {
         list.map(arguments, fn(arg) { exp_to_string_with_indent(arg, indent) })
       case op {
         FieldAccess(_, field) -> "$get_" <> int.to_string(field)
+        VariantCheck(variant) -> "$check_" <> variant
         Panic -> "$panic"
       }
       <> "("
