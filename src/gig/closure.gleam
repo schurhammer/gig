@@ -43,10 +43,10 @@ pub type Exp {
   Literal(typ: core.Type, val: core.LiteralKind)
   Var(typ: core.Type, var: String)
   Call(typ: core.Type, fun: Exp, arg: List(Exp))
+  Op(typ: core.Type, op: core.Op, arg: List(Exp))
   CallClosure(typ: core.Type, fun: Exp, arg: List(Exp))
   Let(typ: core.Type, var: String, val: Exp, exp: Exp)
   If(typ: core.Type, cond: Exp, then_exp: Exp, else_exp: Exp)
-  Panic(typ: core.Type, e: Exp)
 }
 
 pub fn cc_module(mod: mono.Context) {
@@ -99,7 +99,7 @@ pub fn cc_module(mod: mono.Context) {
       let params =
         list.index_map(param_types, fn(_, i) { "a" <> int.to_string(i) })
       let todo_val = Literal(core.string_type, core.String(""))
-      let body = Panic(ret, todo_val)
+      let body = Op(ret, core.Panic, [todo_val])
       Function(
         name: external.id,
         params: params,
@@ -129,6 +129,9 @@ fn fv(n: List(String), e: core.Exp) -> List(#(String, core.Type)) {
       let v = fv(n, fun)
       list.fold(args, v, fn(v, arg) { combine(fv(n, arg), v) })
     }
+    core.Op(_, _, args) -> {
+      list.fold(args, [], fn(v, arg) { combine(fv(n, arg), v) })
+    }
     core.Fn(_, vars, exp) -> {
       let vars = list.map(vars, fn(x) { x.name })
       let n = combine(vars, n)
@@ -144,7 +147,6 @@ fn fv(n: List(String), e: core.Exp) -> List(#(String, core.Type)) {
       let v = combine(v, fv(n, then_e))
       combine(v, fv(n, else_e))
     }
-    core.Panic(_, val) -> fv(n, val)
   }
 }
 
@@ -185,6 +187,16 @@ fn cc(c: CC, e: core.Exp) -> #(CC, Exp) {
         })
       let args = list.reverse(args)
       #(c, CallClosure(typ, fun, args))
+    }
+    core.Op(typ, op, args) -> {
+      let #(c, args) =
+        list.fold(args, #(c, []), fn(acc, arg) {
+          let #(c, args) = acc
+          let #(c, arg) = cc(c, arg)
+          #(c, [arg, ..args])
+        })
+      let args = list.reverse(args)
+      #(c, Op(typ, op, args))
     }
     core.Fn(typ, vars, exp) -> {
       // TODO recursive call before or after converting this?
@@ -227,16 +239,12 @@ fn cc(c: CC, e: core.Exp) -> #(CC, Exp) {
               let #(name, typ) = field
 
               // function from env -> field
-              let extract_fun_name = gen_names.get_getter_name(env_type_name, i)
-              let extract_fun_type = core.FunctionType([env_type], typ)
-              let extract_fun = Var(extract_fun_type, extract_fun_name)
+              let access =
+                Op(typ, core.FieldAccess(env_type_name, i), [
+                  Var(env_type, "ENV"),
+                ])
 
-              Let(
-                exp.typ,
-                name,
-                Call(typ, extract_fun, [Var(env_type, "ENV")]),
-                exp,
-              )
+              Let(exp.typ, name, access, exp)
             })
 
           // add cloure function to module
@@ -266,8 +274,9 @@ fn cc(c: CC, e: core.Exp) -> #(CC, Exp) {
             ])
 
           let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
-          let variant = Variant(env_type_name, "$", fields)
-          let typedef = CustomType(env_type_name, "$", [variant], True)
+          let variant = Variant(env_type_name, env_type_name, fields)
+          let typedef =
+            CustomType(env_type_name, env_type_name, [variant], True)
 
           let types = [typedef, ..c.mod.types]
 
@@ -287,10 +296,6 @@ fn cc(c: CC, e: core.Exp) -> #(CC, Exp) {
       let #(c, then_e) = cc(c, then_e)
       let #(c, else_e) = cc(c, else_e)
       #(c, If(typ, cond, then_e, else_e))
-    }
-    core.Panic(typ, val) -> {
-      let #(c, val) = cc(c, val)
-      #(c, Panic(typ, val))
     }
   }
 }

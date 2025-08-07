@@ -175,7 +175,7 @@ fn instantiate_function(c: Context, name: String, mono: t.Type) {
       let mono_name = fun.id <> type_string
 
       case fun.body {
-        t.Panic(_, _) -> {
+        t.Op(_, t.Panic, _) -> {
           io.println("instantiating unimplemented function " <> fun.id)
           io.println(t.function_to_string(fun))
         }
@@ -257,6 +257,17 @@ fn typed_to_mono_exp(
       let typ = sub_type(c, sub, typ)
       #(c, t.Call(typ, fun, args))
     }
+    t.Op(typ, op, args) -> {
+      let #(c, args) =
+        list.fold(args, #(c, []), fn(acc, arg) {
+          let #(c, args) = acc
+          let #(c, arg) = typed_to_mono_exp(c, sub, arg)
+          #(c, [arg, ..args])
+        })
+      let args = list.reverse(args)
+      let typ = sub_type(c, sub, typ)
+      #(c, t.Op(typ, op, args))
+    }
     t.Fn(typ, params, exp) -> {
       let typ = sub_type(c, sub, typ)
       let #(c, exp) = typed_to_mono_exp(c, sub, exp)
@@ -279,10 +290,6 @@ fn typed_to_mono_exp(
       let #(c, else_e) = typed_to_mono_exp(c, sub, else_e)
       let typ = sub_type(c, sub, typ)
       #(c, t.If(typ, cond, then_e, else_e))
-    }
-    t.Panic(typ, reason) -> {
-      let #(c, reason) = typed_to_mono_exp(c, sub, reason)
-      #(c, t.Panic(typ, reason))
     }
   }
 }

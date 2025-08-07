@@ -60,7 +60,7 @@ String gleam_string_from_utf_codepoints(List_UtfCodepoint codepoints) {
   List_UtfCodepoint current = codepoints;
 
   while (current.tag == Cons_UtfCodepoint_TAG) {
-    UtfCodepoint cp = current.ptr.v1->item;
+    UtfCodepoint cp = current.ptr.Cons->item;
 
     // Calculate UTF-8 byte length for this codepoint
     if (cp <= 0x7F) {
@@ -74,7 +74,7 @@ String gleam_string_from_utf_codepoints(List_UtfCodepoint codepoints) {
     }
     // Invalid codepoints (> 0x10FFFF) are ignored
 
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
 
   if (total_bytes == 0) {
@@ -92,7 +92,7 @@ String gleam_string_from_utf_codepoints(List_UtfCodepoint codepoints) {
   current = codepoints;
 
   while (current.tag == Cons_UtfCodepoint_TAG) {
-    UtfCodepoint cp = current.ptr.v1->item;
+    UtfCodepoint cp = current.ptr.Cons->item;
 
     if (cp <= 0x7F) {
       bytes[pos++] = (char)cp;
@@ -111,7 +111,7 @@ String gleam_string_from_utf_codepoints(List_UtfCodepoint codepoints) {
     }
     // Invalid codepoints (> 0x10FFFF) are silently skipped
 
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
 
   return new_String(bytes, total_bytes);
@@ -188,8 +188,8 @@ List_UtfCodepoint gleam_string_do_to_utf_codepoints(String str) {
   // Reverse the list to get correct order
   List_UtfCodepoint result = new_Empty_UtfCodepoint;
   while (temp_list.tag == Cons_UtfCodepoint_TAG) {
-    UtfCodepoint item = temp_list.ptr.v1->item;
-    List_UtfCodepoint next = temp_list.ptr.v1->next;
+    UtfCodepoint item = temp_list.ptr.Cons->item;
+    List_UtfCodepoint next = temp_list.ptr.Cons->next;
     result = new_Cons_UtfCodepoint(item, result);
     temp_list = next;
   }

@@ -19,13 +19,13 @@ extern char **global_argv;
 #define Nil int
 #define True true
 #define False false
-#define Bool bool
-#define Int int64_t
-#define Float double
-#define UtfCodepoint uint32_t
 
+typedef bool Bool;
+typedef int64_t Int;
+typedef double Float;
 typedef struct String String;
 typedef struct BitArray BitArray;
+typedef uint32_t UtfCodepoint;
 typedef struct Closure Closure;
 
 struct String {

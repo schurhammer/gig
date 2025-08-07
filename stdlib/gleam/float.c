@@ -35,7 +35,8 @@ String gleam_float_to_string(Float a0) {
 Result_Float_Nil gleam_float_parse(String a0) {
   char *temp = malloc(a0.byte_length + 1);
   if (!temp) {
-    Result_Float_Nil result = {.tag = Error_Float_Nil_TAG, .ptr = {.v1 = NULL}};
+    Result_Float_Nil result = {.tag = Error_Float_Nil_TAG,
+                               .ptr = {.Error = NULL}};
     return result;
   }
   memcpy(temp, a0.bytes, a0.byte_length);
@@ -47,13 +48,14 @@ Result_Float_Nil gleam_float_parse(String a0) {
 
   if (end == temp) {
     // Parsing failed
-    Result_Float_Nil result = {.tag = Error_Float_Nil_TAG, .ptr = {.v1 = NULL}};
+    Result_Float_Nil result = {.tag = Error_Float_Nil_TAG,
+                               .ptr = {.Error = NULL}};
     return result;
   }
 
   Result_Float_Nil result = {.tag = Ok_Float_Nil_TAG};
   struct Ok_Float_Nil *ok = malloc(sizeof(struct Ok_Float_Nil));
   ok->value = val;
-  result.ptr.v0 = ok;
+  result.ptr.Ok = ok;
   return result;
 }

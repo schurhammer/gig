@@ -1,9 +1,7 @@
 import gig/closure
 import gig/core.{type LiteralKind, type Type}
 import gleam/int
-import gleam/io
 import gleam/list
-import pprint
 
 pub type Value {
   Literal(typ: Type, val: LiteralKind)
@@ -14,9 +12,9 @@ pub type Term {
   Value(typ: Type, value: Value)
   Call(typ: Type, fun: Value, arg: List(Value))
   CallClosure(typ: Type, fun: Value, arg: List(Value))
+  Op(typ: Type, op: core.Op, arg: List(Value))
   Let(typ: Type, var: String, val: Term, exp: Term)
   If(typ: Type, cond: Value, then_exp: Term, else_exp: Term)
-  Panic(typ: Type, e: Value)
 }
 
 fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
@@ -80,6 +78,47 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
           }
         })
       #(uid, call)
+    }
+    closure.Op(typ, op, args) -> {
+      // assign variable names to each argument (recursively)
+      let #(uid, args) =
+        list.fold(args, #(uid, []), fn(acc, arg) {
+          let #(uid, args) = acc
+
+          let name = "A" <> int.to_string(uid)
+          let uid = uid + 1
+
+          let #(uid, arg) = do_exp(uid, arg)
+          #(uid, [#(name, arg), ..args])
+        })
+
+      // get a list of references to those variables
+      let arg_refs =
+        args
+        |> list.map(fn(arg) {
+          // values are inlined
+          case arg.1 {
+            Value(_, Literal(typ, x)) -> Literal(typ, x)
+            Value(_, Variable(typ, x)) -> Variable(typ, x)
+            _ -> Variable({ arg.1 }.typ, arg.0)
+          }
+        })
+        |> list.reverse()
+
+      // build the call using the variables instead of expressions arguments
+      let call_op = Op(typ, op, arg_refs)
+
+      // add the let bindings for each argument variable
+      let call_op =
+        list.fold(args, call_op, fn(acc, arg) {
+          let #(name, val) = arg
+          // values are inlined
+          case val {
+            Value(_, _) -> acc
+            _ -> Let(typ, name, val, acc)
+          }
+        })
+      #(uid, call_op)
     }
     closure.CallClosure(typ, fun, args) -> {
       // normalize the function expression
@@ -157,17 +196,6 @@ fn do_exp(uid: Int, exp: closure.Exp) -> #(Int, Term) {
           #(uid, exp)
         }
       }
-    }
-    closure.Panic(typ, val) -> {
-      let val_name = "P" <> int.to_string(uid)
-      let uid = uid + 1
-
-      let #(uid, val) = do_exp(uid, val)
-
-      let exp = Panic(typ, Variable(typ, val_name))
-      let exp = Let(exp.typ, val_name, val, exp)
-
-      #(uid, exp)
     }
   }
 }

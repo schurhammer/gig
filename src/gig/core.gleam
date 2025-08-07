@@ -38,17 +38,22 @@ pub type LiteralKind {
   BitArray(size: String)
 }
 
+pub type Op {
+  FieldAccess(variant: String, index: Int)
+  Panic
+}
+
 pub type Exp {
   Literal(typ: Type, value: LiteralKind)
   Local(typ: Type, name: String)
   Global(typ: Type, id: String)
   Fn(typ: Type, parameters: List(Parameter), body: Exp)
   Call(typ: Type, function: Exp, arguments: List(Exp))
+  Op(typ: Type, op: Op, arguments: List(Exp))
   // TODO we could give every let binding a unique integer id
   // to solve any shadowing issues (maybe in typed_ast?)
   Let(typ: Type, name: String, value: Exp, body: Exp)
   If(typ: Type, condition: Exp, then: Exp, els: Exp)
-  Panic(typ: Type, reason: Exp)
 }
 
 pub type CustomType {
@@ -207,7 +212,7 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
         list.index_map(variant.fields, fn(field, i) {
           let name = case field.label {
             Some(label) -> label
-            None -> "field" <> int.to_string(i)
+            None -> gen_names.get_field_name("", i)
           }
           Parameter(map_type(c, field.item.typ), name)
         })
@@ -263,16 +268,7 @@ pub fn register_variant_functions(
   let typ = Poly(custom_typ.vars, FunctionType([custom_typ.typ], bool_type))
   let fun =
     External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
-  let acc = Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
-
-  // getter functions
-  list.index_fold(variant.fields, acc, fn(acc, f, i) {
-    let fun_id = gen_names.get_getter_name(variant.id, i)
-    let typ = Poly(custom_typ.vars, FunctionType([custom_typ.typ], f.typ))
-    let fun =
-      External(typ: typ, src: "", module: module_name, id: fun_id, mono: True)
-    Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
-  })
+  Context(..acc, externals: dict.insert(acc.externals, fun.id, fun))
 }
 
 fn lower_body(c: t.Context, body: List(t.Statement)) {
@@ -359,7 +355,7 @@ fn check_assertions(
       Literal(string_type, String(message)),
       Call(string_type, Global(inspect_typ, "inspect"), [Local(value.typ, "S")]),
     ])
-  let els = Panic(body.typ, m)
+  let els = Op(body.typ, Panic, [m])
   If(body.typ, match, body, els)
 }
 
@@ -1016,7 +1012,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
           Literal(map_type(c, t.string_type), String(message))
         }
       }
-      Panic(typ, value)
+      Op(typ, Panic, [value])
     }
     t.Todo(typ, value) -> {
       let typ = map_type(c, typ)
@@ -1027,7 +1023,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
           Literal(map_type(c, t.string_type), String(message))
         }
       }
-      Panic(typ, value)
+      Op(typ, Panic, [value])
     }
     t.Tuple(typ, elements) -> {
       // TODO register tuple constructor and such if it doesnt exist
@@ -1069,32 +1065,27 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         _ -> "S"
       }
       let subject = Local(typ, subject_name)
-      let constructor = gen_names.get_id(module, constructor)
       let fields =
         list.index_map(ordered_fields, fn(f, i) {
           case f {
             Ok(field) -> lower_expression(c, field)
             Error(field_type) -> {
-              let getter_name = gen_names.get_getter_name(constructor, i)
               let field_type = map_type(c, field_type)
-              let getter_typ = FunctionType([typ], field_type)
-              Call(field_type, Global(getter_typ, getter_name), [subject])
+              Op(field_type, FieldAccess(constructor, i), [subject])
             }
           }
         })
       let record = lower_expression(c, record)
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
+      let constructor = gen_names.get_id(module, constructor)
       let body = Call(typ, Global(constructor_typ, constructor), fields)
       Let(body.typ, subject_name, record, body)
     }
     t.FieldAccess(typ, container, module, variant, label, i) -> {
       let typ = map_type(c, typ)
       let container = lower_expression(c, container)
-      let getter_name = gen_names.get_getter_name(get_id(module, variant), i)
-      let getter_typ = FunctionType([container.typ], typ)
-      let getter = Global(getter_typ, getter_name)
-      Call(typ, getter, [container])
+      Op(typ, FieldAccess(variant, i), [container])
     }
     t.Call(typ, function, args) -> {
       let typ = map_type(c, typ)
@@ -1105,12 +1096,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.TupleIndex(typ, tuple, index) -> {
       let typ = map_type(c, typ)
       let tuple = lower_expression(c, tuple)
-      let assert NamedType(_, elements) = tuple.typ
-      let constructor = gen_names.get_tuple_id(list.length(elements))
-      let getter_name = gen_names.get_getter_name(constructor, index)
-      let getter_typ = FunctionType([tuple.typ], typ)
-      let getter = Global(getter_typ, getter_name)
-      Call(typ, getter, [tuple])
+      Op(typ, FieldAccess("#", index), [tuple])
     }
     t.FnCapture(typ, label, function, arguments_before, arguments_after) -> todo
     t.BitString(typ, segs) -> {
@@ -1195,13 +1181,12 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.Case(typ, subjects, clauses) -> {
       let typ = map_type(c, typ)
       let else_body =
-        Panic(
-          typ,
+        Op(typ, Panic, [
           Literal(
             map_type(c, t.string_type),
             String("No matching clause in " <> current_location_string(c)),
           ),
-        )
+        ])
 
       // Create bindings for each subject
       let subject_vars =
@@ -1348,6 +1333,10 @@ fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
       let args = list.map(args, replace_var(replace, with, _))
       Call(typ, fun, args)
     }
+    Op(typ, op, args) -> {
+      let args = list.map(args, replace_var(replace, with, _))
+      Op(typ, op, args)
+    }
     Fn(typ, vars, exp) ->
       case list.find(vars, fn(v) { v.name == replace }) {
         Ok(_) -> in
@@ -1371,7 +1360,6 @@ fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
         replace_var(replace, with, then_exp),
         replace_var(replace, with, else_exp),
       )
-    Panic(typ, e) -> Panic(typ, replace_var(replace, with, e))
   }
 }
 
@@ -1388,7 +1376,7 @@ fn register_tuple(c: Context, size: Int) {
 
   let element_fields =
     list.index_map(element_types, fn(typ, i) {
-      Parameter(typ, "el" <> int.to_string(i))
+      Parameter(typ, gen_names.get_field_name("", i))
     })
 
   let variant = Variant(constructor_typ, id, "#", element_fields)
@@ -1439,6 +1427,16 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       let args = list.reverse(args)
       #(taken, i, Call(typ, fun, args))
     }
+    Op(typ, op, args) -> {
+      let #(taken, i, args) =
+        list.fold(args, #(taken, i, []), fn(acc, arg) {
+          let #(taken, i, l) = acc
+          let #(taken, i, arg) = unshadow(taken, i, arg)
+          #(taken, i, [arg, ..l])
+        })
+      let args = list.reverse(args)
+      #(taken, i, Op(typ, op, args))
+    }
     Fn(typ, vars, exp) -> {
       let #(_, i, vars, exp) =
         list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
@@ -1488,10 +1486,6 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       let #(taken, i, then_exp) = unshadow(taken, i, then_exp)
       let #(taken, i, else_exp) = unshadow(taken, i, else_exp)
       #(taken, i, If(typ, cond, then_exp, else_exp))
-    }
-    Panic(typ, val) -> {
-      let #(taken, i, val) = unshadow(taken, i, val)
-      #(taken, i, Panic(typ, val))
     }
   }
 }
@@ -1607,6 +1601,19 @@ fn exp_to_string_with_indent(exp: Exp, indent: Int) -> String {
       <> type_to_string(typ)
     }
 
+    Op(typ, op, arguments) -> {
+      let arg_strings =
+        list.map(arguments, fn(arg) { exp_to_string_with_indent(arg, indent) })
+      case op {
+        FieldAccess(_, field) -> "$get_" <> int.to_string(field)
+        Panic -> "$panic"
+      }
+      <> "("
+      <> string.join(arg_strings, ", ")
+      <> ") : "
+      <> type_to_string(typ)
+    }
+
     Let(typ, name, value, body) ->
       "let "
       <> name
@@ -1632,12 +1639,6 @@ fn exp_to_string_with_indent(exp: Exp, indent: Int) -> String {
       <> "\n"
       <> indent_str
       <> ": "
-      <> type_to_string(typ)
-
-    Panic(typ, reason) ->
-      "panic("
-      <> exp_to_string_with_indent(reason, indent)
-      <> ") : "
       <> type_to_string(typ)
   }
 }

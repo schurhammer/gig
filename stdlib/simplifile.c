@@ -202,7 +202,7 @@ Result_List_String_simplifile_FileError simplifile_read_directory(String path) {
   // Reverse the list to maintain proper order
   List_String reversed = new_Empty_String;
   while (result.tag == Cons_String_TAG) {
-    struct Cons_String *cons = result.ptr.v1;
+    struct Cons_String *cons = result.ptr.Cons;
     String head = cons->item;
     List_String tail = cons->next;
 

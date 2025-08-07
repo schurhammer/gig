@@ -4,7 +4,7 @@
 
 #include "builtin.h"
 
-typedef struct { enum {Ok_Int_Nil_TAG, Error_Int_Nil_TAG} tag; union {struct Ok_Int_Nil *v0; struct Error_Int_Nil *v1;} ptr; } Result_Int_Nil;
+typedef struct { enum {Ok_Int_Nil_TAG, Error_Int_Nil_TAG} tag; union {struct Ok_Int_Nil *Ok; struct Error_Int_Nil *Error;} ptr; } Result_Int_Nil;
 
 Bool eq_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
 Bool lt_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);

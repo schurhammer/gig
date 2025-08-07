@@ -5,13 +5,13 @@
 #include "builtin.h"
 
 typedef struct Tuple2_String_String Tuple2_String_String;
-typedef struct { enum {Empty_UtfCodepoint_TAG, Cons_UtfCodepoint_TAG} tag; union {struct Empty_UtfCodepoint *v0; struct Cons_UtfCodepoint *v1;} ptr; } List_UtfCodepoint;
-typedef struct { enum {Ok_Tuple2_String_String_Nil_TAG, Error_Tuple2_String_String_Nil_TAG} tag; union {struct Ok_Tuple2_String_String_Nil *v0; struct Error_Tuple2_String_String_Nil *v1;} ptr; } Result_Tuple2_String_String_Nil;
+typedef struct { enum {Empty_UtfCodepoint_TAG, Cons_UtfCodepoint_TAG} tag; union {struct Empty_UtfCodepoint *Empty; struct Cons_UtfCodepoint *Cons;} ptr; } List_UtfCodepoint;
+typedef struct { enum {Ok_Tuple2_String_String_Nil_TAG, Error_Tuple2_String_String_Nil_TAG} tag; union {struct Ok_Tuple2_String_String_Nil *Ok; struct Error_Tuple2_String_String_Nil *Error;} ptr; } Result_Tuple2_String_String_Nil;
 
 Bool eq_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 Bool lt_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 String inspect_Tuple2_String_String(Tuple2_String_String a);
-Tuple2_String_String new_Tuple2_String_String(String el0, String el1);
+Tuple2_String_String new_Tuple2_String_String(String field0, String field1);
 Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
 Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
 String inspect_List_UtfCodepoint(List_UtfCodepoint a);
@@ -34,8 +34,8 @@ Bool starts_with_string(String a0, String a1);
 UtfCodepoint gleam_string_unsafe_int_to_utf_codepoint(Int a0);
 
 struct Tuple2_String_String{
-String el0;
-String el1;
+String field0;
+String field1;
 };
 
 struct Empty_UtfCodepoint{

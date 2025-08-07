@@ -3,11 +3,11 @@ import gig/core.{BitArray, Float, Int, String}
 import gig/gen_names
 import gig/mono.{type_name}
 import gig/normalise.{
-  type Term, type Value, Call, CallClosure, If, Let, Literal, Panic, Value,
+  type Term, type Value, Call, CallClosure, If, Let, Literal, Op, Value,
   Variable,
 }
 import gig/type_graph
-import gleam/io
+import gleam/dict
 import gleam/order
 
 import gig/graph
@@ -25,6 +25,10 @@ const c_keywords = [
   "volatile", "while", "asm", "typeof", "main", "printf", "malloc", "free",
   "exit", "abort",
 ]
+
+type Context {
+  Context(types: dict.Dict(String, CustomType))
+}
 
 /// Check if a given name is a C keyword or reserved identifier
 fn is_keyword(name: String) -> Bool {
@@ -125,16 +129,14 @@ fn pointer(t: CustomType) {
       |> string.join(", ")
       <> "} tag; union {"
       <> t.variants
-      |> list.index_map(fn(v, i) {
-        "struct " <> v.name <> " *v" <> int.to_string(i) <> ";"
-      })
+      |> list.map(fn(v) { "struct " <> v.name <> " *" <> v.display_name <> ";" })
       |> string.join(" ")
       <> "} ptr; "
       <> "}"
   }
 }
 
-fn gen_term(arg: Term, target: String, id: Int) -> String {
+fn gen_term(c: Context, arg: Term, target: String, id: Int) -> String {
   // TODO is "id" used?
   case arg {
     Value(typ, value) -> gen_value(value, target, id)
@@ -191,14 +193,35 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
 
       hit_target(target, ternary(cond, exp_env, exp_no_env))
     }
-    Panic(typ, val) -> {
-      "panic_exit(" <> gen_value(val, "", id) <> ");\n"
+    Op(_, op, args) -> {
+      case op, args {
+        core.FieldAccess(v, i), [arg] -> {
+          // get details from the type definition
+          let name = type_name(arg.typ)
+          let assert Ok(custom) = dict.get(c.types, name)
+          let assert Ok(variant) =
+            list.find(custom.variants, fn(x) { x.display_name == v })
+          let assert [f, ..] = list.drop(variant.fields, i)
+          let field = escape_if_keyword(f.name)
+
+          // access the field
+          case custom.pointer, custom.variants {
+            True, [_] -> gen_value(arg, "", id) <> "->" <> field
+            True, _ -> gen_value(arg, "", id) <> ".ptr." <> v <> "->" <> field
+            False, _ -> gen_value(arg, "", id) <> "." <> field
+          }
+          |> hit_target(target, _)
+        }
+
+        core.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "", id) <> ");\n"
+        _, _ -> panic as "invalid operation"
+      }
     }
     Let(typ, var, val, exp) ->
       case var, val {
         "_" <> _, _ -> {
           // discarded, no need to make a variable
-          gen_term(val, var, id) <> gen_term(exp, target, id)
+          gen_term(c, val, var, id) <> gen_term(c, exp, target, id)
         }
         _, Value(typ, val) -> {
           // inline value
@@ -209,7 +232,7 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
           <> " = "
           <> gen_value(val, "", id)
           <> ";\n"
-          <> gen_term(exp, target, id)
+          <> gen_term(c, exp, target, id)
         }
         _, Call(..) -> {
           // inline call
@@ -218,9 +241,9 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
           <> " "
           <> escaped_var
           <> " = "
-          <> gen_term(val, "", id)
+          <> gen_term(c, val, "", id)
           <> ";\n"
-          <> gen_term(exp, target, id)
+          <> gen_term(c, exp, target, id)
         }
         _, _ -> {
           // complex expression
@@ -229,22 +252,22 @@ fn gen_term(arg: Term, target: String, id: Int) -> String {
           <> " "
           <> escaped_var
           <> ";\n"
-          <> gen_term(val, escaped_var, id)
-          <> gen_term(exp, target, id)
+          <> gen_term(c, val, escaped_var, id)
+          <> gen_term(c, exp, target, id)
         }
       }
     If(typ, cond, then_exp, else_exp) ->
       "if ("
       <> gen_value(cond, "", id)
       <> ") {\n"
-      <> gen_term(then_exp, target, id + 1)
+      <> gen_term(c, then_exp, target, id + 1)
       <> "} else {\n"
-      <> gen_term(else_exp, target, id + 1)
+      <> gen_term(c, else_exp, target, id + 1)
       <> "}\n"
   }
 }
 
-fn function(fun: Function) -> String {
+fn function(c: Context, fun: Function) -> String {
   let params = fun.params
   let body = normalise.normalise_exp(fun.body, 0)
   let assert core.FunctionType(param_types, ret) = fun.typ
@@ -259,7 +282,7 @@ fn function(fun: Function) -> String {
   })
   |> string.join(", ")
   <> ") {\n"
-  <> gen_term(body, "RETURN", 1)
+  <> gen_term(c, body, "RETURN", 1)
   <> "}"
 }
 
@@ -319,8 +342,8 @@ fn unwrap_pointer(ptr: String, v: closure.Variant, vi: Int) {
       <> ptr
       <> " = *"
       <> ptr
-      <> ".ptr.v"
-      <> int.to_string(vi)
+      <> ".ptr."
+      <> v.display_name
       <> ";\n"
   }
 }
@@ -569,8 +592,8 @@ fn custom_type(t: CustomType) {
                   <> t.name
                   <> "){.tag="
                   <> tag
-                  <> ", .ptr.v"
-                  <> int.to_string(vi)
+                  <> ", .ptr."
+                  <> v.display_name
                   <> "=_ptr});\n"
               }
             False -> "return " <> struct_literal(v) <> ";\n"
@@ -589,30 +612,7 @@ fn custom_type(t: CustomType) {
           False -> "return a.tag == " <> tag <> ";\n"
         }
         <> "}\n"
-      let getters =
-        list.index_map(v.fields, fn(f, fi) {
-          let field_name = escape_if_keyword(f.name)
-          type_name(f.typ)
-          <> " "
-          <> gen_names.get_getter_name(v.name, fi)
-          <> "("
-          <> t.name
-          <> " value) {"
-          <> case t.pointer, t.variants {
-            True, [_] -> "return value->" <> field_name
-            False, _ -> "return value." <> field_name
-            True, _ ->
-              " struct "
-              <> v.name
-              <> "* ptr = value.ptr.v"
-              <> int.to_string(vi)
-              <> "; return ptr"
-              <> access_op
-              <> field_name
-          }
-          <> "; }\n"
-        })
-      [struct, constructor, isa, ..getters]
+      [struct, constructor, isa]
       |> string.concat
     })
     |> string.concat
@@ -733,8 +733,13 @@ pub fn module(mod: Module) -> String {
     list.map(mod.functions, function_forward)
     |> string.join("\n\n")
 
+  let c =
+    Context(
+      types: list.map(types, fn(t) { #(t.name, t) })
+      |> dict.from_list(),
+    )
   let fun_impl =
-    list.map(mod.functions, function)
+    list.map(mod.functions, function(c, _))
     |> string.join("\n\n")
 
   [type_def, type_forward, type_impl, ext_fun_decl, fun_decl, fun_impl]

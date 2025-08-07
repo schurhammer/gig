@@ -32,7 +32,7 @@ static char **list_string_to_argv(List_String args, int *argc) {
   List_String current = args;
   while (current.tag == Cons_String_TAG) {
     (*argc)++;
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
 
   // Allocate array for arguments + NULL terminator
@@ -47,7 +47,7 @@ static char **list_string_to_argv(List_String args, int *argc) {
       break;
 
     // Create null-terminated string for each argument
-    String arg_string = current.ptr.v1->item;
+    String arg_string = current.ptr.Cons->item;
     char *null_terminated_arg = malloc(arg_string.byte_length + 1);
     if (!null_terminated_arg) {
       // Cleanup previously allocated strings on error
@@ -61,7 +61,7 @@ static char **list_string_to_argv(List_String args, int *argc) {
     null_terminated_arg[arg_string.byte_length] = '\0';
 
     argv[i] = null_terminated_arg;
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
   argv[*argc] = NULL;
 
@@ -86,7 +86,7 @@ static char **list_env_to_envp(List_Tuple2_String_String env_list, int *envc) {
   List_Tuple2_String_String current = env_list;
   while (current.tag == Cons_Tuple2_String_String_TAG) {
     new_envc++;
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
 
   *envc = existing_envc + new_envc;
@@ -110,9 +110,9 @@ static char **list_env_to_envp(List_Tuple2_String_String env_list, int *envc) {
     if (current.tag != Cons_Tuple2_String_String_TAG)
       break;
 
-    Tuple2_String_String env_var = current.ptr.v1->item;
-    String key = env_var.el0;
-    String value = env_var.el1;
+    Tuple2_String_String env_var = current.ptr.Cons->item;
+    String key = env_var.field0;
+    String value = env_var.field1;
 
     // Allocate space for "KEY=VALUE"
     int len =
@@ -130,7 +130,7 @@ static char **list_env_to_envp(List_Tuple2_String_String env_list, int *envc) {
     snprintf(env_str, len, "%.*s=%.*s", key.byte_length, key.bytes,
              value.byte_length, value.bytes);
     envp[existing_envc + i] = env_str;
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
   envp[*envc] = NULL;
 
@@ -143,16 +143,16 @@ static Bool get_option_bool(List_Tuple2_shellout_CommandOpt_Bool opts,
   List_Tuple2_shellout_CommandOpt_Bool current = opts;
 
   while (current.tag == Cons_Tuple2_shellout_CommandOpt_Bool_TAG) {
-    Tuple2_shellout_CommandOpt_Bool pair = current.ptr.v1->item;
-    shellout_CommandOpt current_opt = pair.el0;
-    Bool value = pair.el1;
+    Tuple2_shellout_CommandOpt_Bool pair = current.ptr.Cons->item;
+    shellout_CommandOpt current_opt = pair.field0;
+    Bool value = pair.field1;
 
     // Check if this is the option we're looking for
     if (eq_shellout_CommandOpt(current_opt, opt)) {
       return value;
     }
 
-    current = current.ptr.v1->next;
+    current = current.ptr.Cons->next;
   }
 
   return False; // Default value if option not found

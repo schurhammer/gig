@@ -4,7 +4,7 @@
 
 #include "builtin.h"
 
-typedef struct { enum {Ok_Float_Nil_TAG, Error_Float_Nil_TAG} tag; union {struct Ok_Float_Nil *v0; struct Error_Float_Nil *v1;} ptr; } Result_Float_Nil;
+typedef struct { enum {Ok_Float_Nil_TAG, Error_Float_Nil_TAG} tag; union {struct Ok_Float_Nil *Ok; struct Error_Float_Nil *Error;} ptr; } Result_Float_Nil;
 
 Bool eq_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
 Bool lt_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
