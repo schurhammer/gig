@@ -49,7 +49,6 @@ fn hit_target(target: String, with: String) {
     "" -> with
     // discarded, no need to set the target
     "_" <> _ -> with <> ";\n"
-    // TODO this causes warnings about functions not having return
     "RETURN" -> "return " <> with <> ";\n"
     target -> target <> " = " <> with <> ";\n"
   }
@@ -121,17 +120,84 @@ fn gen_value(arg: Value, target: String) {
 fn pointer(t: CustomType) {
   case t.variants {
     [_] -> "struct " <> t.name <> "*"
-    _ ->
-      "struct { enum {"
-      <> t.variants
-      |> list.map(fn(v) { v.name <> "_TAG" })
-      |> string.join(", ")
-      <> "} tag; union {"
-      <> t.variants
-      |> list.map(fn(v) { "struct " <> v.name <> " *" <> v.display_name <> ";" })
-      |> string.join(" ")
-      <> "} ptr; "
-      <> "}"
+    _ -> {
+      let tags =
+        t.variants
+        |> list.map(fn(v) { v.name <> "_TAG" })
+        |> string.join(", ")
+      let ptrs =
+        t.variants
+        |> list.map(fn(v) {
+          "struct " <> v.name <> " *" <> v.display_name <> ";\n"
+        })
+        |> string.concat()
+      "struct {\nenum {" <> tags <> "} tag;\nunion {\n" <> ptrs <> "} ptr; }"
+    }
+  }
+}
+
+/// Generate field access code
+fn generate_field_access(
+  custom: CustomType,
+  variant_name: String,
+  field_name: String,
+  base_expr: String,
+) -> String {
+  let field = escape_if_keyword(field_name)
+  case custom.pointer, custom.variants {
+    True, [_] -> base_expr <> "->" <> field
+    True, _ -> base_expr <> ".ptr." <> variant_name <> "->" <> field
+    False, _ -> base_expr <> "." <> field
+  }
+}
+
+/// Generate variant check code
+fn generate_variant_check(
+  custom: CustomType,
+  variant_name: String,
+  base_expr: String,
+) -> String {
+  case custom.variants {
+    [_] -> "True"
+    _ -> base_expr <> ".tag == " <> variant_name <> "_TAG"
+  }
+}
+
+/// Handle Let binding generation
+fn handle_let_binding(
+  c: Context,
+  var: String,
+  val: Term,
+  exp: Term,
+  target: String,
+) -> String {
+  let escaped_var = escape_if_keyword(var)
+
+  case var, val {
+    "_" <> _, _ -> gen_term(c, val, var) <> gen_term(c, exp, target)
+    _, Value(_, val) ->
+      type_name(val.typ)
+      <> " "
+      <> escaped_var
+      <> " = "
+      <> gen_value(val, "")
+      <> ";\n"
+      <> gen_term(c, exp, target)
+    _, Call(..) ->
+      type_name(val.typ)
+      <> " "
+      <> escaped_var
+      <> " = "
+      <> gen_term(c, val, "")
+      <> ";\n"
+      <> gen_term(c, exp, target)
+    _, _ ->
+      type_name(val.typ)
+      <> " "
+      <> escaped_var
+      <> ";\n"
+      <> gen_term(c, val, escaped_var)
+      <> gen_term(c, exp, target)
   }
 }
 
@@ -140,53 +206,36 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
   case arg {
     Value(_, value) -> gen_value(value, target)
     Call(_, fun, args) -> {
-      hit_target(
-        target,
+      let call_expr =
         gen_value(fun, "")
-          <> "("
-          <> list.map(args, gen_value(_, "")) |> string.join(", ")
-          <> ")",
-      )
+        <> "("
+        <> string.join(list.map(args, gen_value(_, "")), ", ")
+        <> ")"
+      hit_target(target, call_expr)
     }
     CallClosure(typ, fun, args) -> {
       let closure = gen_value(fun, "")
       let param_types = list.map(args, fn(x) { type_name(x.typ) })
-
-      let fun = closure <> ".fun"
+      let fun_ptr = closure <> ".fun"
       let env_param = closure <> ".env"
       let params = list.map(args, gen_value(_, ""))
-
-      // the closure may or may not have an env parameter
-      // determined by if env is a null pointer
       let cond = "is_closure(" <> closure <> ")"
 
+      let type_sig = "((" <> type_name(typ) <> "(*)("
       let exp_env =
-        "("
-        <> "("
-        <> type_name(typ)
-        <> "(*)"
-        <> "("
+        type_sig
         <> string.join(["void*", ..param_types], ", ")
-        <> ")"
-        <> ")"
-        <> fun
-        <> ")"
-        <> "("
+        <> "))"
+        <> fun_ptr
+        <> ")("
         <> string.join([env_param, ..params], ", ")
         <> ")"
-
       let exp_no_env =
-        "("
-        <> "("
-        <> type_name(typ)
-        <> "(*)"
-        <> "("
+        type_sig
         <> string.join(param_types, ", ")
-        <> ")"
-        <> ")"
-        <> fun
-        <> ")"
-        <> "("
+        <> "))"
+        <> fun_ptr
+        <> ")("
         <> string.join(params, ", ")
         <> ")"
 
@@ -201,14 +250,8 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
           let assert Ok(variant) =
             list.find(custom.variants, fn(x) { x.display_name == v })
           let assert [f, ..] = list.drop(variant.fields, i)
-          let field = escape_if_keyword(f.name)
 
-          // access the field
-          case custom.pointer, custom.variants {
-            True, [_] -> gen_value(arg, "") <> "->" <> field
-            True, _ -> gen_value(arg, "") <> ".ptr." <> v <> "->" <> field
-            False, _ -> gen_value(arg, "") <> "." <> field
-          }
+          generate_field_access(custom, v, f.name, gen_value(arg, ""))
           |> hit_target(target, _)
         }
         core.VariantCheck(v), [arg] -> {
@@ -218,10 +261,7 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
           let assert Ok(variant) =
             list.find(custom.variants, fn(x) { x.display_name == v })
 
-          case custom.variants {
-            [_] -> "True"
-            _ -> gen_value(arg, "") <> ".tag == " <> variant.name <> "_TAG"
-          }
+          generate_variant_check(custom, variant.name, gen_value(arg, ""))
           |> hit_target(target, _)
         }
         core.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "") <> ");\n"
@@ -230,45 +270,7 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
         }
       }
     }
-    Let(_, var, val, exp) ->
-      case var, val {
-        "_" <> _, _ -> {
-          // discarded, no need to make a variable
-          gen_term(c, val, var) <> gen_term(c, exp, target)
-        }
-        _, Value(_, val) -> {
-          // inline value
-          let escaped_var = escape_if_keyword(var)
-          type_name(val.typ)
-          <> " "
-          <> escaped_var
-          <> " = "
-          <> gen_value(val, "")
-          <> ";\n"
-          <> gen_term(c, exp, target)
-        }
-        _, Call(..) -> {
-          // inline call
-          let escaped_var = escape_if_keyword(var)
-          type_name(val.typ)
-          <> " "
-          <> escaped_var
-          <> " = "
-          <> gen_term(c, val, "")
-          <> ";\n"
-          <> gen_term(c, exp, target)
-        }
-        _, _ -> {
-          // complex expression
-          let escaped_var = escape_if_keyword(var)
-          type_name(val.typ)
-          <> " "
-          <> escaped_var
-          <> ";\n"
-          <> gen_term(c, val, escaped_var)
-          <> gen_term(c, exp, target)
-        }
-      }
+    Let(_, var, val, exp) -> handle_let_binding(c, var, val, exp, target)
     If(_, cond, then_exp, else_exp) ->
       "if ("
       <> gen_value(cond, "")
@@ -280,40 +282,40 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
   }
 }
 
+/// Generate function signature (common between function and function_forward)
+fn generate_function_signature(
+  name: String,
+  params: List(String),
+  param_types: List(mono.Type),
+  return_type: mono.Type,
+) -> String {
+  let param_list =
+    list.zip(params, param_types)
+    |> list.map(fn(p) {
+      let #(param_name, typ) = p
+      type_name(typ) <> " " <> escape_if_keyword(param_name)
+    })
+    |> string.join(", ")
+
+  type_name(return_type) <> " " <> name <> "(" <> param_list <> ")"
+}
+
 fn function(c: Context, fun: Function) -> String {
   let params = fun.params
   let body = normalise.normalise_exp(fun.body, 0)
-  let assert core.FunctionType(param_types, ret) = fun.typ
-  type_name(ret)
-  <> " "
-  <> fun.name
-  <> "("
-  <> list.zip(params, param_types)
-  |> list.map(fn(p) {
-    let #(name, typ) = p
-    type_name(typ) <> " " <> escape_if_keyword(name)
-  })
-  |> string.join(", ")
-  <> ") {\n"
+  let assert mono.FunctionType(param_types, ret) = fun.typ
+
+  generate_function_signature(fun.name, params, param_types, ret)
+  <> " {\n"
   <> gen_term(c, body, "RETURN")
   <> "}"
 }
 
 pub fn function_forward(fun: Function) -> String {
-  // io.debug(fun)
   let params = fun.params
-  let assert core.FunctionType(param_types, ret) = fun.typ
-  type_name(ret)
-  <> " "
-  <> fun.name
-  <> "("
-  <> list.zip(params, param_types)
-  |> list.map(fn(p) {
-    let #(name, typ) = p
-    type_name(typ) <> " " <> escape_if_keyword(name)
-  })
-  |> string.join(", ")
-  <> ");"
+  let assert mono.FunctionType(param_types, ret) = fun.typ
+
+  generate_function_signature(fun.name, params, param_types, ret) <> ";"
 }
 
 fn custom_type_def(t: CustomType) {
@@ -362,273 +364,319 @@ fn unwrap_pointer(ptr: String, v: closure.Variant) {
 }
 
 fn struct_literal(v: closure.Variant) {
-  { "((struct " <> v.name <> "){" }
-  <> {
+  let fields_str =
     v.fields
     |> list.map(fn(f) {
       let field_name = escape_if_keyword(f.name)
       "." <> field_name <> " = " <> field_name
     })
     |> string.join(",")
-  }
-  <> "})"
+
+  "((struct " <> v.name <> "){" <> fields_str <> "})"
 }
 
-fn custom_type(t: CustomType) {
+/// Generate field comparison for equality functions
+fn generate_field_equality_check(
+  field_typ: mono.Type,
+  field_name: String,
+  access_op: String,
+) -> String {
+  let escaped_name = escape_if_keyword(field_name)
+  "if(!eq_"
+  <> type_name(field_typ)
+  <> "(a"
+  <> access_op
+  <> escaped_name
+  <> ", b"
+  <> access_op
+  <> escaped_name
+  <> ")) { return False; }\n"
+}
+
+/// Generate field comparison for less-than functions
+fn generate_field_less_than_check(
+  field_typ: mono.Type,
+  field_name: String,
+  access_op: String,
+) -> String {
+  let escaped_name = escape_if_keyword(field_name)
+  let field_lt = "lt_" <> type_name(field_typ)
+  "if("
+  <> field_lt
+  <> "(a"
+  <> access_op
+  <> escaped_name
+  <> ", b"
+  <> access_op
+  <> escaped_name
+  <> ")) { return True; }\nif("
+  <> field_lt
+  <> "(b"
+  <> access_op
+  <> escaped_name
+  <> ", a"
+  <> access_op
+  <> escaped_name
+  <> ")) { return False; }\n"
+}
+
+/// Generate equality function for custom type
+fn generate_equality_function(t: CustomType) -> String {
   let access_op = case t.pointer {
     True -> "->"
     False -> "."
   }
 
-  let equal =
-    "Bool"
-    <> " eq_"
-    <> t.name
-    <> "("
-    <> t.name
-    <> " a, "
-    <> t.name
-    <> " b"
-    <> ") {\n"
-    <> case t.variants {
-      [v] ->
-        list.map(v.fields, fn(f) {
-          let field_name = escape_if_keyword(f.name)
-          "if(!"
-          <> "eq_"
-          <> type_name(f.typ)
-          <> "(a"
-          <> access_op
-          <> field_name
-          <> ", b"
-          <> access_op
-          <> field_name
-          <> ")) { return False; }\n"
-        })
-        |> string.concat
-      variants ->
-        "if (a.tag != b.tag) { return False; }\n"
-        <> list.map(variants, fn(v) {
-          "if (a.tag == "
-          <> v.name
-          <> "_TAG) {\n"
-          <> unwrap_pointer("a", v)
-          <> unwrap_pointer("b", v)
-          <> list.map(v.fields, fn(f) {
-            let field_equal = "eq_" <> type_name(f.typ)
-            let escaped_field_name = escape_if_keyword(f.name)
-            "if(!"
-            <> field_equal
-            <> "(sa."
-            <> escaped_field_name
-            <> ", sb."
-            <> escaped_field_name
-            <> ")) { return False; }\n"
-          })
-          |> string.concat
-          <> "}\n"
-        })
-        |> string.join("else ")
-    }
-    <> "return True;\n"
-    <> "}\n"
+  let function_header =
+    "Bool eq_" <> t.name <> "(" <> t.name <> " a, " <> t.name <> " b) {\n"
 
-  let less_than =
-    "Bool lt_"
-    <> t.name
-    <> "("
-    <> t.name
-    <> " a, "
-    <> t.name
-    <> " b"
-    <> ") {\n"
-    <> case t.variants {
-      [v] ->
-        list.map(v.fields, fn(f) {
-          let field_lt = "lt_" <> type_name(f.typ)
-          let field_name = escape_if_keyword(f.name)
-          "if("
-          <> field_lt
-          <> "(a"
-          <> access_op
-          <> field_name
-          <> ", b"
-          <> access_op
-          <> field_name
-          <> ")) { return True; }\n"
-          <> "if("
-          <> field_lt
-          <> "(b"
-          <> access_op
-          <> field_name
-          <> ", a"
-          <> access_op
-          <> field_name
-          <> ")) { return False; }\n"
-        })
-        |> string.concat
-      variants ->
-        "if (a.tag < b.tag) { return True; }\n"
-        <> "if (a.tag > b.tag) { return False; }\n"
-        <> list.map(variants, fn(v) {
-          "if (a.tag == "
-          <> v.name
-          <> "_TAG) {\n"
-          <> unwrap_pointer("a", v)
-          <> unwrap_pointer("b", v)
-          <> list.map(v.fields, fn(f) {
-            let field_lt = "lt_" <> type_name(f.typ)
-            let field_name = escape_if_keyword(f.name)
-            "if("
-            <> field_lt
-            <> "(sa."
-            <> field_name
-            <> ", sb."
-            <> field_name
-            <> ")) { return True; }\n"
-            <> "if("
-            <> field_lt
-            <> "(sb."
-            <> field_name
-            <> ", sa."
-            <> field_name
-            <> ")) { return False; }\n"
-          })
-          |> string.concat
-          <> "}\n"
-        })
-        |> string.join("else ")
-    }
-    <> "return False;\n"
-    <> "}\n"
-
-  let inspect =
-    "String inspect_"
-    <> t.name
-    <> "("
-    <> t.name
-    <> " a) {\n"
-    <> case t.variants {
-      [v] ->
-        case v.fields {
-          [] -> "return " <> string_lit(v.display_name) <> ";\n"
-          _ ->
-            "return append_string("
-            <> v.fields
+  let body = case t.variants {
+    [v] ->
+      list.map(v.fields, fn(f) {
+        generate_field_equality_check(f.typ, f.name, access_op)
+      })
+      |> string.concat
+    variants -> {
+      let variant_checks =
+        variants
+        |> list.map(fn(v) {
+          let field_checks =
+            v.fields
             |> list.map(fn(f) {
-              "inspect_"
-              <> type_name(f.typ)
-              <> "(a"
-              <> access_op
-              <> escape_if_keyword(f.name)
-              <> ")"
+              let field_equal = "eq_" <> type_name(f.typ)
+              let escaped_field_name = escape_if_keyword(f.name)
+              "if(!"
+              <> field_equal
+              <> "(sa."
+              <> escaped_field_name
+              <> ", sb."
+              <> escaped_field_name
+              <> ")) { return False; }\n"
             })
+            |> string.concat
+          "if (a.tag == "
+          <> v.name
+          <> "_TAG) {\n"
+          <> unwrap_pointer("a", v)
+          <> unwrap_pointer("b", v)
+          <> field_checks
+          <> "}\n"
+        })
+        |> string.join("else ")
+      "if (a.tag != b.tag) { return False; }\n" <> variant_checks
+    }
+  }
+
+  function_header <> body <> "return True;\n}\n"
+}
+
+/// Generate less-than function for custom type
+fn generate_less_than_function(t: CustomType) -> String {
+  let access_op = case t.pointer {
+    True -> "->"
+    False -> "."
+  }
+
+  let function_header =
+    "Bool lt_" <> t.name <> "(" <> t.name <> " a, " <> t.name <> " b) {\n"
+
+  let body = case t.variants {
+    [v] ->
+      list.map(v.fields, fn(f) {
+        generate_field_less_than_check(f.typ, f.name, access_op)
+      })
+      |> string.concat
+    variants -> {
+      let variant_checks =
+        variants
+        |> list.map(fn(v) {
+          let field_checks =
+            v.fields
+            |> list.map(fn(f) {
+              let field_lt = "lt_" <> type_name(f.typ)
+              let field_name = escape_if_keyword(f.name)
+              "if("
+              <> field_lt
+              <> "(sa."
+              <> field_name
+              <> ", sb."
+              <> field_name
+              <> ")) { return True; }\nif("
+              <> field_lt
+              <> "(sb."
+              <> field_name
+              <> ", sa."
+              <> field_name
+              <> ")) { return False; }\n"
+            })
+            |> string.concat
+          "if (a.tag == "
+          <> v.name
+          <> "_TAG) {\n"
+          <> unwrap_pointer("a", v)
+          <> unwrap_pointer("b", v)
+          <> field_checks
+          <> "}\n"
+        })
+        |> string.join("else ")
+      "if (a.tag < b.tag) { return True; }\nif (a.tag > b.tag) { return False; }\n"
+      <> variant_checks
+    }
+  }
+
+  function_header <> body <> "return False;\n}\n"
+}
+
+/// Generate inspect fields for a variant
+fn generate_inspect_fields(
+  fields: List(closure.Field),
+  access_op: String,
+  prefix: String,
+) -> List(String) {
+  fields
+  |> list.map(fn(f) {
+    "inspect_"
+    <> type_name(f.typ)
+    <> "("
+    <> prefix
+    <> access_op
+    <> escape_if_keyword(f.name)
+    <> ")"
+  })
+}
+
+/// Generate inspect function for custom type
+fn generate_inspect_function(t: CustomType) -> String {
+  let access_op = case t.pointer {
+    True -> "->"
+    False -> "."
+  }
+
+  let function_header =
+    "String inspect_" <> t.name <> "(" <> t.name <> " a) {\n"
+
+  let body = case t.variants {
+    [v] ->
+      case v.fields {
+        [] -> "return " <> string_lit(v.display_name) <> ";\n"
+        fields -> {
+          let field_inspects =
+            generate_inspect_fields(fields, access_op, "a")
             |> list.intersperse(string_lit(", "))
             |> list.fold(string_lit(v.display_name <> "("), fn(a, f) {
-              "append_string(" <> a <> ", " <> f <> ")"
+              "append_string(\n" <> a <> ",\n" <> f <> ")"
             })
-            <> ", "
-            <> string_lit(")")
-            <> ");\n"
+          "return append_string(\n"
+          <> field_inspects
+          <> ",\n"
+          <> string_lit(")")
+          <> ");\n"
         }
-      variants ->
-        list.map(variants, fn(v) {
+      }
+    variants -> {
+      let variant_cases =
+        variants
+        |> list.map(fn(v) {
+          let variant_body = case v.fields {
+            [] -> "return " <> string_lit(v.display_name) <> ";\n"
+            fields -> {
+              let field_inspects =
+                generate_inspect_fields(fields, ".", "sa")
+                |> list.intersperse(string_lit(", "))
+                |> list.fold(string_lit(v.display_name <> "("), fn(a, f) {
+                  "append_string(\n" <> a <> ",\n" <> f <> ")"
+                })
+              "return append_string(\n"
+              <> field_inspects
+              <> ",\n"
+              <> string_lit(")")
+              <> ");\n"
+            }
+          }
           "if (a.tag == "
           <> v.name
           <> "_TAG) {\n"
           <> unwrap_pointer("a", v)
-          <> case v.fields {
-            [] -> "return " <> string_lit(v.display_name) <> ";\n"
-            _ ->
-              "return append_string("
-              <> v.fields
-              |> list.map(fn(f) {
-                "inspect_"
-                <> type_name(f.typ)
-                <> "(sa."
-                <> escape_if_keyword(f.name)
-                <> ")"
-              })
-              |> list.intersperse(string_lit(", "))
-              |> list.fold(string_lit(v.display_name <> "("), fn(a, f) {
-                "append_string(" <> a <> ", " <> f <> ")"
-              })
-              <> ", "
-              <> string_lit(")")
-              <> ");\n"
-          }
+          <> variant_body
           <> "}\n"
         })
         |> string.concat
+      variant_cases <> "return " <> string_lit("???") <> ";\n"
     }
-    <> "return "
-    <> string_lit("???")
-    <> ";\n"
-    <> "}\n"
+  }
 
-  let variant_definitions =
-    list.map(t.variants, fn(v) {
-      let tag = v.name <> "_TAG"
+  function_header <> body <> "}\n"
+}
 
-      let struct = custom_type_struct(v) <> "\n"
+/// Generate variant definitions for custom type
+fn generate_variant_definitions(t: CustomType) -> String {
+  list.map(t.variants, fn(v) {
+    let tag = v.name <> "_TAG"
+    let struct = custom_type_struct(v) <> "\n"
 
-      let constructor = case v.fields {
-        [] ->
-          "const "
-          <> t.name
-          <> " new_"
-          <> v.name
-          <> " = {.tag="
-          <> tag
-          <> ", .ptr=0};\n"
-        _ ->
-          constructor_function_header(t, v)
-          <> " {\n"
-          <> case t.pointer {
-            True ->
+    let constructor = case v.fields {
+      [] ->
+        "const "
+        <> t.name
+        <> " new_"
+        <> v.name
+        <> " = {.tag="
+        <> tag
+        <> ", .ptr=0};\n"
+      _ -> {
+        let header = constructor_function_header(t, v)
+        let body = case t.pointer {
+          True -> {
+            let malloc_part =
               "struct "
               <> v.name
               <> " *_ptr = malloc(sizeof(struct "
               <> v.name
               <> "));\n"
-              <> "*_ptr = "
-              <> struct_literal(v)
-              <> ";\n"
-              <> case t.variants {
-                [_] -> "return _ptr;"
-                _ ->
-                  "return (("
-                  <> t.name
-                  <> "){.tag="
-                  <> tag
-                  <> ", .ptr."
-                  <> v.display_name
-                  <> "=_ptr});\n"
-              }
-            False -> "return " <> struct_literal(v) <> ";\n"
+            let assign_part = "*_ptr = " <> struct_literal(v) <> ";\n"
+            let return_part = case t.variants {
+              [_] -> "return _ptr;"
+              _ ->
+                "return (("
+                <> t.name
+                <> "){.tag="
+                <> tag
+                <> ", .ptr."
+                <> v.display_name
+                <> "=_ptr});\n"
+            }
+            malloc_part <> assign_part <> return_part
           }
-          <> "}\n"
+          False -> "return " <> struct_literal(v) <> ";\n"
+        }
+        header <> " {\n" <> body <> "}\n"
       }
-      [struct, constructor]
-      |> string.concat
-    })
-    |> string.concat
+    }
 
-  variant_definitions <> equal <> less_than <> inspect
+    struct <> constructor
+  })
+  |> string.concat
+}
+
+fn custom_type(t: CustomType) {
+  generate_variant_definitions(t)
+  <> generate_equality_function(t)
+  <> generate_less_than_function(t)
+  <> generate_inspect_function(t)
 }
 
 fn constructor_function_header(t: CustomType, v: closure.Variant) -> String {
   case v.fields {
     [] -> "extern const " <> t.name <> " new_" <> v.name
-    _ ->
-      t.name
-      <> " new_"
-      <> v.name
-      <> "("
-      <> v.fields
-      |> list.map(fn(p) { type_name(p.typ) <> " " <> escape_if_keyword(p.name) })
-      |> string.join(", ")
-      <> ")"
+    _ -> {
+      let params =
+        v.fields
+        |> list.map(fn(p) {
+          type_name(p.typ) <> " " <> escape_if_keyword(p.name)
+        })
+        |> string.join(", ")
+      t.name <> " new_" <> v.name <> "(" <> params <> ")"
+    }
   }
 }
 
@@ -639,49 +687,39 @@ fn custom_type_struct(v: closure.Variant) {
       type_name(f.typ) <> " " <> escape_if_keyword(f.name) <> ";\n"
     })
     |> string.join("")
-
   "struct " <> v.name <> "{\n" <> fields <> "};"
 }
 
-pub fn module_header(mod: Module) -> String {
-  // sort types to put them in order of dependency and
-  //  "pointer types" after "struct types"
+/// Sort types by dependency (extracted common logic)
+fn sort_types_by_dependency(mod: Module) -> List(CustomType) {
   let type_graph = type_graph.create(mod)
   let type_groups = graph.strongly_connected_components(type_graph)
 
-  let types =
-    list.flatten(type_groups)
-    |> list.map(fn(name) {
-      let assert Ok(x) = list.find(mod.types, fn(x) { x.name == name })
-      x
-    })
-    |> list.sort(fn(a, b) {
-      case a.pointer, b.pointer {
-        True, True -> order.Eq
-        True, False -> order.Gt
-        False, False -> order.Eq
-        False, True -> order.Lt
-      }
-    })
+  list.flatten(type_groups)
+  |> list.map(fn(name) {
+    let assert Ok(x) = list.find(mod.types, fn(x) { x.name == name })
+    x
+  })
+  |> list.sort(fn(a, b) {
+    case a.pointer, b.pointer {
+      True, True -> order.Eq
+      True, False -> order.Gt
+      False, False -> order.Eq
+      False, True -> order.Lt
+    }
+  })
+  |> list.filter(fn(t) { t.name != "Bool" && t.name != "Nil" })
+}
 
-  let types = list.filter(types, fn(t) { t.name != "Bool" && t.name != "Nil" })
+pub fn module_header(mod: Module) -> String {
+  let types = sort_types_by_dependency(mod)
 
-  let type_decl =
-    list.map(types, custom_type_def)
-    |> string.join("\n")
-
-  let type_forward =
-    list.map(types, custom_type_forward)
-    |> string.join("\n")
-
-  let fun_decl =
-    list.map(mod.externals, function_forward)
-    |> string.join("\n")
-
+  let type_decl = list.map(types, custom_type_def) |> string.join("\n")
+  let type_forward = list.map(types, custom_type_forward) |> string.join("\n")
+  let fun_decl = list.map(mod.externals, function_forward) |> string.join("\n")
   let type_structs =
     list.map(types, fn(t) {
-      list.map(t.variants, custom_type_struct)
-      |> string.join("\n")
+      list.map(t.variants, custom_type_struct) |> string.join("\n")
     })
     |> string.join("\n\n")
 
@@ -691,57 +729,18 @@ pub fn module_header(mod: Module) -> String {
 }
 
 pub fn module(mod: Module) -> String {
-  // sort types to put them in order of dependency and
-  //  "pointer types" after "struct types"
-  let type_groups =
-    type_graph.create(mod)
-    |> graph.strongly_connected_components()
-
-  let types =
-    list.flatten(type_groups)
-    |> list.map(fn(name) {
-      let assert Ok(x) = list.find(mod.types, fn(x) { x.name == name })
-      x
-    })
-    |> list.sort(fn(a, b) {
-      case a.pointer, b.pointer {
-        True, True -> order.Eq
-        True, False -> order.Gt
-        False, False -> order.Eq
-        False, True -> order.Lt
-      }
-    })
-
-  let types_dict =
-    list.map(types, fn(t) { #(t.name, t) })
-    |> dict.from_list()
-
-  let types = list.filter(types, fn(t) { t.name != "Bool" && t.name != "Nil" })
-
-  let type_def =
-    list.map(types, custom_type_def)
-    |> string.join("\n\n")
-
-  let type_forward =
-    list.map(types, custom_type_forward)
-    |> string.join("\n\n")
-
-  let type_impl =
-    list.map(types, custom_type)
-    |> string.join("\n\n")
-
-  let ext_fun_decl =
-    list.map(mod.externals, function_forward)
-    |> string.join("\n")
-
-  let fun_decl =
-    list.map(mod.functions, function_forward)
-    |> string.join("\n\n")
-
+  let types = sort_types_by_dependency(mod)
+  let types_dict = list.map(types, fn(t) { #(t.name, t) }) |> dict.from_list()
   let c = Context(types: types_dict)
-  let fun_impl =
-    list.map(mod.functions, function(c, _))
-    |> string.join("\n\n")
+
+  let type_def = list.map(types, custom_type_def) |> string.join("\n\n")
+  let type_forward = list.map(types, custom_type_forward) |> string.join("\n\n")
+  let type_impl = list.map(types, custom_type) |> string.join("\n\n")
+  let ext_fun_decl =
+    list.map(mod.externals, function_forward) |> string.join("\n")
+  let fun_decl =
+    list.map(mod.functions, function_forward) |> string.join("\n\n")
+  let fun_impl = list.map(mod.functions, function(c, _)) |> string.join("\n\n")
 
   [type_def, type_forward, type_impl, ext_fun_decl, fun_decl, fun_impl]
   |> list.filter(fn(x) { !string.is_empty(x) })

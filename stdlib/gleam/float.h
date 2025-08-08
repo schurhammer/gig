@@ -4,7 +4,12 @@
 
 #include "builtin.h"
 
-typedef struct { enum {Ok_Float_Nil_TAG, Error_Float_Nil_TAG} tag; union {struct Ok_Float_Nil *Ok; struct Error_Float_Nil *Error;} ptr; } Result_Float_Nil;
+typedef struct {
+enum {Ok_Float_Nil_TAG, Error_Float_Nil_TAG} tag;
+union {
+struct Ok_Float_Nil *Ok;
+struct Error_Float_Nil *Error;
+} ptr; } Result_Float_Nil;
 
 Bool eq_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
 Bool lt_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
@@ -12,16 +17,16 @@ String inspect_Result_Float_Nil(Result_Float_Nil a);
 Result_Float_Nil new_Ok_Float_Nil(Float value);
 Result_Float_Nil new_Error_Float_Nil(Nil value);
 
-Float gleam_float_ceiling(Float a0);
-Float gleam_float_do_power(Float a0);
-Float gleam_float_power(Float a0, Float a1);
-Float gleam_float_do_to_float(Int a0);
-Float gleam_float_exponential(Float a0);
-Float gleam_float_floor(Float a0);
-Int gleam_float_js_round(Float a0);
-Result_Float_Nil gleam_float_parse(String a0);
 Float gleam_float_random();
 String gleam_float_to_string(Float a0);
+Float gleam_float_exponential(Float a0);
+Result_Float_Nil gleam_float_parse(String a0);
+Float gleam_float_do_to_float(Int a0);
+Int gleam_float_js_round(Float a0);
+Float gleam_float_do_power(Float a0);
+Float gleam_float_power(Float a0, Float a1);
+Float gleam_float_ceiling(Float a0);
+Float gleam_float_floor(Float a0);
 Int gleam_float_truncate(Float a0);
 
 struct Ok_Float_Nil{

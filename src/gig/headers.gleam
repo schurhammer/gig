@@ -4,31 +4,35 @@ import gig/core
 import gig/mono
 import gleam/dict
 import gleam/list
-import gleam/set
 import gleam/string
 
 pub fn module_headers(c: core.Context) {
   c.externals
-  |> dict.to_list()
-  |> list.filter(fn(x) { !{ x.1 }.mono })
-  |> list.group(fn(x) { { x.1 }.module })
+  |> list.filter(fn(x) { !x.mono })
+  |> list.group(fn(x) { x.module })
   |> dict.to_list()
   |> list.map(fn(entry) {
     let #(module_name, externals) = entry
-    let module =
-      mono.Context(
-        in: c,
-        out: core.Context(
-          types: dict.new(),
-          functions: dict.new(),
-          externals: dict.from_list(externals),
-        ),
-        used_modules: set.new(),
-      )
+
+    let externals =
+      list.map(externals, fn(external) {
+        let typ = mono.sub_type([], external.typ.typ)
+        let external =
+          mono.External(
+            internal_name: external.internal_name,
+            external_name: external.external_name,
+            module: external.module,
+            mono: external.mono,
+            typ: typ,
+          )
+        external
+      })
+    let module = mono.init_context(c)
+    let module = mono.Context(..module, externals:)
+
     let header =
       list.fold(externals, module, fn(c, external) {
-        let external = external.1
-        mono.instantiate_type(c, external.typ.typ)
+        mono.instantiate_type(c, external.typ)
       })
       |> closure.cc_module
       |> codegen.module_header

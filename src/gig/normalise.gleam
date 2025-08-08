@@ -1,5 +1,6 @@
 import gig/closure
-import gig/core.{type LiteralKind, type Type}
+import gig/core.{type LiteralKind}
+import gig/mono.{type Type}
 import gleam/int
 import gleam/list
 

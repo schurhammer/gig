@@ -76,23 +76,26 @@ pub type Function {
 }
 
 pub type External {
-  External(typ: Poly, src: String, module: String, id: String, mono: Bool)
+  External(
+    typ: Poly,
+    internal_name: String,
+    external_name: String,
+    module: String,
+    mono: Bool,
+  )
 }
 
 pub type Context {
   Context(
-    types: Dict(String, CustomType),
-    functions: Dict(String, Function),
-    externals: Dict(String, External),
+    types: List(CustomType),
+    functions: List(Function),
+    externals: List(External),
   )
 }
 
 pub fn lower_context(c: t.Context) {
-  let acc =
-    Context(types: dict.new(), functions: dict.new(), externals: dict.new())
-  dict.fold(c.modules, acc, fn(acc, name, module) {
-    lower_module(c, acc, module)
-  })
+  let acc = Context(types: [], functions: [], externals: [])
+  dict.fold(c.modules, acc, fn(acc, _, module) { lower_module(c, acc, module) })
 }
 
 fn lower_module(c: t.Context, acc: Context, module: t.Module) {
@@ -106,18 +109,18 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
   let acc =
     list.fold(module.custom_types, acc, fn(acc, custom) {
       case custom.definition.variants {
-        // no variants is considered external
+        // no variants is considered external so we don't register it
         [] -> acc
         _ -> {
           let custom = lower_custom_type(c, custom.definition)
-          Context(..acc, types: dict.insert(acc.types, custom.id, custom))
+          Context(..acc, types: [custom, ..acc.types])
         }
       }
     })
 
   // create type related builtin functions
   let acc =
-    list.fold(dict.values(acc.types), acc, fn(acc, custom) {
+    list.fold(acc.types, acc, fn(acc, custom) {
       list.fold(custom.variants, acc, fn(acc, variant) {
         register_variant_functions(acc, module.name, custom.typ, variant)
       })
@@ -140,26 +143,23 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
             _,
             [
               t.LocalVariable(_, "c"),
-              t.String(_, src),
-              t.String(_, external_id),
+              t.String(_, _src),
+              t.String(_, external_name),
             ],
           ) = external
           let typ = map_poly(c, fun.definition.typ)
           let module = c.current_module
           let name = fun.definition.name
-          let internal_id = get_id(module, name)
+          let internal_name = get_id(module, name)
           let mono = list.any(attrs, fn(x) { x.name == "monomorphise" })
           // TODO actual src file?
-          let src = module
-          let fun = External(typ, src, module, external_id, mono)
-          Context(
-            ..acc,
-            externals: dict.insert(acc.externals, internal_id, fun),
-          )
+          let fun =
+            External(typ:, internal_name:, external_name:, module:, mono:)
+          Context(..acc, externals: [fun, ..acc.externals])
         }
         Error(_) -> {
           let fun = lower_function(c, fun)
-          Context(..acc, functions: dict.insert(acc.functions, fun.id, fun))
+          Context(..acc, functions: [fun, ..acc.functions])
         }
       }
     })
@@ -222,12 +222,12 @@ pub fn register_variant_functions(
   let fun =
     External(
       typ: variant.typ,
-      src: "",
+      internal_name: variant.id,
+      external_name: "new_" <> variant.id,
       module: module_name,
-      id: "new_" <> variant.id,
       mono: True,
     )
-  Context(..c, externals: dict.insert(c.externals, variant.id, fun))
+  Context(..c, externals: [fun, ..c.externals])
 }
 
 fn lower_body(c: t.Context, body: List(t.Statement)) {
@@ -1351,7 +1351,7 @@ fn register_tuple(c: Context, size: Int) {
   let variant = Variant(constructor_typ, id, "#", element_fields)
   let custom = CustomType(custom_typ, id, "#", [variant])
 
-  let c = Context(..c, types: dict.insert(c.types, custom.id, custom))
+  let c = Context(..c, types: [custom, ..c.types])
   register_variant_functions(c, t.builtin, custom.typ, variant)
 }
 

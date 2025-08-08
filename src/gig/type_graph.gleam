@@ -1,12 +1,10 @@
+import gig/closure.{type CustomType, type Field, type Module, type Variant}
 import gig/graph
 import gig/mono.{type_name}
 import gleam/list
 
 type Graph =
   graph.Graph(String)
-
-import gig/closure.{type CustomType, type Field, type Module, type Variant}
-import gig/core
 
 pub fn create(module: Module) {
   let g =
@@ -29,17 +27,16 @@ fn walk_field(g: Graph, t: CustomType, f: Field) -> Graph {
   walk_type(g, t, f.typ)
 }
 
-fn walk_type(g: Graph, t: CustomType, f: core.Type) -> Graph {
+fn walk_type(g: Graph, t: CustomType, f: mono.Type) -> Graph {
   case f {
-    core.NamedType(_, args) -> {
+    mono.NamedType(_, args) -> {
       let name = type_name(f)
       let g = graph.insert_edge(g, t.name, name)
       list.fold(args, g, fn(g, arg) { walk_type(g, t, arg) })
     }
-    core.FunctionType(args, ret) -> {
+    mono.FunctionType(args, ret) -> {
       let g = walk_type(g, t, ret)
       list.fold(args, g, fn(g, arg) { walk_type(g, t, arg) })
     }
-    core.Unbound(..) -> panic
   }
 }
