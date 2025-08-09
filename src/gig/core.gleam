@@ -821,9 +821,9 @@ fn lower_pattern_match(
       let match = t.BinaryOperator(t.bool_type, g.Eq, subject, value)
       lower_expression(c, match)
     }
-    t.PatternDiscard(typ, name) -> true_value
-    t.PatternVariable(typ, name) -> true_value
-    t.PatternTuple(typ, elems) -> {
+    t.PatternDiscard(_typ, _name) -> true_value
+    t.PatternVariable(_typ, _name) -> true_value
+    t.PatternTuple(_typ, elems) -> {
       // TODO check if the order of boolean expression is correct i.e. left to right
       // maybe we need to reverse, swap params, fold_right etc
       list.index_fold(elems, true_value, fn(match, elem, i) {
@@ -847,10 +847,10 @@ fn lower_pattern_match(
         })
       lower_pattern_match(c, list, subject)
     }
-    t.PatternAssignment(typ, pattern, name) -> {
+    t.PatternAssignment(_typ, pattern, _name) -> {
       lower_pattern_match(c, pattern, subject)
     }
-    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
+    t.PatternConcatenate(_typ, prefix, _prefix_name, _suffix_name) -> {
       let prefix_str = t.String(t.string_type, prefix)
       let match =
         t.Function(
@@ -862,7 +862,7 @@ fn lower_pattern_match(
       let starts_with_call = t.Call(t.bool_type, match, [subject, prefix_str])
       lower_expression(c, starts_with_call)
     }
-    t.PatternBitString(typ, segs) -> {
+    t.PatternBitString(_typ, segs) -> {
       let #(total_size, match_to_end, data_match) =
         list.fold(
           segs,
@@ -917,10 +917,10 @@ fn lower_pattern_match(
       and_exp(length_match, data_match)
     }
     t.PatternConstructor(
-      typ,
+      _typ,
       module,
       constructor,
-      arguments,
+      _arguments,
       ordered_arguments,
       _,
       _,
@@ -950,10 +950,21 @@ fn lower_pattern_match(
               let elem_match = lower_pattern_match(c, elem.item, subject)
               and_exp(elem_match, match)
             })
-          // TODO special case for single variant no need to check ?
+
           let subject = lower_expression(c, subject)
-          let variant_match =
-            Op(bool_type, VariantCheck(get_id(module, constructor)), [subject])
+          let assert NamedType(custom, _) = subject.typ
+          let assert Ok(mod) = dict.get(c.modules, module)
+          let assert Ok(t.Definition(_, custom)) =
+            list.find(mod.custom_types, fn(c) {
+              get_id(module, c.definition.name) == custom
+            })
+          let variant = get_id(module, constructor)
+
+          let variant_match = case custom.variants {
+            [_] -> true_value
+            _ -> Op(bool_type, VariantCheck(variant), [subject])
+          }
+
           and_exp(variant_match, match)
         }
       }
@@ -967,7 +978,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.Float(typ, value) -> Literal(map_type(c, typ), Float(value))
     t.String(typ, value) -> Literal(map_type(c, typ), String(value))
     t.LocalVariable(typ, name) -> Local(map_type(c, typ), name)
-    t.Function(typ, module, name, labels) -> {
+    t.Function(typ, module, name, _labels) -> {
       let typ = map_type(c, typ)
 
       case module, name {
@@ -1020,7 +1031,6 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Op(typ, Panic, [value])
     }
     t.Tuple(typ, elements) -> {
-      // TODO register tuple constructor and such if it doesnt exist
       let typ = map_type(c, typ)
       let elements = list.map(elements, lower_expression(c, _))
       let element_types = list.map(elements, fn(e) { e.typ })
@@ -1043,13 +1053,13 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         Call(list_typ, cons, args)
       })
     }
-    t.Fn(typ, parameters, return, body) -> {
+    t.Fn(typ, parameters, _return, body) -> {
       let typ = map_type(c, typ)
       let parameters = list.map(parameters, lower_parameter(c, _))
       let body = lower_body(c, body)
       Fn(typ, parameters, body)
     }
-    t.RecordUpdate(typ, _, module, constructor, record, fields, ordered_fields) -> {
+    t.RecordUpdate(typ, _, module, constructor, record, _fields, ordered_fields) -> {
       // bind record to subject
       // for each field in variant either take the new field or default to field access on subject
       // and call the constructor with that
@@ -1077,7 +1087,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let body = Call(typ, Global(constructor_typ, constructor), fields)
       Let(body.typ, subject_name, record, body)
     }
-    t.FieldAccess(typ, container, module, variant, label, index) -> {
+    t.FieldAccess(typ, container, module, variant, _label, index) -> {
       let typ = map_type(c, typ)
       let container = lower_expression(c, container)
       let assert NamedType(custom, _) = container.typ
@@ -1106,7 +1116,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let tuple = lower_expression(c, tuple)
       Op(typ, FieldAccess("#", gen_names.get_field_name("", index)), [tuple])
     }
-    t.FnCapture(typ, label, function, arguments_before, arguments_after) -> todo
+    t.FnCapture(..) -> todo
     t.BitString(typ, segs) -> {
       let typ = map_type(c, typ)
 
@@ -1265,12 +1275,12 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         Let(acc.typ, name, value, acc)
       })
     }
-    t.BinaryOperator(typ, g.And, left, right) -> {
+    t.BinaryOperator(_typ, g.And, left, right) -> {
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
       and_exp(left, right)
     }
-    t.BinaryOperator(typ, g.Or, left, right) -> {
+    t.BinaryOperator(_typ, g.Or, left, right) -> {
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
       or_exp(left, right)
