@@ -17,10 +17,17 @@ pub fn module_headers(c: core.Context) {
     let externals =
       list.map(externals, fn(external) {
         let typ = mono.sub_type([], external.typ.typ)
+
+        let params =
+          list.map(external.parameters, fn(param) {
+            mono.Field(param.name, mono.sub_type([], param.typ))
+          })
+
         let external =
           mono.External(
             internal_name: external.internal_name,
             external_name: external.external_name,
+            parameters: params,
             module: external.module,
             mono: external.mono,
             typ: typ,

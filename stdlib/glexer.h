@@ -4,4 +4,4 @@
 
 #include "builtin.h"
 
-String slice_string(String a0, Int a1, Int a2);
+String slice_string(String string, Int byte, Int bytes);

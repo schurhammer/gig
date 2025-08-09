@@ -13,7 +13,7 @@ pub type Term {
   Value(typ: Type, value: Value)
   Call(typ: Type, fun: Value, arg: List(Value))
   CallClosure(typ: Type, fun: Value, arg: List(Value))
-  Op(typ: Type, op: core.Op, arg: List(Value))
+  Op(typ: Type, op: mono.Op, arg: List(Value))
   Let(typ: Type, var: String, val: Term, exp: Term)
   If(typ: Type, cond: Value, then_exp: Term, else_exp: Term)
 }

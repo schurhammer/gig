@@ -1,6 +1,6 @@
 import gig/gen_names.{get_id}
 import gig/typed_ast as t
-import gleam/dict.{type Dict}
+import gleam/dict
 import gleam/io
 import gleam/result
 import gleam/string
@@ -39,7 +39,7 @@ pub type LiteralKind {
 }
 
 pub type Op {
-  FieldAccess(variant: String, index: Int)
+  FieldAccess(variant: String, field: String)
   VariantCheck(variant: String)
   Panic
 }
@@ -78,9 +78,10 @@ pub type Function {
 pub type External {
   External(
     typ: Poly,
+    module: String,
     internal_name: String,
     external_name: String,
-    module: String,
+    parameters: List(Parameter),
     mono: Bool,
   )
 }
@@ -122,7 +123,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
   let acc =
     list.fold(acc.types, acc, fn(acc, custom) {
       list.fold(custom.variants, acc, fn(acc, variant) {
-        register_variant_functions(acc, module.name, custom.typ, variant)
+        register_variant_functions(acc, module.name, variant)
       })
     })
 
@@ -147,14 +148,22 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
               t.String(_, external_name),
             ],
           ) = external
-          let typ = map_poly(c, fun.definition.typ)
+          let fun = fun.definition
+          let typ = map_poly(c, fun.typ)
           let module = c.current_module
-          let name = fun.definition.name
+          let name = fun.name
           let internal_name = get_id(module, name)
           let mono = list.any(attrs, fn(x) { x.name == "monomorphise" })
-          // TODO actual src file?
+          let parameters = list.map(fun.parameters, lower_parameter(c, _))
           let fun =
-            External(typ:, internal_name:, external_name:, module:, mono:)
+            External(
+              typ:,
+              parameters:,
+              internal_name:,
+              external_name:,
+              module:,
+              mono:,
+            )
           Context(..acc, externals: [fun, ..acc.externals])
         }
         Error(_) -> {
@@ -215,15 +224,17 @@ fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
 pub fn register_variant_functions(
   c: Context,
   module_name: String,
-  custom_typ: Poly,
   variant: Variant,
 ) {
   // constructor function
+  let params =
+    list.map(variant.fields, fn(field) { Parameter(field.typ, field.name) })
   let fun =
     External(
       typ: variant.typ,
       internal_name: variant.id,
       external_name: "new_" <> variant.id,
+      parameters: params,
       module: module_name,
       mono: True,
     )
@@ -648,9 +659,8 @@ fn lower_pattern_bindings(
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
-          let a = [t.Field(None, x), t.Field(None, rest)]
-          let o = [x, rest]
-          t.PatternConstructor(typ, t.builtin, "Cons", a, o, True, False)
+          let a = [t.Field(Some("item"), x), t.Field(Some("next"), rest)]
+          t.PatternConstructor(typ, t.builtin, "Cons", a, a, True, False)
         })
       lower_pattern_bindings(c, list, subject)
     }
@@ -713,10 +723,18 @@ fn lower_pattern_bindings(
       _,
     ) -> {
       let elems = ordered_arguments
-      list.index_map(elems, fn(elem, i) {
+      list.index_map(elems, fn(elem, index) {
+        let label = option.unwrap(elem.label, "")
         let subject =
-          t.FieldAccess(elem.typ, subject, module, constructor, "", i)
-        lower_pattern_bindings(c, elem, subject)
+          t.FieldAccess(
+            elem.item.typ,
+            subject,
+            module,
+            constructor,
+            label,
+            index,
+          )
+        lower_pattern_bindings(c, elem.item, subject)
       })
       |> list.flatten
     }
@@ -824,9 +842,8 @@ fn lower_pattern_match(
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
-          let a = [t.Field(None, x), t.Field(None, rest)]
-          let o = [x, rest]
-          t.PatternConstructor(typ, t.builtin, "Cons", a, o, True, False)
+          let a = [t.Field(Some("item"), x), t.Field(Some("next"), rest)]
+          t.PatternConstructor(typ, t.builtin, "Cons", a, a, True, False)
         })
       lower_pattern_match(c, list, subject)
     }
@@ -919,16 +936,24 @@ fn lower_pattern_match(
         _, _ -> {
           let elems = ordered_arguments
           let match =
-            list.index_fold(elems, true_value, fn(match, elem, i) {
+            list.index_fold(elems, true_value, fn(match, elem, index) {
+              let label = option.unwrap(elem.label, "")
               let subject =
-                t.FieldAccess(elem.typ, subject, module, constructor, "", i)
-              let elem_match = lower_pattern_match(c, elem, subject)
+                t.FieldAccess(
+                  elem.item.typ,
+                  subject,
+                  module,
+                  constructor,
+                  label,
+                  index,
+                )
+              let elem_match = lower_pattern_match(c, elem.item, subject)
               and_exp(elem_match, match)
             })
           // TODO special case for single variant no need to check ?
           let subject = lower_expression(c, subject)
           let variant_match =
-            Op(bool_type, VariantCheck(constructor), [subject])
+            Op(bool_type, VariantCheck(get_id(module, constructor)), [subject])
           and_exp(variant_match, match)
         }
       }
@@ -1028,22 +1053,23 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       // bind record to subject
       // for each field in variant either take the new field or default to field access on subject
       // and call the constructor with that
-      let typ = map_type(c, typ)
       let subject_name = case record {
         t.LocalVariable(_, name) -> name
         _ -> "S"
       }
-      let subject = Local(typ, subject_name)
+      let subject = t.LocalVariable(typ, subject_name)
       let fields =
         list.index_map(ordered_fields, fn(f, i) {
           case f {
-            Ok(field) -> lower_expression(c, field)
+            Ok(field) -> lower_expression(c, field.item)
             Error(field_type) -> {
-              let field_type = map_type(c, field_type)
-              Op(field_type, FieldAccess(constructor, i), [subject])
+              let access =
+                t.FieldAccess(field_type, subject, module, constructor, "", i)
+              lower_expression(c, access)
             }
           }
         })
+      let typ = map_type(c, typ)
       let record = lower_expression(c, record)
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
@@ -1051,10 +1077,23 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let body = Call(typ, Global(constructor_typ, constructor), fields)
       Let(body.typ, subject_name, record, body)
     }
-    t.FieldAccess(typ, container, module, variant, label, i) -> {
+    t.FieldAccess(typ, container, module, variant, label, index) -> {
       let typ = map_type(c, typ)
       let container = lower_expression(c, container)
-      Op(typ, FieldAccess(variant, i), [container])
+      let assert NamedType(custom, _) = container.typ
+      let assert Ok(module) = dict.get(c.modules, module)
+      let assert Ok(t.Definition(_, custom)) =
+        list.find(module.custom_types, fn(c) {
+          get_id(module.name, c.definition.name) == custom
+        })
+      let assert Ok(variant) =
+        list.find(custom.variants, fn(v) { v.name == variant })
+      let assert [field, ..] = list.drop(variant.fields, index)
+      let field = option.unwrap(field.label, "")
+      let field = gen_names.get_field_name(field, index)
+      Op(typ, FieldAccess(variant.name, field), [
+        container,
+      ])
     }
     t.Call(typ, function, args) -> {
       let typ = map_type(c, typ)
@@ -1065,7 +1104,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.TupleIndex(typ, tuple, index) -> {
       let typ = map_type(c, typ)
       let tuple = lower_expression(c, tuple)
-      Op(typ, FieldAccess("#", index), [tuple])
+      Op(typ, FieldAccess("#", gen_names.get_field_name("", index)), [tuple])
     }
     t.FnCapture(typ, label, function, arguments_before, arguments_after) -> todo
     t.BitString(typ, segs) -> {
@@ -1352,7 +1391,7 @@ fn register_tuple(c: Context, size: Int) {
   let custom = CustomType(custom_typ, id, "#", [variant])
 
   let c = Context(..c, types: [custom, ..c.types])
-  register_variant_functions(c, t.builtin, custom.typ, variant)
+  register_variant_functions(c, t.builtin, variant)
 }
 
 fn map_type(c: t.Context, typ: t.Type) {
@@ -1456,159 +1495,5 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       let #(taken, i, else_exp) = unshadow(taken, i, else_exp)
       #(taken, i, If(typ, cond, then_exp, else_exp))
     }
-  }
-}
-
-/// Convert a Type to a string representation
-pub fn type_to_string(typ: Type) -> String {
-  case typ {
-    NamedType(id, []) -> id
-    NamedType(id, parameters) ->
-      id
-      <> "("
-      <> string.join(list.map(parameters, type_to_string), ", ")
-      <> ")"
-    FunctionType([], return) -> "fn() -> " <> type_to_string(return)
-    FunctionType(parameters, return) ->
-      "fn("
-      <> string.join(list.map(parameters, type_to_string), ", ")
-      <> ") -> "
-      <> type_to_string(return)
-    Unbound(id) -> "?" <> int.to_string(id)
-  }
-}
-
-/// Convert a LiteralKind to a string representation
-pub fn literal_to_string(literal: LiteralKind) -> String {
-  case literal {
-    NilVal -> "Nil"
-    Bool(value) -> value
-    Int(value) -> value
-    Float(value) -> value
-    String(value) -> "\"" <> value <> "\""
-    BitArray(size) -> "<<" <> size <> ">>"
-  }
-}
-
-/// Convert a Poly to a string representation
-pub fn poly_to_string(poly: Poly) -> String {
-  case poly {
-    Poly([], typ) -> type_to_string(typ)
-    Poly(vars, typ) -> {
-      let var_strings = list.map(vars, fn(var) { "?" <> int.to_string(var) })
-      "forall " <> string.join(var_strings, " ") <> ". " <> type_to_string(typ)
-    }
-  }
-}
-
-/// Convert a Parameter to a string representation
-pub fn parameter_to_string(param: Parameter) -> String {
-  param.name <> ": " <> type_to_string(param.typ)
-}
-
-/// Convert a Function to a string representation
-pub fn function_to_string(func: Function) -> String {
-  let Function(typ, id, parameters, body) = func
-  let param_strings = list.map(parameters, parameter_to_string)
-  "fn "
-  <> id
-  <> "("
-  <> string.join(param_strings, ", ")
-  <> ") : "
-  <> poly_to_string(typ)
-  <> " {\n"
-  <> "  "
-  <> exp_to_string_with_indent(body, 1)
-  <> "\n"
-  <> "}"
-}
-
-/// Convert an Exp to a string representation that looks like source code
-/// and includes type information
-pub fn exp_to_string(exp: Exp) -> String {
-  exp_to_string_with_indent(exp, 0)
-}
-
-/// Helper function for exp_to_string with indentation support
-fn exp_to_string_with_indent(exp: Exp, indent: Int) -> String {
-  let indent_str = string.repeat("  ", indent)
-  let next_indent = indent + 1
-  let next_indent_str = string.repeat("  ", next_indent)
-
-  case exp {
-    Literal(typ, value) ->
-      literal_to_string(value) <> " : " <> type_to_string(typ)
-
-    Local(typ, name) -> name <> " : " <> type_to_string(typ)
-
-    Global(typ, id) -> id <> " : " <> type_to_string(typ)
-
-    Fn(typ, parameters, body) -> {
-      let param_strings =
-        list.map(parameters, fn(param) {
-          param.name <> ": " <> type_to_string(param.typ)
-        })
-      "fn("
-      <> string.join(param_strings, ", ")
-      <> ") : "
-      <> type_to_string(typ)
-      <> " {\n"
-      <> next_indent_str
-      <> exp_to_string_with_indent(body, next_indent)
-      <> "\n"
-      <> indent_str
-      <> "}"
-    }
-
-    Call(typ, function, arguments) -> {
-      let arg_strings =
-        list.map(arguments, fn(arg) { exp_to_string_with_indent(arg, indent) })
-      exp_to_string_with_indent(function, indent)
-      <> "("
-      <> string.join(arg_strings, ", ")
-      <> ") : "
-      <> type_to_string(typ)
-    }
-
-    Op(typ, op, arguments) -> {
-      let arg_strings =
-        list.map(arguments, fn(arg) { exp_to_string_with_indent(arg, indent) })
-      case op {
-        FieldAccess(_, field) -> "$get_" <> int.to_string(field)
-        VariantCheck(variant) -> "$check_" <> variant
-        Panic -> "$panic"
-      }
-      <> "("
-      <> string.join(arg_strings, ", ")
-      <> ") : "
-      <> type_to_string(typ)
-    }
-
-    Let(typ, name, value, body) ->
-      "let "
-      <> name
-      <> " = "
-      <> exp_to_string_with_indent(value, indent)
-      <> " in\n"
-      <> indent_str
-      <> exp_to_string_with_indent(body, indent)
-      <> " : "
-      <> type_to_string(typ)
-
-    If(typ, condition, then_exp, else_exp) ->
-      "if "
-      <> exp_to_string_with_indent(condition, indent)
-      <> " then\n"
-      <> next_indent_str
-      <> exp_to_string_with_indent(then_exp, next_indent)
-      <> "\n"
-      <> indent_str
-      <> "else\n"
-      <> next_indent_str
-      <> exp_to_string_with_indent(else_exp, next_indent)
-      <> "\n"
-      <> indent_str
-      <> ": "
-      <> type_to_string(typ)
   }
 }

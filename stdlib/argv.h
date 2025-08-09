@@ -10,7 +10,7 @@ enum {Empty_String_TAG, Cons_String_TAG} tag;
 union {
 struct Empty_String *Empty;
 struct Cons_String *Cons;
-} ptr; } List_String;
+} val; } List_String;
 
 Bool eq_Tuple3_String_String_List_String(Tuple3_String_String_List_String a, Tuple3_String_String_List_String b);
 Bool lt_Tuple3_String_String_List_String(Tuple3_String_String_List_String a, Tuple3_String_String_List_String b);

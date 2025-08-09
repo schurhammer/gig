@@ -4,6 +4,6 @@
 
 #include "builtin.h"
 
-String gleam_io_do_get_line(Int a0);
-Nil gleam_io_do_print(String a0);
-Nil gleam_io_do_print_error(String a0);
+String gleam_io_do_get_line(Int length);
+Nil gleam_io_do_print(String s);
+Nil gleam_io_do_print_error(String s);

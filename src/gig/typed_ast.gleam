@@ -120,7 +120,7 @@ pub type Pattern {
     module: String,
     constructor: String,
     arguments: List(Field(Pattern)),
-    ordered_arguments: List(Pattern),
+    ordered_arguments: List(Field(Pattern)),
     with_module: Bool,
     with_spread: Bool,
   )
@@ -158,7 +158,7 @@ pub type Expression {
     constructor: String,
     record: Expression,
     fields: List(#(String, Expression)),
-    ordered_fields: List(Result(Expression, Type)),
+    ordered_fields: List(Result(Field(Expression), Type)),
   )
   FieldAccess(
     typ: Type,
@@ -1361,7 +1361,7 @@ fn infer_pattern(
                 Some(opt) -> #(c, opt)
                 None -> {
                   let #(c, typ) = new_type_var_ref(c)
-                  #(c, PatternDiscard(typ, ""))
+                  #(c, Field(None, PatternDiscard(typ, "")))
                 }
               }
               #(c, [opt, ..opts])
@@ -1373,7 +1373,7 @@ fn infer_pattern(
           #(c, args)
         }
       }
-      let arg_types = list.map(ordered_arguments, fn(x) { x.typ })
+      let arg_types = list.map(ordered_arguments, fn(x) { x.item.typ })
 
       // handle 0 parameter variants are not functions
       let #(c, typ) = case arg_types {
@@ -1523,7 +1523,10 @@ fn infer_body(
   }
 }
 
-fn match_labels(args: List(Field(a)), params: List(Option(String))) -> List(a) {
+fn match_labels(
+  args: List(Field(a)),
+  params: List(Option(String)),
+) -> List(Field(a)) {
   // find the labels in the order specified by parameters
   // either we find the matching label or default to the first unlabelled arg
   case params {
@@ -1534,10 +1537,10 @@ fn match_labels(args: List(Field(a)), params: List(Option(String))) -> List(a) {
       }
     [p, ..p_rest] ->
       case listx.pop(args, fn(a) { a.label == p }) {
-        Ok(#(a, a_rest)) -> [a.item, ..match_labels(a_rest, p_rest)]
+        Ok(#(a, a_rest)) -> [a, ..match_labels(a_rest, p_rest)]
         Error(_) ->
           case listx.pop(args, fn(a) { a.label == None }) {
-            Ok(#(a, a_rest)) -> [a.item, ..match_labels(a_rest, p_rest)]
+            Ok(#(a, a_rest)) -> [a, ..match_labels(a_rest, p_rest)]
             Error(_) -> panic as "no matching label"
           }
       }
@@ -1547,16 +1550,13 @@ fn match_labels(args: List(Field(a)), params: List(Option(String))) -> List(a) {
 fn match_labels_optional(
   args: List(Field(a)),
   params: List(Option(String)),
-) -> List(Option(a)) {
+) -> List(Option(Field(a))) {
   // find the labels in the order specified by parameters
   case params {
     [] -> []
     [p, ..p_rest] ->
       case listx.pop(args, fn(a) { a.label == p }) {
-        Ok(#(a, a_rest)) -> [
-          Some(a.item),
-          ..match_labels_optional(a_rest, p_rest)
-        ]
+        Ok(#(a, a_rest)) -> [Some(a), ..match_labels_optional(a_rest, p_rest)]
         Error(_) -> [None, ..match_labels_optional(args, p_rest)]
       }
   }
@@ -1734,7 +1734,7 @@ fn infer_expression(
           let #(given, expected) = x
           let #(c, result) = case given {
             Some(e) -> {
-              let c = unify(c, e.typ, expected)
+              let c = unify(c, e.item.typ, expected)
               #(c, Ok(e))
             }
             None -> #(c, Error(expected))
@@ -1864,10 +1864,10 @@ fn infer_expression(
           let #(c, args) = acc
 
           // give type hint when arg is a fn
-          let result = case arg {
+          let result = case arg.item {
             g.Fn(parameters, return, body) ->
               infer_fn(c, n, parameters, return, body, hint)
-            _ -> infer_expression(c, n, arg)
+            _ -> infer_expression(c, n, arg.item)
           }
           use #(c, arg) <- try(result)
 

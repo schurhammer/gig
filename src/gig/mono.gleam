@@ -28,19 +28,30 @@ pub type Type {
 pub type External {
   External(
     typ: Type,
+    module: String,
     internal_name: String,
     external_name: String,
-    module: String,
+    parameters: List(Field),
     mono: Bool,
   )
 }
 
 pub type CustomType {
-  CustomType(name: String, display_name: String, variants: List(Variant))
+  CustomType(
+    name: String,
+    untyped_name: String,
+    display_name: String,
+    variants: List(Variant),
+  )
 }
 
 pub type Variant {
-  Variant(name: String, display_name: String, fields: List(Field))
+  Variant(
+    name: String,
+    untyped_name: String,
+    display_name: String,
+    fields: List(Field),
+  )
 }
 
 pub type Field {
@@ -48,7 +59,19 @@ pub type Field {
 }
 
 pub type Function {
-  Function(name: String, parameters: List(Field), body: Exp, typ: Type)
+  Function(name: String, parameters: List(Field), return: Type, body: Exp)
+}
+
+pub type FieldAccessKind {
+  StructPointerAccess
+  StructAccess
+  TaggedUnionAccess
+}
+
+pub type Op {
+  FieldAccess(kind: FieldAccessKind, variant: String, field: String)
+  VariantCheck(variant: String)
+  Panic
 }
 
 pub type Exp {
@@ -56,7 +79,7 @@ pub type Exp {
   Local(typ: Type, var: String)
   Global(typ: Type, var: String)
   Call(typ: Type, fun: Exp, arg: List(Exp))
-  Op(typ: Type, op: t.Op, arg: List(Exp))
+  Op(typ: Type, op: Op, arg: List(Exp))
   // CallClosure(typ: Type, fun: Exp, arg: List(Exp))
   Fn(typ: Type, parameters: List(Field), body: Exp)
   Let(typ: Type, var: String, val: Exp, exp: Exp)
@@ -169,7 +192,6 @@ fn unify_type(c: Context, poly: t.Type, mono: Type) -> List(#(Int, Type)) {
 
 pub fn type_name(typ: Type) -> String {
   case typ {
-    NamedType(name, []) -> name
     NamedType(name, args) ->
       string.join([name, ..list.map(args, type_name)], "_")
     FunctionType(..) -> "Closure"
@@ -177,6 +199,9 @@ pub fn type_name(typ: Type) -> String {
 }
 
 fn get_type_string(sub: List(#(Int, Type))) {
+  // TODO only include typed that are actually used
+  // e.g. variant that only uses part of the params
+  // e.g. phantom type
   list.map(sub, fn(s) { "_" <> type_name(s.1) })
   |> string.concat()
 }
@@ -201,11 +226,12 @@ pub fn instantiate_type(c: Context, mono: Type) {
                     list.map(v.fields, fn(field) {
                       Field(field.name, sub_type(sub, field.typ))
                     })
-                  Variant(mono_name, v.display_name, fields)
+                  Variant(mono_name, v.id, v.display_name, fields)
                 })
 
               // create new custom type
-              let custom = CustomType(mono_name, custom.display_name, variants)
+              let custom =
+                CustomType(mono_name, custom.id, custom.display_name, variants)
 
               // add to module
               let types = [custom, ..c.types]
@@ -242,7 +268,6 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
       case fun.body {
         t.Op(_, t.Panic, _) -> {
           io.println("instantiating unimplemented function " <> fun.id)
-          io.println(t.function_to_string(fun))
         }
         _ -> Nil
       }
@@ -260,11 +285,12 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
               let typ = sub_type(sub, p.typ)
               Field(p.name, typ)
             })
+          let assert FunctionType(_, ret) = mono
           let fun =
             Function(
-              typ: mono,
               name: mono_name,
               parameters: params,
+              return: ret,
               body: mono_body,
             )
 
@@ -289,12 +315,18 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
                   let typ = sub_type([], external.typ.typ)
                   let c = instantiate_type(c, typ)
 
+                  let params =
+                    list.map(external.parameters, fn(param) {
+                      Field(param.name, sub_type([], param.typ))
+                    })
+
                   // add the external to output
                   let external =
                     External(
                       internal_name: external.internal_name,
                       external_name: external.external_name,
                       module: external.module,
+                      parameters: params,
                       mono: external.mono,
                       typ: typ,
                     )
@@ -355,6 +387,20 @@ fn typed_to_mono_exp(
         })
       let args = list.reverse(args)
       let typ = sub_type(sub, typ)
+      let op = case op {
+        t.FieldAccess(variant:, field:) -> {
+          let assert [arg, ..] = args
+          let assert NamedType(name, _) = arg.typ
+          let assert Ok(custom) = dict.get(c.in_types, name)
+          let kind = case custom.variants {
+            [_] -> StructAccess
+            _ -> TaggedUnionAccess
+          }
+          FieldAccess(kind:, variant:, field:)
+        }
+        t.VariantCheck(variant:) -> VariantCheck(variant:)
+        t.Panic -> Panic
+      }
       #(c, Op(typ, op, args))
     }
     t.Fn(typ, params, exp) -> {

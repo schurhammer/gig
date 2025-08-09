@@ -131,24 +131,25 @@ fn pointer(t: CustomType) {
           "struct " <> v.name <> " *" <> v.display_name <> ";\n"
         })
         |> string.concat()
-      "struct {\nenum {" <> tags <> "} tag;\nunion {\n" <> ptrs <> "} ptr; }"
+      "struct {\nenum {" <> tags <> "} tag;\nunion {\n" <> ptrs <> "} val; }"
     }
   }
 }
 
 /// Generate field access code
 fn generate_field_access(
-  custom: CustomType,
-  variant_name: String,
-  field_name: String,
+  kind: mono.FieldAccessKind,
+  variant: String,
+  field: String,
   base_expr: String,
 ) -> String {
-  let field = escape_if_keyword(field_name)
-  case custom.pointer, custom.variants {
-    True, [_] -> base_expr <> "->" <> field
-    True, _ -> base_expr <> ".ptr." <> variant_name <> "->" <> field
-    False, _ -> base_expr <> "." <> field
+  let field = escape_if_keyword(field)
+  let accessor = case kind {
+    mono.StructPointerAccess -> "->"
+    mono.StructAccess -> "."
+    mono.TaggedUnionAccess -> ".val." <> variant <> "->"
   }
+  base_expr <> accessor <> field
 }
 
 /// Generate variant check code
@@ -243,28 +244,21 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
     }
     Op(_, op, args) -> {
       case op, args {
-        core.FieldAccess(v, i), [arg] -> {
-          // get details from the type definition
-          let name = type_name(arg.typ)
-          let assert Ok(custom) = dict.get(c.types, name)
-          let assert Ok(variant) =
-            list.find(custom.variants, fn(x) { x.display_name == v })
-          let assert [f, ..] = list.drop(variant.fields, i)
-
-          generate_field_access(custom, v, f.name, gen_value(arg, ""))
+        mono.FieldAccess(kind, v, f), [arg] -> {
+          generate_field_access(kind, v, f, gen_value(arg, ""))
           |> hit_target(target, _)
         }
-        core.VariantCheck(v), [arg] -> {
+        mono.VariantCheck(v), [arg] -> {
           // get details from the type definition
           let name = type_name(arg.typ)
           let assert Ok(custom) = dict.get(c.types, name)
           let assert Ok(variant) =
-            list.find(custom.variants, fn(x) { x.display_name == v })
+            list.find(custom.variants, fn(x) { x.untyped_name == v })
 
           generate_variant_check(custom, variant.name, gen_value(arg, ""))
           |> hit_target(target, _)
         }
-        core.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "") <> ");\n"
+        mono.Panic, [arg] -> "panic_exit(" <> gen_value(arg, "") <> ");\n"
         _, _ -> {
           panic as "invalid operation"
         }
@@ -285,37 +279,28 @@ fn gen_term(c: Context, arg: Term, target: String) -> String {
 /// Generate function signature (common between function and function_forward)
 fn generate_function_signature(
   name: String,
-  params: List(String),
-  param_types: List(mono.Type),
-  return_type: mono.Type,
+  params: List(closure.Field),
+  return: mono.Type,
 ) -> String {
   let param_list =
-    list.zip(params, param_types)
-    |> list.map(fn(p) {
-      let #(param_name, typ) = p
-      type_name(typ) <> " " <> escape_if_keyword(param_name)
+    list.map(params, fn(p) {
+      type_name(p.typ) <> " " <> escape_if_keyword(p.name)
     })
     |> string.join(", ")
 
-  type_name(return_type) <> " " <> name <> "(" <> param_list <> ")"
+  type_name(return) <> " " <> name <> "(" <> param_list <> ")"
 }
 
 fn function(c: Context, fun: Function) -> String {
-  let params = fun.params
   let body = normalise.normalise_exp(fun.body, 0)
-  let assert mono.FunctionType(param_types, ret) = fun.typ
-
-  generate_function_signature(fun.name, params, param_types, ret)
+  generate_function_signature(fun.name, fun.parameters, fun.return)
   <> " {\n"
   <> gen_term(c, body, "RETURN")
   <> "}"
 }
 
 pub fn function_forward(fun: Function) -> String {
-  let params = fun.params
-  let assert mono.FunctionType(param_types, ret) = fun.typ
-
-  generate_function_signature(fun.name, params, param_types, ret) <> ";"
+  generate_function_signature(fun.name, fun.parameters, fun.return) <> ";"
 }
 
 fn custom_type_def(t: CustomType) {
@@ -357,7 +342,7 @@ fn unwrap_pointer(ptr: String, v: closure.Variant) {
       <> ptr
       <> " = *"
       <> ptr
-      <> ".ptr."
+      <> ".val."
       <> v.display_name
       <> ";\n"
   }
@@ -622,7 +607,7 @@ fn generate_variant_definitions(t: CustomType) -> String {
         <> v.name
         <> " = {.tag="
         <> tag
-        <> ", .ptr=0};\n"
+        <> ", .val=0};\n"
       _ -> {
         let header = constructor_function_header(t, v)
         let body = case t.pointer {
@@ -641,7 +626,7 @@ fn generate_variant_definitions(t: CustomType) -> String {
                 <> t.name
                 <> "){.tag="
                 <> tag
-                <> ", .ptr."
+                <> ", .val."
                 <> v.display_name
                 <> "=_ptr});\n"
             }

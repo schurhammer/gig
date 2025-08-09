@@ -1,3 +1,4 @@
+import anf/closure_anf
 import gig/closure
 import gig/codegen
 import gig/core
@@ -170,9 +171,15 @@ int main(int argc, char **argv) {
     |> string.replace("$main", main_name <> "();")
     |> string.replace("$code", code)
 
+  // output the anf c file
+  let c_file = target_path <> module_id <> ".anf.c"
+  io.println("Generating ./" <> c_file)
+  let anf = closure_anf.closure_module_to_anf(cc)
+  let anf_out = closure_anf.compile_module(anf)
+  let _ = simplifile.write(c_file, anf_out)
+
   // output the c file
   let c_file = target_path <> module_id <> ".c"
-
   io.println("Generating ./" <> c_file)
   case simplifile.write(c_file, output) {
     Ok(_) -> Nil

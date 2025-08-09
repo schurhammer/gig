@@ -19,6 +19,7 @@ pub type Module {
 pub type CustomType {
   CustomType(
     name: String,
+    untyped_name: String,
     display_name: String,
     variants: List(Variant),
     pointer: Bool,
@@ -26,7 +27,12 @@ pub type CustomType {
 }
 
 pub type Variant {
-  Variant(name: String, display_name: String, fields: List(Field))
+  Variant(
+    name: String,
+    untyped_name: String,
+    display_name: String,
+    fields: List(Field),
+  )
 }
 
 pub type Field {
@@ -34,14 +40,14 @@ pub type Field {
 }
 
 pub type Function {
-  Function(name: String, params: List(String), body: Exp, typ: mono.Type)
+  Function(name: String, parameters: List(Field), return: mono.Type, body: Exp)
 }
 
 pub type Exp {
   Literal(typ: mono.Type, val: core.LiteralKind)
   Var(typ: mono.Type, var: String)
   Call(typ: mono.Type, fun: Exp, arg: List(Exp))
-  Op(typ: mono.Type, op: core.Op, arg: List(Exp))
+  Op(typ: mono.Type, op: mono.Op, arg: List(Exp))
   CallClosure(typ: mono.Type, fun: Exp, arg: List(Exp))
   Let(typ: mono.Type, var: String, val: Exp, exp: Exp)
   If(typ: mono.Type, cond: Exp, then_exp: Exp, else_exp: Exp)
@@ -54,8 +60,9 @@ pub fn cc_module(mod: mono.Context) {
     list.fold(mod.functions, c, fn(c, fun) {
       let #(c, e) = cc(c, fun.body)
 
-      let parameters = list.map(fun.parameters, fn(x) { x.name })
-      let function = Function(fun.name, parameters, e, fun.typ)
+      let parameters = list.map(fun.parameters, fn(x) { Field(x.name, x.typ) })
+
+      let function = Function(fun.name, parameters, fun.return, e)
 
       let mod = Module(..c.mod, functions: [function, ..c.mod.functions])
       CC(..c, mod: mod)
@@ -66,7 +73,7 @@ pub fn cc_module(mod: mono.Context) {
       let variants =
         list.map(custom.variants, fn(v) {
           let fields = list.map(v.fields, fn(f) { Field(f.name, f.typ) })
-          Variant(v.name, v.display_name, fields)
+          Variant(v.name, v.untyped_name, v.display_name, fields)
         })
       let pointer = case variants {
         [v] ->
@@ -79,6 +86,7 @@ pub fn cc_module(mod: mono.Context) {
       let custom =
         CustomType(
           name: custom.name,
+          untyped_name: custom.untyped_name,
           display_name: custom.display_name,
           variants: variants,
           pointer: pointer,
@@ -92,17 +100,17 @@ pub fn cc_module(mod: mono.Context) {
     mod.externals
     |> list.filter(fn(ext) { !ext.mono })
     |> list.map(fn(external) {
-      let assert mono.FunctionType(param_types, ret) = external.typ
+      let assert mono.FunctionType(_, ret) = external.typ
       let params =
-        list.index_map(param_types, fn(_, i) { "a" <> int.to_string(i) })
+        list.map(external.parameters, fn(param) { Field(param.name, param.typ) })
       let string_type = mono.NamedType("String", [])
       let todo_val = Literal(string_type, core.String(""))
-      let body = Op(ret, core.Panic, [todo_val])
+      let body = Op(ret, mono.Panic, [todo_val])
       Function(
         name: external.external_name,
-        params: params,
+        parameters: params,
+        return: ret,
         body: body,
-        typ: external.typ,
       )
     })
 
@@ -197,8 +205,7 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
       #(c, Op(typ, op, args))
     }
     mono.Fn(typ, vars, exp) -> {
-      // TODO recursive call before or after converting this?
-      let #(c, exp) = cc(c, exp)
+      let #(c, body) = cc(c, exp)
 
       let var_names = list.map(vars, fn(x) { x.name })
       let var_types = list.map(vars, fn(x) { x.typ })
@@ -209,50 +216,68 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
         [] -> {
           // create global function
           let id = int.to_string(c.uid)
-          let fun_name = "Closure_" <> id
-          let fun = Function(fun_name, var_names, exp, typ)
+          let name = "Closure_" <> id
+
+          let parameters =
+            list.zip(var_names, var_types)
+            |> list.map(fn(i) { Field(i.0, i.1) })
+
+          let return = body.typ
+
+          let fun = Function(name:, parameters:, return:, body:)
           let functions = [fun, ..c.mod.functions]
           let c = CC(Module(..c.mod, functions:), c.uid + 1)
 
           // make a closure reference to the function
           let val =
             Call(typ, Var(typ, "create_function"), [
-              Var(mono.NamedType("void*", []), fun_name),
+              Var(mono.NamedType("void*", []), name),
             ])
           #(c, val)
         }
         _ -> {
           // create global function
           let id = int.to_string(c.uid)
-          let fun_name = "Closure_" <> id
+          let name = "Closure_" <> id
           let env_type_name = "ClosureEnv_" <> id
           let env_type = mono.NamedType(env_type_name, [])
 
-          let fun_params = ["ENV", ..var_names]
+          let var_names = ["ENV", ..var_names]
+          let var_types = [env_type, ..var_types]
+          let parameters =
+            list.zip(var_names, var_types)
+            |> list.map(fn(i) { Field(i.0, i.1) })
+
+          let return = body.typ
 
           // add let bindings to unpack the closure
-          let fun_body =
+          let body =
             closure_fields
-            |> list.index_fold(exp, fn(exp, field, i) {
+            |> list.fold(body, fn(exp, field) {
               let #(name, typ) = field
 
               // function from env -> field
               let access =
-                Op(typ, core.FieldAccess(env_type_name, i), [
-                  Var(env_type, "ENV"),
-                ])
+                Op(
+                  typ,
+                  mono.FieldAccess(
+                    mono.StructPointerAccess,
+                    env_type_name,
+                    name,
+                  ),
+                  [
+                    Var(env_type, "ENV"),
+                  ],
+                )
 
               Let(exp.typ, name, access, exp)
             })
 
-          // add cloure function to module
-          let fun_type =
-            mono.FunctionType([env_type, ..var_types], fun_body.typ)
-          let fun = Function(fun_name, fun_params, fun_body, fun_type)
+          let fun = Function(name:, parameters:, return:, body:)
           let functions = [fun, ..c.mod.functions]
 
           // create the closure object
-          let fun_pointer = Var(mono.NamedType("void*", []), fun_name)
+          let fun_pointer = Var(mono.NamedType("void*", []), name)
 
           let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
           let new_env_fun_type = mono.FunctionType(env_arg_types, env_type)
@@ -272,9 +297,16 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
             ])
 
           let fields = list.map(closure_fields, fn(x) { Field(x.0, x.1) })
-          let variant = Variant(env_type_name, env_type_name, fields)
+          let variant =
+            Variant(env_type_name, env_type_name, env_type_name, fields)
           let typedef =
-            CustomType(env_type_name, env_type_name, [variant], True)
+            CustomType(
+              env_type_name,
+              env_type_name,
+              env_type_name,
+              [variant],
+              True,
+            )
 
           let types = [typedef, ..c.mod.types]
 

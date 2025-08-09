@@ -10,13 +10,13 @@ enum {Ok_Tuple2_String_String_Nil_TAG, Error_Tuple2_String_String_Nil_TAG} tag;
 union {
 struct Ok_Tuple2_String_String_Nil *Ok;
 struct Error_Tuple2_String_String_Nil *Error;
-} ptr; } Result_Tuple2_String_String_Nil;
+} val; } Result_Tuple2_String_String_Nil;
 typedef struct {
 enum {Empty_UtfCodepoint_TAG, Cons_UtfCodepoint_TAG} tag;
 union {
 struct Empty_UtfCodepoint *Empty;
 struct Cons_UtfCodepoint *Cons;
-} ptr; } List_UtfCodepoint;
+} val; } List_UtfCodepoint;
 
 Bool eq_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 Bool lt_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
@@ -33,15 +33,15 @@ String inspect_List_UtfCodepoint(List_UtfCodepoint a);
 extern const List_UtfCodepoint new_Empty_UtfCodepoint;
 List_UtfCodepoint new_Cons_UtfCodepoint(UtfCodepoint item, List_UtfCodepoint next);
 
-Bool starts_with_string(String a0, String a1);
-Bool ends_with_string(String a0, String a1);
-List_UtfCodepoint gleam_string_do_to_utf_codepoints(String a0);
-String gleam_string_from_utf_codepoints(List_UtfCodepoint a0);
-Int compare_string(String a0, String a1);
-UtfCodepoint gleam_string_unsafe_int_to_utf_codepoint(Int a0);
-String append_string(String a0, String a1);
-Result_Tuple2_String_String_Nil pop_grapheme_string(String a0);
-String slice_string(String a0, Int a1, Int a2);
+Bool starts_with_string(String string, String prefix);
+Bool ends_with_string(String string, String suffix);
+List_UtfCodepoint gleam_string_do_to_utf_codepoints(String string);
+String gleam_string_from_utf_codepoints(List_UtfCodepoint utf_codepoints);
+Int compare_string(String a, String b);
+UtfCodepoint gleam_string_unsafe_int_to_utf_codepoint(Int a);
+String append_string(String first, String second);
+Result_Tuple2_String_String_Nil pop_grapheme_string(String string);
+String slice_string(String string, Int idx, Int len);
 
 struct Tuple2_String_String{
 String field0;

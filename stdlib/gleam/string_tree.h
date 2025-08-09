@@ -4,5 +4,5 @@
 
 #include "builtin.h"
 
-Int length_string(String a0);
-String slice_string(String a0, Int a1, Int a2);
+Int length_string(String str);
+String slice_string(String str, Int offset, Int length);
