@@ -5,34 +5,39 @@
 #include "builtin.h"
 
 typedef struct Tuple3_String_String_List_String Tuple3_String_String_List_String;
-typedef struct {
-enum {Empty_String_TAG, Cons_String_TAG} tag;
-union {
-struct Empty_String *Empty;
-struct Cons_String *Cons;
-} val; } List_String;
+typedef struct T_List_String List_String;
+enum E_List {
+  E_Empty,
+  E_Cons
+};
+union U_List_String {
+  struct Empty_String *Empty;
+  struct Cons_String *Cons;
+};
+struct T_List_String {
+  enum E_List tag;
+  union U_List_String val;
+};
+struct Tuple3_String_String_List_String {
+  String field0;
+  String field1;
+  List_String field2;
+};
+struct Empty_String {
+};
+struct Cons_String {
+  String item;
+  List_String next;
+};
 
+
+Tuple3_String_String_List_String new_Tuple3_String_String_List_String(String field0, String field1, List_String field2);
 Bool eq_Tuple3_String_String_List_String(Tuple3_String_String_List_String a, Tuple3_String_String_List_String b);
 Bool lt_Tuple3_String_String_List_String(Tuple3_String_String_List_String a, Tuple3_String_String_List_String b);
-String inspect_Tuple3_String_String_List_String(Tuple3_String_String_List_String a);
-Tuple3_String_String_List_String new_Tuple3_String_String_List_String(String field0, String field1, List_String field2);
-Bool eq_List_String(List_String a, List_String b);
-Bool lt_List_String(List_String a, List_String b);
-String inspect_List_String(List_String a);
+String inspect_Tuple3_String_String_List_String(Tuple3_String_String_List_String value);
 extern const List_String new_Empty_String;
 List_String new_Cons_String(String item, List_String next);
-
+Bool eq_List_String(List_String a, List_String b);
+Bool lt_List_String(List_String a, List_String b);
+String inspect_List_String(List_String value);
 Tuple3_String_String_List_String argv_do();
-
-struct Tuple3_String_String_List_String{
-String field0;
-String field1;
-List_String field2;
-};
-
-struct Empty_String{
-};
-struct Cons_String{
-String item;
-List_String next;
-};

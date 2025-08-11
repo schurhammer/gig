@@ -4,19 +4,32 @@
 
 #include "builtin.h"
 
-typedef struct {
-enum {Ok_Float_Nil_TAG, Error_Float_Nil_TAG} tag;
-union {
-struct Ok_Float_Nil *Ok;
-struct Error_Float_Nil *Error;
-} val; } Result_Float_Nil;
+typedef struct T_Result_Float_Nil Result_Float_Nil;
+enum E_Result {
+  E_Ok,
+  E_Error
+};
+union U_Result_Float_Nil {
+  struct Ok_Float_Nil *Ok;
+  struct Error_Float_Nil *Error;
+};
+struct T_Result_Float_Nil {
+  enum E_Result tag;
+  union U_Result_Float_Nil val;
+};
+struct Ok_Float_Nil {
+  Float value;
+};
+struct Error_Float_Nil {
+  Nil value;
+};
 
-Bool eq_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
-Bool lt_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
-String inspect_Result_Float_Nil(Result_Float_Nil a);
+
 Result_Float_Nil new_Ok_Float_Nil(Float value);
 Result_Float_Nil new_Error_Float_Nil(Nil value);
-
+Bool eq_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
+Bool lt_Result_Float_Nil(Result_Float_Nil a, Result_Float_Nil b);
+String inspect_Result_Float_Nil(Result_Float_Nil value);
 Float gleam_float_random();
 String gleam_float_to_string(Float x);
 Float gleam_float_exponential(Float x);
@@ -28,10 +41,3 @@ Float gleam_float_power(Float a, Float b);
 Float gleam_float_ceiling(Float x);
 Float gleam_float_floor(Float x);
 Int gleam_float_truncate(Float x);
-
-struct Ok_Float_Nil{
-Float value;
-};
-struct Error_Float_Nil{
-Nil value;
-};

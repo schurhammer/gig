@@ -1,7 +1,6 @@
 import gig/gen_names.{get_id}
 import gig/typed_ast as t
 import gleam/dict
-import gleam/io
 import gleam/result
 import gleam/string
 import glexer
@@ -41,7 +40,6 @@ pub type LiteralKind {
 pub type Op {
   FieldAccess(variant: String, field: String)
   VariantCheck(variant: String)
-  Panic
 }
 
 pub type Exp {
@@ -55,6 +53,7 @@ pub type Exp {
   // to solve any shadowing issues (maybe in typed_ast?)
   Let(typ: Type, name: String, value: Exp, body: Exp)
   If(typ: Type, condition: Exp, then: Exp, els: Exp)
+  Panic(typ: Type, value: Exp)
 }
 
 pub type CustomType {
@@ -243,15 +242,7 @@ pub fn register_variant_functions(
 
 fn lower_body(c: t.Context, body: List(t.Statement)) {
   case body {
-    [] -> {
-      io.println(
-        "unimplemented function "
-        <> c.current_module
-        <> "."
-        <> c.current_definition,
-      )
-      lower_expression(c, t.Todo(t.nil_type, None))
-    }
+    [] -> lower_expression(c, t.Todo(t.nil_type, None))
     [statement] ->
       case statement {
         t.Expression(_, exp) -> lower_expression(c, exp)
@@ -317,7 +308,7 @@ fn check_assertions(
   body: Exp,
 ) -> Exp {
   let match = lower_pattern_match(c, pattern, subject)
-  let message = "Assertion failed in " <> current_location_string(c) <> "\n"
+  let message = "Assertion failed in " <> current_location(c) <> "\n"
   let inspect_typ = FunctionType([value.typ], string_type)
   let append_typ = FunctionType([string_type, string_type], string_type)
   let m =
@@ -325,7 +316,7 @@ fn check_assertions(
       Literal(string_type, String(message)),
       Call(string_type, Global(inspect_typ, "inspect"), [Local(value.typ, "S")]),
     ])
-  let els = Op(body.typ, Panic, [m])
+  let els = Panic(body.typ, m)
   If(body.typ, match, body, els)
 }
 
@@ -767,11 +758,7 @@ fn and_exp(first: Exp, second: Exp) {
   case first, second {
     Literal(_, Bool("True")), _ -> second
     _, Literal(_, Bool("True")) -> first
-    _, _ -> {
-      let subject = Local(first.typ, "B")
-      let body = if_exp(subject, second, subject)
-      Let(body.typ, "B", first, body)
-    }
+    _, _ -> if_exp(first, second, false_value)
   }
 }
 
@@ -1013,22 +1000,22 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let value = case value {
         Some(value) -> lower_expression(c, value)
         None -> {
-          let message = "panic: " <> current_location_string(c)
+          let message = "panic: " <> current_location(c)
           Literal(map_type(c, t.string_type), String(message))
         }
       }
-      Op(typ, Panic, [value])
+      Panic(typ, value)
     }
     t.Todo(typ, value) -> {
       let typ = map_type(c, typ)
       let value = case value {
         Some(value) -> lower_expression(c, value)
         None -> {
-          let message = "todo: " <> current_location_string(c)
+          let message = "todo: " <> current_location(c)
           Literal(map_type(c, t.string_type), String(message))
         }
       }
-      Op(typ, Panic, [value])
+      Panic(typ, value)
     }
     t.Tuple(typ, elements) -> {
       let typ = map_type(c, typ)
@@ -1198,13 +1185,8 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     }
     t.Case(typ, subjects, clauses) -> {
       let typ = map_type(c, typ)
-      let else_body =
-        Op(typ, Panic, [
-          Literal(
-            map_type(c, t.string_type),
-            String("No matching clause in " <> current_location_string(c)),
-          ),
-        ])
+      let message = String("No matching clause in " <> current_location(c))
+      let else_body = Panic(typ, Literal(map_type(c, t.string_type), message))
 
       // Create bindings for each subject
       let subject_vars =
@@ -1325,7 +1307,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
   }
 }
 
-fn current_location_string(c: t.Context) {
+fn current_location(c: t.Context) {
   c.current_module <> "." <> c.current_definition
 }
 
@@ -1378,6 +1360,7 @@ fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
         replace_var(replace, with, then_exp),
         replace_var(replace, with, else_exp),
       )
+    Panic(typ, arg) -> Panic(typ, replace_var(replace, with, arg))
   }
 }
 
@@ -1456,22 +1439,18 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       #(taken, i, Op(typ, op, args))
     }
     Fn(typ, vars, exp) -> {
-      let #(_, i, vars, exp) =
+      let #(taken, i, vars, exp) =
         list.fold(vars, #(taken, i, [], exp), fn(acc, var) {
           let #(taken, i, vars, exp) = acc
           case list.contains(taken, var.name) {
             True -> {
               let new_var = var.name <> "V" <> int.to_string(i)
-              let i = i + 1
-              let exp = replace_var(var.name, Local(var.typ, new_var), exp)
-              let taken = [new_var, ..taken]
-              let #(taken, i, exp) = unshadow(taken, i, exp)
               let vars = [Parameter(var.typ, new_var), ..vars]
-              #(taken, i, vars, exp)
+              let exp = replace_var(var.name, Local(var.typ, new_var), exp)
+              #(taken, i + 1, vars, exp)
             }
             False -> {
               let taken = [var.name, ..taken]
-              let #(taken, i, exp) = unshadow(taken, i, exp)
               let vars = [var, ..vars]
               #(taken, i, vars, exp)
             }
@@ -1485,11 +1464,9 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       case list.contains(taken, var) {
         True -> {
           let new_var = var <> "V" <> int.to_string(i)
-          let taken = [new_var, ..taken]
-          let i = i + 1
-          let #(taken, i, val) = unshadow(taken, i, val)
-          let exp = replace_var(var, Local(val.typ, new_var), exp)
+          let #(taken, i, val) = unshadow(taken, i + 1, val)
           let #(taken, i, exp) = unshadow(taken, i, exp)
+          let exp = replace_var(var, Local(val.typ, new_var), exp)
           #(taken, i, Let(typ, new_var, val, exp))
         }
         False -> {
@@ -1504,6 +1481,10 @@ fn unshadow(taken: List(String), i: Int, e: Exp) -> #(List(String), Int, Exp) {
       let #(taken, i, then_exp) = unshadow(taken, i, then_exp)
       let #(taken, i, else_exp) = unshadow(taken, i, else_exp)
       #(taken, i, If(typ, cond, then_exp, else_exp))
+    }
+    Panic(typ, arg) -> {
+      let #(taken, i, arg) = unshadow(taken, i, arg)
+      #(taken, i, Panic(typ, arg))
     }
   }
 }

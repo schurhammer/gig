@@ -51,6 +51,7 @@ pub type Exp {
   CallClosure(typ: mono.Type, fun: Exp, arg: List(Exp))
   Let(typ: mono.Type, var: String, val: Exp, exp: Exp)
   If(typ: mono.Type, cond: Exp, then_exp: Exp, else_exp: Exp)
+  Panic(typ: mono.Type, arg: Exp)
 }
 
 pub fn cc_module(mod: mono.Context) {
@@ -105,7 +106,7 @@ pub fn cc_module(mod: mono.Context) {
         list.map(external.parameters, fn(param) { Field(param.name, param.typ) })
       let string_type = mono.NamedType("String", [])
       let todo_val = Literal(string_type, core.String(""))
-      let body = Op(ret, mono.Panic, [todo_val])
+      let body = Panic(ret, todo_val)
       Function(
         name: external.external_name,
         parameters: params,
@@ -153,6 +154,7 @@ fn fv(n: List(String), e: mono.Exp) -> List(#(String, mono.Type)) {
       let v = combine(v, fv(n, then_e))
       combine(v, fv(n, else_e))
     }
+    mono.Panic(_, arg) -> fv(n, arg)
   }
 }
 
@@ -160,7 +162,6 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
   case e {
     mono.Literal(typ, var) -> #(c, Literal(typ, var))
     mono.Local(typ, var) -> #(c, Var(typ, var))
-
     mono.Global(mono.FunctionType(..) as typ, var) -> {
       let val =
         Call(typ, Var(typ, "create_function"), [
@@ -279,7 +280,7 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
           // create the closure object
           let fun_pointer = Var(mono.NamedType("void*", []), name)
 
-          let env_arg_types = closure_fields |> list.map(fn(x) { x.1 })
+          let env_arg_types = list.map(closure_fields, fn(x) { x.1 })
           let new_env_fun_type = mono.FunctionType(env_arg_types, env_type)
           let env_args = list.map(closure_fields, fn(x) { Var(x.1, x.0) })
 
@@ -326,6 +327,10 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
       let #(c, then_e) = cc(c, then_e)
       let #(c, else_e) = cc(c, else_e)
       #(c, If(typ, cond, then_e, else_e))
+    }
+    mono.Panic(typ, arg) -> {
+      let #(c, arg) = cc(c, arg)
+      #(c, Panic(typ, arg))
     }
   }
 }

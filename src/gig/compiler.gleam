@@ -1,6 +1,5 @@
-import anf/closure_anf
+import anf/codegen
 import gig/closure
-import gig/codegen
 import gig/core
 import gig/headers
 import gig/mono
@@ -104,32 +103,6 @@ pub fn compile(
   let #(typed, _done) = infer_file(sources, c, ["gleam"], module_id)
 
   let core = core.lower_context(typed)
-  let #(mono, main_name) = mono.run(core, module_id <> "_" <> "main")
-  let cc = closure.cc_module(mono)
-  let code = codegen.module(cc)
-
-  let external_c_files =
-    mono.used_modules
-    |> set.delete("")
-    |> set.to_list()
-    |> list.filter_map(fn(module) {
-      let filepath = case dict.get(sources, module <> ".polyfill") {
-        Ok(path) -> path
-        _ -> {
-          let assert Ok(filepath) = dict.get(sources, module)
-          filepath
-        }
-      }
-      let filepath =
-        filepath
-        |> string.replace(".polyfill.gleam", ".c")
-        |> string.replace(".gleam", ".c")
-
-      case simplifile.is_file(filepath) {
-        Ok(True) -> Ok(filepath)
-        _ -> Error(Nil)
-      }
-    })
 
   // generate header files for ffi
   headers.module_headers(core)
@@ -156,8 +129,15 @@ pub fn compile(
     }
   })
 
-  // insert the generated code into the template
-  let output =
+  // compile to c
+  let c_file = target_path <> module_id <> ".c"
+  io.println("Generating ./" <> c_file)
+
+  let #(mono, main_name) = mono.run(core, module_id <> "_" <> "main")
+  let cc = closure.cc_module(mono)
+  let code = codegen.compile_module(cc)
+
+  let template =
     "#include <builtin.h>
 
 $code
@@ -168,23 +148,40 @@ int main(int argc, char **argv) {
   return 0;
 }
 "
+
+  let output =
+    template
     |> string.replace("$main", main_name <> "();")
     |> string.replace("$code", code)
 
-  // output the anf c file
-  let c_file = target_path <> module_id <> ".anf.c"
-  io.println("Generating ./" <> c_file)
-  let anf = closure_anf.closure_module_to_anf(cc)
-  let anf_out = closure_anf.compile_module(anf)
-  let _ = simplifile.write(c_file, anf_out)
-
-  // output the c file
-  let c_file = target_path <> module_id <> ".c"
-  io.println("Generating ./" <> c_file)
   case simplifile.write(c_file, output) {
     Ok(_) -> Nil
     _ -> panic as { "Failed to write file " <> c_file }
   }
+
+  // find c files that need to be added to the compilation
+  let external_c_files =
+    mono.used_modules
+    |> set.delete("")
+    |> set.to_list()
+    |> list.filter_map(fn(module) {
+      let filepath = case dict.get(sources, module <> ".polyfill") {
+        Ok(path) -> path
+        _ -> {
+          let assert Ok(filepath) = dict.get(sources, module)
+          filepath
+        }
+      }
+      let filepath =
+        filepath
+        |> string.replace(".polyfill.gleam", ".c")
+        |> string.replace(".gleam", ".c")
+
+      case simplifile.is_file(filepath) {
+        Ok(True) -> Ok(filepath)
+        _ -> Error(Nil)
+      }
+    })
 
   // compile the c file
   let binary_name = target_path <> module_id <> ".exe"
@@ -213,13 +210,12 @@ int main(int argc, char **argv) {
     False -> args
   }
 
-  io.println(compiler <> " " <> string.inspect(args))
+  io.println(string.join([compiler, ..args], " "))
 
   io.println("Generating ./" <> binary_name)
   case shellout.command(compiler, args, ".", []) {
     Ok(_) -> Nil
-    Error(message) ->
-      io.println_error("Failed to generate binary:\n" <> message.1)
+    Error(message) -> panic as { "Failed to generate binary:\n" <> message.1 }
   }
 
   binary_name

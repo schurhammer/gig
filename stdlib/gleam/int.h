@@ -4,19 +4,32 @@
 
 #include "builtin.h"
 
-typedef struct {
-enum {Ok_Int_Nil_TAG, Error_Int_Nil_TAG} tag;
-union {
-struct Ok_Int_Nil *Ok;
-struct Error_Int_Nil *Error;
-} val; } Result_Int_Nil;
+typedef struct T_Result_Int_Nil Result_Int_Nil;
+enum E_Result {
+  E_Ok,
+  E_Error
+};
+union U_Result_Int_Nil {
+  struct Ok_Int_Nil *Ok;
+  struct Error_Int_Nil *Error;
+};
+struct T_Result_Int_Nil {
+  enum E_Result tag;
+  union U_Result_Int_Nil val;
+};
+struct Ok_Int_Nil {
+  Int value;
+};
+struct Error_Int_Nil {
+  Nil value;
+};
 
-Bool eq_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
-Bool lt_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
-String inspect_Result_Int_Nil(Result_Int_Nil a);
+
 Result_Int_Nil new_Ok_Int_Nil(Int value);
 Result_Int_Nil new_Error_Int_Nil(Nil value);
-
+Bool eq_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
+Bool lt_Result_Int_Nil(Result_Int_Nil a, Result_Int_Nil b);
+String inspect_Result_Int_Nil(Result_Int_Nil value);
 String gleam_int_to_string(Int x);
 Int gleam_int_bitwise_exclusive_or(Int x, Int y);
 Int gleam_int_bitwise_shift_left(Int x, Int y);
@@ -28,10 +41,3 @@ Int gleam_int_bitwise_shift_right(Int x, Int y);
 Result_Int_Nil gleam_int_do_base_parse(String a, Int b);
 Int gleam_int_bitwise_and(Int x, Int y);
 String gleam_int_do_to_base_string(Int a, Int b);
-
-struct Ok_Int_Nil{
-Int value;
-};
-struct Error_Int_Nil{
-Nil value;
-};

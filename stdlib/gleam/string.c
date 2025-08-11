@@ -59,7 +59,7 @@ String gleam_string_from_utf_codepoints(List_UtfCodepoint codepoints) {
   size_t total_bytes = 0;
   List_UtfCodepoint current = codepoints;
 
-  while (current.tag == Cons_UtfCodepoint_TAG) {
+  while (current.tag == E_Cons) {
     UtfCodepoint cp = current.val.Cons->item;
 
     // Calculate UTF-8 byte length for this codepoint
@@ -91,7 +91,7 @@ String gleam_string_from_utf_codepoints(List_UtfCodepoint codepoints) {
   size_t pos = 0;
   current = codepoints;
 
-  while (current.tag == Cons_UtfCodepoint_TAG) {
+  while (current.tag == E_Cons) {
     UtfCodepoint cp = current.val.Cons->item;
 
     if (cp <= 0x7F) {
@@ -187,7 +187,7 @@ List_UtfCodepoint gleam_string_do_to_utf_codepoints(String str) {
 
   // Reverse the list to get correct order
   List_UtfCodepoint result = new_Empty_UtfCodepoint;
-  while (temp_list.tag == Cons_UtfCodepoint_TAG) {
+  while (temp_list.tag == E_Cons) {
     UtfCodepoint item = temp_list.val.Cons->item;
     List_UtfCodepoint next = temp_list.val.Cons->next;
     result = new_Cons_UtfCodepoint(item, result);

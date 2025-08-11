@@ -14,6 +14,8 @@ pub fn main() {
   use <- simple()
   use <- args(1, 2)
   use a, b <- continuation_args
+  let a = a
+  let b = b
   io.debug(a)
   io.debug(b)
   use a, b <- continuation_args()

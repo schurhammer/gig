@@ -7,151 +7,174 @@
 typedef struct Tuple2_Int_String Tuple2_Int_String;
 typedef struct Tuple2_String_String Tuple2_String_String;
 typedef struct Tuple2_shellout_CommandOpt_Bool Tuple2_shellout_CommandOpt_Bool;
-typedef struct {
-enum {Ok_String_String_TAG, Error_String_String_TAG} tag;
-union {
-struct Ok_String_String *Ok;
-struct Error_String_String *Error;
-} val; } Result_String_String;
-typedef struct {
-enum {Ok_String_Tuple2_Int_String_TAG, Error_String_Tuple2_Int_String_TAG} tag;
-union {
-struct Ok_String_Tuple2_Int_String *Ok;
-struct Error_String_Tuple2_Int_String *Error;
-} val; } Result_String_Tuple2_Int_String;
-typedef struct {
-enum {Empty_Tuple2_String_String_TAG, Cons_Tuple2_String_String_TAG} tag;
-union {
-struct Empty_Tuple2_String_String *Empty;
-struct Cons_Tuple2_String_String *Cons;
-} val; } List_Tuple2_String_String;
-typedef struct {
-enum {shellout_LetBeStderr_TAG, shellout_LetBeStdout_TAG, shellout_OverlappedStdio_TAG, shellout_SetEnvironment_TAG} tag;
-union {
-struct shellout_LetBeStderr *LetBeStderr;
-struct shellout_LetBeStdout *LetBeStdout;
-struct shellout_OverlappedStdio *OverlappedStdio;
-struct shellout_SetEnvironment *SetEnvironment;
-} val; } shellout_CommandOpt;
-typedef struct {
-enum {Empty_Tuple2_shellout_CommandOpt_Bool_TAG, Cons_Tuple2_shellout_CommandOpt_Bool_TAG} tag;
-union {
-struct Empty_Tuple2_shellout_CommandOpt_Bool *Empty;
-struct Cons_Tuple2_shellout_CommandOpt_Bool *Cons;
-} val; } List_Tuple2_shellout_CommandOpt_Bool;
-typedef struct {
-enum {Empty_String_TAG, Cons_String_TAG} tag;
-union {
-struct Empty_String *Empty;
-struct Cons_String *Cons;
-} val; } List_String;
+typedef struct T_Result_String_String Result_String_String;
+enum E_Result {
+  E_Ok,
+  E_Error
+};
+union U_Result_String_String {
+  struct Ok_String_String *Ok;
+  struct Error_String_String *Error;
+};
+struct T_Result_String_String {
+  enum E_Result tag;
+  union U_Result_String_String val;
+};
+typedef struct T_Result_String_Tuple2_Int_String Result_String_Tuple2_Int_String;
+union U_Result_String_Tuple2_Int_String {
+  struct Ok_String_Tuple2_Int_String *Ok;
+  struct Error_String_Tuple2_Int_String *Error;
+};
+struct T_Result_String_Tuple2_Int_String {
+  enum E_Result tag;
+  union U_Result_String_Tuple2_Int_String val;
+};
+typedef struct T_List_Tuple2_String_String List_Tuple2_String_String;
+enum E_List {
+  E_Empty,
+  E_Cons
+};
+union U_List_Tuple2_String_String {
+  struct Empty_Tuple2_String_String *Empty;
+  struct Cons_Tuple2_String_String *Cons;
+};
+struct T_List_Tuple2_String_String {
+  enum E_List tag;
+  union U_List_Tuple2_String_String val;
+};
+typedef struct T_shellout_CommandOpt shellout_CommandOpt;
+enum E_shellout_CommandOpt {
+  E_shellout_LetBeStderr,
+  E_shellout_LetBeStdout,
+  E_shellout_OverlappedStdio,
+  E_shellout_SetEnvironment
+};
+union U_shellout_CommandOpt {
+  struct shellout_LetBeStderr *LetBeStderr;
+  struct shellout_LetBeStdout *LetBeStdout;
+  struct shellout_OverlappedStdio *OverlappedStdio;
+  struct shellout_SetEnvironment *SetEnvironment;
+};
+struct T_shellout_CommandOpt {
+  enum E_shellout_CommandOpt tag;
+  union U_shellout_CommandOpt val;
+};
+typedef struct T_List_Tuple2_shellout_CommandOpt_Bool List_Tuple2_shellout_CommandOpt_Bool;
+union U_List_Tuple2_shellout_CommandOpt_Bool {
+  struct Empty_Tuple2_shellout_CommandOpt_Bool *Empty;
+  struct Cons_Tuple2_shellout_CommandOpt_Bool *Cons;
+};
+struct T_List_Tuple2_shellout_CommandOpt_Bool {
+  enum E_List tag;
+  union U_List_Tuple2_shellout_CommandOpt_Bool val;
+};
+typedef struct T_List_String List_String;
+union U_List_String {
+  struct Empty_String *Empty;
+  struct Cons_String *Cons;
+};
+struct T_List_String {
+  enum E_List tag;
+  union U_List_String val;
+};
+struct Tuple2_Int_String {
+  Int field0;
+  String field1;
+};
+struct Tuple2_String_String {
+  String field0;
+  String field1;
+};
+struct Tuple2_shellout_CommandOpt_Bool {
+  shellout_CommandOpt field0;
+  Bool field1;
+};
+struct Ok_String_String {
+  String value;
+};
+struct Error_String_String {
+  String value;
+};
+struct Ok_String_Tuple2_Int_String {
+  String value;
+};
+struct Error_String_Tuple2_Int_String {
+  Tuple2_Int_String value;
+};
+struct Empty_Tuple2_String_String {
+};
+struct Cons_Tuple2_String_String {
+  Tuple2_String_String item;
+  List_Tuple2_String_String next;
+};
+struct shellout_LetBeStderr {
+};
+struct shellout_LetBeStdout {
+};
+struct shellout_OverlappedStdio {
+};
+struct shellout_SetEnvironment {
+  List_Tuple2_String_String field0;
+};
+struct Empty_Tuple2_shellout_CommandOpt_Bool {
+};
+struct Cons_Tuple2_shellout_CommandOpt_Bool {
+  Tuple2_shellout_CommandOpt_Bool item;
+  List_Tuple2_shellout_CommandOpt_Bool next;
+};
+struct Empty_String {
+};
+struct Cons_String {
+  String item;
+  List_String next;
+};
 
+
+Tuple2_Int_String new_Tuple2_Int_String(Int field0, String field1);
 Bool eq_Tuple2_Int_String(Tuple2_Int_String a, Tuple2_Int_String b);
 Bool lt_Tuple2_Int_String(Tuple2_Int_String a, Tuple2_Int_String b);
-String inspect_Tuple2_Int_String(Tuple2_Int_String a);
-Tuple2_Int_String new_Tuple2_Int_String(Int field0, String field1);
+String inspect_Tuple2_Int_String(Tuple2_Int_String value);
+Tuple2_String_String new_Tuple2_String_String(String field0, String field1);
 Bool eq_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 Bool lt_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
-String inspect_Tuple2_String_String(Tuple2_String_String a);
-Tuple2_String_String new_Tuple2_String_String(String field0, String field1);
+String inspect_Tuple2_String_String(Tuple2_String_String value);
+Tuple2_shellout_CommandOpt_Bool new_Tuple2_shellout_CommandOpt_Bool(shellout_CommandOpt field0, Bool field1);
 Bool eq_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool a, Tuple2_shellout_CommandOpt_Bool b);
 Bool lt_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool a, Tuple2_shellout_CommandOpt_Bool b);
-String inspect_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool a);
-Tuple2_shellout_CommandOpt_Bool new_Tuple2_shellout_CommandOpt_Bool(shellout_CommandOpt field0, Bool field1);
-Bool eq_Result_String_String(Result_String_String a, Result_String_String b);
-Bool lt_Result_String_String(Result_String_String a, Result_String_String b);
-String inspect_Result_String_String(Result_String_String a);
+String inspect_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool value);
 Result_String_String new_Ok_String_String(String value);
 Result_String_String new_Error_String_String(String value);
-Bool eq_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String a, Result_String_Tuple2_Int_String b);
-Bool lt_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String a, Result_String_Tuple2_Int_String b);
-String inspect_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String a);
+Bool eq_Result_String_String(Result_String_String a, Result_String_String b);
+Bool lt_Result_String_String(Result_String_String a, Result_String_String b);
+String inspect_Result_String_String(Result_String_String value);
 Result_String_Tuple2_Int_String new_Ok_String_Tuple2_Int_String(String value);
 Result_String_Tuple2_Int_String new_Error_String_Tuple2_Int_String(Tuple2_Int_String value);
-Bool eq_List_Tuple2_String_String(List_Tuple2_String_String a, List_Tuple2_String_String b);
-Bool lt_List_Tuple2_String_String(List_Tuple2_String_String a, List_Tuple2_String_String b);
-String inspect_List_Tuple2_String_String(List_Tuple2_String_String a);
+Bool eq_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String a, Result_String_Tuple2_Int_String b);
+Bool lt_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String a, Result_String_Tuple2_Int_String b);
+String inspect_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String value);
 extern const List_Tuple2_String_String new_Empty_Tuple2_String_String;
 List_Tuple2_String_String new_Cons_Tuple2_String_String(Tuple2_String_String item, List_Tuple2_String_String next);
-Bool eq_shellout_CommandOpt(shellout_CommandOpt a, shellout_CommandOpt b);
-Bool lt_shellout_CommandOpt(shellout_CommandOpt a, shellout_CommandOpt b);
-String inspect_shellout_CommandOpt(shellout_CommandOpt a);
+Bool eq_List_Tuple2_String_String(List_Tuple2_String_String a, List_Tuple2_String_String b);
+Bool lt_List_Tuple2_String_String(List_Tuple2_String_String a, List_Tuple2_String_String b);
+String inspect_List_Tuple2_String_String(List_Tuple2_String_String value);
 extern const shellout_CommandOpt new_shellout_LetBeStderr;
 extern const shellout_CommandOpt new_shellout_LetBeStdout;
 extern const shellout_CommandOpt new_shellout_OverlappedStdio;
 shellout_CommandOpt new_shellout_SetEnvironment(List_Tuple2_String_String field0);
-Bool eq_List_Tuple2_shellout_CommandOpt_Bool(List_Tuple2_shellout_CommandOpt_Bool a, List_Tuple2_shellout_CommandOpt_Bool b);
-Bool lt_List_Tuple2_shellout_CommandOpt_Bool(List_Tuple2_shellout_CommandOpt_Bool a, List_Tuple2_shellout_CommandOpt_Bool b);
-String inspect_List_Tuple2_shellout_CommandOpt_Bool(List_Tuple2_shellout_CommandOpt_Bool a);
+Bool eq_shellout_CommandOpt(shellout_CommandOpt a, shellout_CommandOpt b);
+Bool lt_shellout_CommandOpt(shellout_CommandOpt a, shellout_CommandOpt b);
+String inspect_shellout_CommandOpt(shellout_CommandOpt value);
 extern const List_Tuple2_shellout_CommandOpt_Bool new_Empty_Tuple2_shellout_CommandOpt_Bool;
 List_Tuple2_shellout_CommandOpt_Bool new_Cons_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool item, List_Tuple2_shellout_CommandOpt_Bool next);
-Bool eq_List_String(List_String a, List_String b);
-Bool lt_List_String(List_String a, List_String b);
-String inspect_List_String(List_String a);
+Bool eq_List_Tuple2_shellout_CommandOpt_Bool(List_Tuple2_shellout_CommandOpt_Bool a, List_Tuple2_shellout_CommandOpt_Bool b);
+Bool lt_List_Tuple2_shellout_CommandOpt_Bool(List_Tuple2_shellout_CommandOpt_Bool a, List_Tuple2_shellout_CommandOpt_Bool b);
+String inspect_List_Tuple2_shellout_CommandOpt_Bool(List_Tuple2_shellout_CommandOpt_Bool value);
 extern const List_String new_Empty_String;
 List_String new_Cons_String(String item, List_String next);
-
+Bool eq_List_String(List_String a, List_String b);
+Bool lt_List_String(List_String a, List_String b);
+String inspect_List_String(List_String value);
 List_String shellout_arguments();
 Result_String_Tuple2_Int_String shellout_c_do_command(String executable, List_String arguments, String directory, List_Tuple2_shellout_CommandOpt_Bool options, List_Tuple2_String_String environment);
 Nil shellout_exit(Int status);
 Result_String_String shellout_which(String executable);
-
-struct Tuple2_Int_String{
-Int field0;
-String field1;
-};
-
-struct Tuple2_String_String{
-String field0;
-String field1;
-};
-
-struct Tuple2_shellout_CommandOpt_Bool{
-shellout_CommandOpt field0;
-Bool field1;
-};
-
-struct Ok_String_String{
-String value;
-};
-struct Error_String_String{
-String value;
-};
-
-struct Ok_String_Tuple2_Int_String{
-String value;
-};
-struct Error_String_Tuple2_Int_String{
-Tuple2_Int_String value;
-};
-
-struct Empty_Tuple2_String_String{
-};
-struct Cons_Tuple2_String_String{
-Tuple2_String_String item;
-List_Tuple2_String_String next;
-};
-
-struct shellout_LetBeStderr{
-};
-struct shellout_LetBeStdout{
-};
-struct shellout_OverlappedStdio{
-};
-struct shellout_SetEnvironment{
-List_Tuple2_String_String field0;
-};
-
-struct Empty_Tuple2_shellout_CommandOpt_Bool{
-};
-struct Cons_Tuple2_shellout_CommandOpt_Bool{
-Tuple2_shellout_CommandOpt_Bool item;
-List_Tuple2_shellout_CommandOpt_Bool next;
-};
-
-struct Empty_String{
-};
-struct Cons_String{
-String item;
-List_String next;
-};

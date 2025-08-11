@@ -30,7 +30,7 @@ static char **list_string_to_argv(List_String args, int *argc) {
   // Count arguments first
   *argc = 0;
   List_String current = args;
-  while (current.tag == Cons_String_TAG) {
+  while (current.tag == E_Cons) {
     (*argc)++;
     current = current.val.Cons->next;
   }
@@ -43,7 +43,7 @@ static char **list_string_to_argv(List_String args, int *argc) {
   // Fill the array
   current = args;
   for (int i = 0; i < *argc; i++) {
-    if (current.tag != Cons_String_TAG)
+    if (current.tag != E_Cons)
       break;
 
     // Create null-terminated string for each argument
@@ -84,7 +84,7 @@ static char **list_env_to_envp(List_Tuple2_String_String env_list, int *envc) {
   // Count new environment variables
   int new_envc = 0;
   List_Tuple2_String_String current = env_list;
-  while (current.tag == Cons_Tuple2_String_String_TAG) {
+  while (current.tag == E_Cons) {
     new_envc++;
     current = current.val.Cons->next;
   }
@@ -107,7 +107,7 @@ static char **list_env_to_envp(List_Tuple2_String_String env_list, int *envc) {
   // Add new environment variables
   current = env_list;
   for (int i = 0; i < new_envc; i++) {
-    if (current.tag != Cons_Tuple2_String_String_TAG)
+    if (current.tag != E_Cons)
       break;
 
     Tuple2_String_String env_var = current.val.Cons->item;
@@ -142,7 +142,7 @@ static Bool get_option_bool(List_Tuple2_shellout_CommandOpt_Bool opts,
                             shellout_CommandOpt opt) {
   List_Tuple2_shellout_CommandOpt_Bool current = opts;
 
-  while (current.tag == Cons_Tuple2_shellout_CommandOpt_Bool_TAG) {
+  while (current.tag == E_Cons) {
     Tuple2_shellout_CommandOpt_Bool pair = current.val.Cons->item;
     shellout_CommandOpt current_opt = pair.field0;
     Bool value = pair.field1;

@@ -5,34 +5,64 @@
 #include "builtin.h"
 
 typedef struct Tuple2_String_String Tuple2_String_String;
-typedef struct {
-enum {Ok_Tuple2_String_String_Nil_TAG, Error_Tuple2_String_String_Nil_TAG} tag;
-union {
-struct Ok_Tuple2_String_String_Nil *Ok;
-struct Error_Tuple2_String_String_Nil *Error;
-} val; } Result_Tuple2_String_String_Nil;
-typedef struct {
-enum {Empty_UtfCodepoint_TAG, Cons_UtfCodepoint_TAG} tag;
-union {
-struct Empty_UtfCodepoint *Empty;
-struct Cons_UtfCodepoint *Cons;
-} val; } List_UtfCodepoint;
+typedef struct T_Result_Tuple2_String_String_Nil Result_Tuple2_String_String_Nil;
+enum E_Result {
+  E_Ok,
+  E_Error
+};
+union U_Result_Tuple2_String_String_Nil {
+  struct Ok_Tuple2_String_String_Nil *Ok;
+  struct Error_Tuple2_String_String_Nil *Error;
+};
+struct T_Result_Tuple2_String_String_Nil {
+  enum E_Result tag;
+  union U_Result_Tuple2_String_String_Nil val;
+};
+typedef struct T_List_UtfCodepoint List_UtfCodepoint;
+enum E_List {
+  E_Empty,
+  E_Cons
+};
+union U_List_UtfCodepoint {
+  struct Empty_UtfCodepoint *Empty;
+  struct Cons_UtfCodepoint *Cons;
+};
+struct T_List_UtfCodepoint {
+  enum E_List tag;
+  union U_List_UtfCodepoint val;
+};
+struct Tuple2_String_String {
+  String field0;
+  String field1;
+};
+struct Ok_Tuple2_String_String_Nil {
+  Tuple2_String_String value;
+};
+struct Error_Tuple2_String_String_Nil {
+  Nil value;
+};
+struct Empty_UtfCodepoint {
+};
+struct Cons_UtfCodepoint {
+  UtfCodepoint item;
+  List_UtfCodepoint next;
+};
 
+
+Tuple2_String_String new_Tuple2_String_String(String field0, String field1);
 Bool eq_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
 Bool lt_Tuple2_String_String(Tuple2_String_String a, Tuple2_String_String b);
-String inspect_Tuple2_String_String(Tuple2_String_String a);
-Tuple2_String_String new_Tuple2_String_String(String field0, String field1);
-Bool eq_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
-Bool lt_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
-String inspect_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a);
+String inspect_Tuple2_String_String(Tuple2_String_String value);
 Result_Tuple2_String_String_Nil new_Ok_Tuple2_String_String_Nil(Tuple2_String_String value);
 Result_Tuple2_String_String_Nil new_Error_Tuple2_String_String_Nil(Nil value);
-Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
-Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
-String inspect_List_UtfCodepoint(List_UtfCodepoint a);
+Bool eq_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
+Bool lt_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil a, Result_Tuple2_String_String_Nil b);
+String inspect_Result_Tuple2_String_String_Nil(Result_Tuple2_String_String_Nil value);
 extern const List_UtfCodepoint new_Empty_UtfCodepoint;
 List_UtfCodepoint new_Cons_UtfCodepoint(UtfCodepoint item, List_UtfCodepoint next);
-
+Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
+Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
+String inspect_List_UtfCodepoint(List_UtfCodepoint value);
 Bool starts_with_string(String string, String prefix);
 Bool ends_with_string(String string, String suffix);
 List_UtfCodepoint gleam_string_do_to_utf_codepoints(String string);
@@ -42,22 +72,3 @@ UtfCodepoint gleam_string_unsafe_int_to_utf_codepoint(Int a);
 String append_string(String first, String second);
 Result_Tuple2_String_String_Nil pop_grapheme_string(String string);
 String slice_string(String string, Int idx, Int len);
-
-struct Tuple2_String_String{
-String field0;
-String field1;
-};
-
-struct Ok_Tuple2_String_String_Nil{
-Tuple2_String_String value;
-};
-struct Error_Tuple2_String_String_Nil{
-Nil value;
-};
-
-struct Empty_UtfCodepoint{
-};
-struct Cons_UtfCodepoint{
-UtfCodepoint item;
-List_UtfCodepoint next;
-};

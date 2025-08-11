@@ -4,6 +4,7 @@
 import gleam
 import gleam/order
 import gleam/list
+import gleam/string_tree
 
 pub fn length(a: String) -> Int {
   length_string(a)
@@ -54,10 +55,19 @@ fn do_join(strings: List(String), with separator: String) -> String {
 }
 
 pub fn concat(strings: List(String)) -> String {
-    case strings {
-        [] -> ""
-        [x, ..xs] -> x <> concat(xs)
-    }
+  case strings {
+    [] -> ""
+    [x] -> x
+    xs -> concat(append_pairs(xs))
+  }
+}
+
+fn append_pairs(strings: List(String)) {
+  case strings {
+    [] -> []
+    [x] -> [x]
+    [x, y, ..xs] -> [x <> y, ..append_pairs(xs)]
+  }
 }
 
 @external(c, "", "gleam_string_unsafe_int_to_utf_codepoint")

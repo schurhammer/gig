@@ -5,126 +5,378 @@
 #include "builtin.h"
 
 typedef struct simplifile_FileInfo simplifile_FileInfo;
-typedef struct {
-enum {Empty_String_TAG, Cons_String_TAG} tag;
-union {
-struct Empty_String *Empty;
-struct Cons_String *Cons;
-} val; } List_String;
-typedef struct {
-enum {simplifile_Eacces_TAG, simplifile_Eagain_TAG, simplifile_Ebadf_TAG, simplifile_Ebadmsg_TAG, simplifile_Ebusy_TAG, simplifile_Edeadlk_TAG, simplifile_Edeadlock_TAG, simplifile_Edquot_TAG, simplifile_Eexist_TAG, simplifile_Efault_TAG, simplifile_Efbig_TAG, simplifile_Eftype_TAG, simplifile_Eintr_TAG, simplifile_Einval_TAG, simplifile_Eio_TAG, simplifile_Eisdir_TAG, simplifile_Eloop_TAG, simplifile_Emfile_TAG, simplifile_Emlink_TAG, simplifile_Emultihop_TAG, simplifile_Enametoolong_TAG, simplifile_Enfile_TAG, simplifile_Enobufs_TAG, simplifile_Enodev_TAG, simplifile_Enolck_TAG, simplifile_Enolink_TAG, simplifile_Enoent_TAG, simplifile_Enomem_TAG, simplifile_Enospc_TAG, simplifile_Enosr_TAG, simplifile_Enostr_TAG, simplifile_Enosys_TAG, simplifile_Enotblk_TAG, simplifile_Enotdir_TAG, simplifile_Enotsup_TAG, simplifile_Enxio_TAG, simplifile_Eopnotsupp_TAG, simplifile_Eoverflow_TAG, simplifile_Eperm_TAG, simplifile_Epipe_TAG, simplifile_Erange_TAG, simplifile_Erofs_TAG, simplifile_Espipe_TAG, simplifile_Esrch_TAG, simplifile_Estale_TAG, simplifile_Etxtbsy_TAG, simplifile_Exdev_TAG, simplifile_NotUtf8_TAG, simplifile_Unknown_TAG} tag;
-union {
-struct simplifile_Eacces *Eacces;
-struct simplifile_Eagain *Eagain;
-struct simplifile_Ebadf *Ebadf;
-struct simplifile_Ebadmsg *Ebadmsg;
-struct simplifile_Ebusy *Ebusy;
-struct simplifile_Edeadlk *Edeadlk;
-struct simplifile_Edeadlock *Edeadlock;
-struct simplifile_Edquot *Edquot;
-struct simplifile_Eexist *Eexist;
-struct simplifile_Efault *Efault;
-struct simplifile_Efbig *Efbig;
-struct simplifile_Eftype *Eftype;
-struct simplifile_Eintr *Eintr;
-struct simplifile_Einval *Einval;
-struct simplifile_Eio *Eio;
-struct simplifile_Eisdir *Eisdir;
-struct simplifile_Eloop *Eloop;
-struct simplifile_Emfile *Emfile;
-struct simplifile_Emlink *Emlink;
-struct simplifile_Emultihop *Emultihop;
-struct simplifile_Enametoolong *Enametoolong;
-struct simplifile_Enfile *Enfile;
-struct simplifile_Enobufs *Enobufs;
-struct simplifile_Enodev *Enodev;
-struct simplifile_Enolck *Enolck;
-struct simplifile_Enolink *Enolink;
-struct simplifile_Enoent *Enoent;
-struct simplifile_Enomem *Enomem;
-struct simplifile_Enospc *Enospc;
-struct simplifile_Enosr *Enosr;
-struct simplifile_Enostr *Enostr;
-struct simplifile_Enosys *Enosys;
-struct simplifile_Enotblk *Enotblk;
-struct simplifile_Enotdir *Enotdir;
-struct simplifile_Enotsup *Enotsup;
-struct simplifile_Enxio *Enxio;
-struct simplifile_Eopnotsupp *Eopnotsupp;
-struct simplifile_Eoverflow *Eoverflow;
-struct simplifile_Eperm *Eperm;
-struct simplifile_Epipe *Epipe;
-struct simplifile_Erange *Erange;
-struct simplifile_Erofs *Erofs;
-struct simplifile_Espipe *Espipe;
-struct simplifile_Esrch *Esrch;
-struct simplifile_Estale *Estale;
-struct simplifile_Etxtbsy *Etxtbsy;
-struct simplifile_Exdev *Exdev;
-struct simplifile_NotUtf8 *NotUtf8;
-struct simplifile_Unknown *Unknown;
-} val; } simplifile_FileError;
-typedef struct {
-enum {Ok_List_String_simplifile_FileError_TAG, Error_List_String_simplifile_FileError_TAG} tag;
-union {
-struct Ok_List_String_simplifile_FileError *Ok;
-struct Error_List_String_simplifile_FileError *Error;
-} val; } Result_List_String_simplifile_FileError;
-typedef struct {
-enum {Ok_Int_simplifile_FileError_TAG, Error_Int_simplifile_FileError_TAG} tag;
-union {
-struct Ok_Int_simplifile_FileError *Ok;
-struct Error_Int_simplifile_FileError *Error;
-} val; } Result_Int_simplifile_FileError;
-typedef struct {
-enum {Ok_BitArray_simplifile_FileError_TAG, Error_BitArray_simplifile_FileError_TAG} tag;
-union {
-struct Ok_BitArray_simplifile_FileError *Ok;
-struct Error_BitArray_simplifile_FileError *Error;
-} val; } Result_BitArray_simplifile_FileError;
-typedef struct {
-enum {Ok_simplifile_FileInfo_simplifile_FileError_TAG, Error_simplifile_FileInfo_simplifile_FileError_TAG} tag;
-union {
-struct Ok_simplifile_FileInfo_simplifile_FileError *Ok;
-struct Error_simplifile_FileInfo_simplifile_FileError *Error;
-} val; } Result_simplifile_FileInfo_simplifile_FileError;
-typedef struct {
-enum {Empty_UtfCodepoint_TAG, Cons_UtfCodepoint_TAG} tag;
-union {
-struct Empty_UtfCodepoint *Empty;
-struct Cons_UtfCodepoint *Cons;
-} val; } List_UtfCodepoint;
-typedef struct {
-enum {Ok_List_UtfCodepoint_simplifile_FileError_TAG, Error_List_UtfCodepoint_simplifile_FileError_TAG} tag;
-union {
-struct Ok_List_UtfCodepoint_simplifile_FileError *Ok;
-struct Error_List_UtfCodepoint_simplifile_FileError *Error;
-} val; } Result_List_UtfCodepoint_simplifile_FileError;
-typedef struct {
-enum {Ok_Nil_simplifile_FileError_TAG, Error_Nil_simplifile_FileError_TAG} tag;
-union {
-struct Ok_Nil_simplifile_FileError *Ok;
-struct Error_Nil_simplifile_FileError *Error;
-} val; } Result_Nil_simplifile_FileError;
-typedef struct {
-enum {Ok_Bool_simplifile_FileError_TAG, Error_Bool_simplifile_FileError_TAG} tag;
-union {
-struct Ok_Bool_simplifile_FileError *Ok;
-struct Error_Bool_simplifile_FileError *Error;
-} val; } Result_Bool_simplifile_FileError;
+typedef struct T_List_String List_String;
+enum E_List {
+  E_Empty,
+  E_Cons
+};
+union U_List_String {
+  struct Empty_String *Empty;
+  struct Cons_String *Cons;
+};
+struct T_List_String {
+  enum E_List tag;
+  union U_List_String val;
+};
+typedef struct T_simplifile_FileError simplifile_FileError;
+enum E_simplifile_FileError {
+  E_simplifile_Eacces,
+  E_simplifile_Eagain,
+  E_simplifile_Ebadf,
+  E_simplifile_Ebadmsg,
+  E_simplifile_Ebusy,
+  E_simplifile_Edeadlk,
+  E_simplifile_Edeadlock,
+  E_simplifile_Edquot,
+  E_simplifile_Eexist,
+  E_simplifile_Efault,
+  E_simplifile_Efbig,
+  E_simplifile_Eftype,
+  E_simplifile_Eintr,
+  E_simplifile_Einval,
+  E_simplifile_Eio,
+  E_simplifile_Eisdir,
+  E_simplifile_Eloop,
+  E_simplifile_Emfile,
+  E_simplifile_Emlink,
+  E_simplifile_Emultihop,
+  E_simplifile_Enametoolong,
+  E_simplifile_Enfile,
+  E_simplifile_Enobufs,
+  E_simplifile_Enodev,
+  E_simplifile_Enolck,
+  E_simplifile_Enolink,
+  E_simplifile_Enoent,
+  E_simplifile_Enomem,
+  E_simplifile_Enospc,
+  E_simplifile_Enosr,
+  E_simplifile_Enostr,
+  E_simplifile_Enosys,
+  E_simplifile_Enotblk,
+  E_simplifile_Enotdir,
+  E_simplifile_Enotsup,
+  E_simplifile_Enxio,
+  E_simplifile_Eopnotsupp,
+  E_simplifile_Eoverflow,
+  E_simplifile_Eperm,
+  E_simplifile_Epipe,
+  E_simplifile_Erange,
+  E_simplifile_Erofs,
+  E_simplifile_Espipe,
+  E_simplifile_Esrch,
+  E_simplifile_Estale,
+  E_simplifile_Etxtbsy,
+  E_simplifile_Exdev,
+  E_simplifile_NotUtf8,
+  E_simplifile_Unknown
+};
+union U_simplifile_FileError {
+  struct simplifile_Eacces *Eacces;
+  struct simplifile_Eagain *Eagain;
+  struct simplifile_Ebadf *Ebadf;
+  struct simplifile_Ebadmsg *Ebadmsg;
+  struct simplifile_Ebusy *Ebusy;
+  struct simplifile_Edeadlk *Edeadlk;
+  struct simplifile_Edeadlock *Edeadlock;
+  struct simplifile_Edquot *Edquot;
+  struct simplifile_Eexist *Eexist;
+  struct simplifile_Efault *Efault;
+  struct simplifile_Efbig *Efbig;
+  struct simplifile_Eftype *Eftype;
+  struct simplifile_Eintr *Eintr;
+  struct simplifile_Einval *Einval;
+  struct simplifile_Eio *Eio;
+  struct simplifile_Eisdir *Eisdir;
+  struct simplifile_Eloop *Eloop;
+  struct simplifile_Emfile *Emfile;
+  struct simplifile_Emlink *Emlink;
+  struct simplifile_Emultihop *Emultihop;
+  struct simplifile_Enametoolong *Enametoolong;
+  struct simplifile_Enfile *Enfile;
+  struct simplifile_Enobufs *Enobufs;
+  struct simplifile_Enodev *Enodev;
+  struct simplifile_Enolck *Enolck;
+  struct simplifile_Enolink *Enolink;
+  struct simplifile_Enoent *Enoent;
+  struct simplifile_Enomem *Enomem;
+  struct simplifile_Enospc *Enospc;
+  struct simplifile_Enosr *Enosr;
+  struct simplifile_Enostr *Enostr;
+  struct simplifile_Enosys *Enosys;
+  struct simplifile_Enotblk *Enotblk;
+  struct simplifile_Enotdir *Enotdir;
+  struct simplifile_Enotsup *Enotsup;
+  struct simplifile_Enxio *Enxio;
+  struct simplifile_Eopnotsupp *Eopnotsupp;
+  struct simplifile_Eoverflow *Eoverflow;
+  struct simplifile_Eperm *Eperm;
+  struct simplifile_Epipe *Epipe;
+  struct simplifile_Erange *Erange;
+  struct simplifile_Erofs *Erofs;
+  struct simplifile_Espipe *Espipe;
+  struct simplifile_Esrch *Esrch;
+  struct simplifile_Estale *Estale;
+  struct simplifile_Etxtbsy *Etxtbsy;
+  struct simplifile_Exdev *Exdev;
+  struct simplifile_NotUtf8 *NotUtf8;
+  struct simplifile_Unknown *Unknown;
+};
+struct T_simplifile_FileError {
+  enum E_simplifile_FileError tag;
+  union U_simplifile_FileError val;
+};
+typedef struct T_Result_List_String_simplifile_FileError Result_List_String_simplifile_FileError;
+enum E_Result {
+  E_Ok,
+  E_Error
+};
+union U_Result_List_String_simplifile_FileError {
+  struct Ok_List_String_simplifile_FileError *Ok;
+  struct Error_List_String_simplifile_FileError *Error;
+};
+struct T_Result_List_String_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_List_String_simplifile_FileError val;
+};
+typedef struct T_Result_Int_simplifile_FileError Result_Int_simplifile_FileError;
+union U_Result_Int_simplifile_FileError {
+  struct Ok_Int_simplifile_FileError *Ok;
+  struct Error_Int_simplifile_FileError *Error;
+};
+struct T_Result_Int_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_Int_simplifile_FileError val;
+};
+typedef struct T_Result_BitArray_simplifile_FileError Result_BitArray_simplifile_FileError;
+union U_Result_BitArray_simplifile_FileError {
+  struct Ok_BitArray_simplifile_FileError *Ok;
+  struct Error_BitArray_simplifile_FileError *Error;
+};
+struct T_Result_BitArray_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_BitArray_simplifile_FileError val;
+};
+typedef struct T_Result_simplifile_FileInfo_simplifile_FileError Result_simplifile_FileInfo_simplifile_FileError;
+union U_Result_simplifile_FileInfo_simplifile_FileError {
+  struct Ok_simplifile_FileInfo_simplifile_FileError *Ok;
+  struct Error_simplifile_FileInfo_simplifile_FileError *Error;
+};
+struct T_Result_simplifile_FileInfo_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_simplifile_FileInfo_simplifile_FileError val;
+};
+typedef struct T_List_UtfCodepoint List_UtfCodepoint;
+union U_List_UtfCodepoint {
+  struct Empty_UtfCodepoint *Empty;
+  struct Cons_UtfCodepoint *Cons;
+};
+struct T_List_UtfCodepoint {
+  enum E_List tag;
+  union U_List_UtfCodepoint val;
+};
+typedef struct T_Result_List_UtfCodepoint_simplifile_FileError Result_List_UtfCodepoint_simplifile_FileError;
+union U_Result_List_UtfCodepoint_simplifile_FileError {
+  struct Ok_List_UtfCodepoint_simplifile_FileError *Ok;
+  struct Error_List_UtfCodepoint_simplifile_FileError *Error;
+};
+struct T_Result_List_UtfCodepoint_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_List_UtfCodepoint_simplifile_FileError val;
+};
+typedef struct T_Result_Nil_simplifile_FileError Result_Nil_simplifile_FileError;
+union U_Result_Nil_simplifile_FileError {
+  struct Ok_Nil_simplifile_FileError *Ok;
+  struct Error_Nil_simplifile_FileError *Error;
+};
+struct T_Result_Nil_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_Nil_simplifile_FileError val;
+};
+typedef struct T_Result_Bool_simplifile_FileError Result_Bool_simplifile_FileError;
+union U_Result_Bool_simplifile_FileError {
+  struct Ok_Bool_simplifile_FileError *Ok;
+  struct Error_Bool_simplifile_FileError *Error;
+};
+struct T_Result_Bool_simplifile_FileError {
+  enum E_Result tag;
+  union U_Result_Bool_simplifile_FileError val;
+};
+struct simplifile_FileInfo {
+  Int size;
+  Int mode;
+  Int nlinks;
+  Int inode;
+  Int user_id;
+  Int group_id;
+  Int dev;
+  Int atime_seconds;
+  Int mtime_seconds;
+  Int ctime_seconds;
+};
+struct Empty_String {
+};
+struct Cons_String {
+  String item;
+  List_String next;
+};
+struct simplifile_Eacces {
+};
+struct simplifile_Eagain {
+};
+struct simplifile_Ebadf {
+};
+struct simplifile_Ebadmsg {
+};
+struct simplifile_Ebusy {
+};
+struct simplifile_Edeadlk {
+};
+struct simplifile_Edeadlock {
+};
+struct simplifile_Edquot {
+};
+struct simplifile_Eexist {
+};
+struct simplifile_Efault {
+};
+struct simplifile_Efbig {
+};
+struct simplifile_Eftype {
+};
+struct simplifile_Eintr {
+};
+struct simplifile_Einval {
+};
+struct simplifile_Eio {
+};
+struct simplifile_Eisdir {
+};
+struct simplifile_Eloop {
+};
+struct simplifile_Emfile {
+};
+struct simplifile_Emlink {
+};
+struct simplifile_Emultihop {
+};
+struct simplifile_Enametoolong {
+};
+struct simplifile_Enfile {
+};
+struct simplifile_Enobufs {
+};
+struct simplifile_Enodev {
+};
+struct simplifile_Enolck {
+};
+struct simplifile_Enolink {
+};
+struct simplifile_Enoent {
+};
+struct simplifile_Enomem {
+};
+struct simplifile_Enospc {
+};
+struct simplifile_Enosr {
+};
+struct simplifile_Enostr {
+};
+struct simplifile_Enosys {
+};
+struct simplifile_Enotblk {
+};
+struct simplifile_Enotdir {
+};
+struct simplifile_Enotsup {
+};
+struct simplifile_Enxio {
+};
+struct simplifile_Eopnotsupp {
+};
+struct simplifile_Eoverflow {
+};
+struct simplifile_Eperm {
+};
+struct simplifile_Epipe {
+};
+struct simplifile_Erange {
+};
+struct simplifile_Erofs {
+};
+struct simplifile_Espipe {
+};
+struct simplifile_Esrch {
+};
+struct simplifile_Estale {
+};
+struct simplifile_Etxtbsy {
+};
+struct simplifile_Exdev {
+};
+struct simplifile_NotUtf8 {
+};
+struct simplifile_Unknown {
+  String inner;
+};
+struct Ok_List_String_simplifile_FileError {
+  List_String value;
+};
+struct Error_List_String_simplifile_FileError {
+  simplifile_FileError value;
+};
+struct Ok_Int_simplifile_FileError {
+  Int value;
+};
+struct Error_Int_simplifile_FileError {
+  simplifile_FileError value;
+};
+struct Ok_BitArray_simplifile_FileError {
+  BitArray value;
+};
+struct Error_BitArray_simplifile_FileError {
+  simplifile_FileError value;
+};
+struct Ok_simplifile_FileInfo_simplifile_FileError {
+  simplifile_FileInfo value;
+};
+struct Error_simplifile_FileInfo_simplifile_FileError {
+  simplifile_FileError value;
+};
+struct Empty_UtfCodepoint {
+};
+struct Cons_UtfCodepoint {
+  UtfCodepoint item;
+  List_UtfCodepoint next;
+};
+struct Ok_List_UtfCodepoint_simplifile_FileError {
+  List_UtfCodepoint value;
+};
+struct Error_List_UtfCodepoint_simplifile_FileError {
+  simplifile_FileError value;
+};
+struct Ok_Nil_simplifile_FileError {
+  Nil value;
+};
+struct Error_Nil_simplifile_FileError {
+  simplifile_FileError value;
+};
+struct Ok_Bool_simplifile_FileError {
+  Bool value;
+};
+struct Error_Bool_simplifile_FileError {
+  simplifile_FileError value;
+};
 
+
+simplifile_FileInfo new_simplifile_FileInfo(Int size, Int mode, Int nlinks, Int inode, Int user_id, Int group_id, Int dev, Int atime_seconds, Int mtime_seconds, Int ctime_seconds);
 Bool eq_simplifile_FileInfo(simplifile_FileInfo a, simplifile_FileInfo b);
 Bool lt_simplifile_FileInfo(simplifile_FileInfo a, simplifile_FileInfo b);
-String inspect_simplifile_FileInfo(simplifile_FileInfo a);
-simplifile_FileInfo new_simplifile_FileInfo(Int size, Int mode, Int nlinks, Int inode, Int user_id, Int group_id, Int dev, Int atime_seconds, Int mtime_seconds, Int ctime_seconds);
-Bool eq_List_String(List_String a, List_String b);
-Bool lt_List_String(List_String a, List_String b);
-String inspect_List_String(List_String a);
+String inspect_simplifile_FileInfo(simplifile_FileInfo value);
 extern const List_String new_Empty_String;
 List_String new_Cons_String(String item, List_String next);
-Bool eq_simplifile_FileError(simplifile_FileError a, simplifile_FileError b);
-Bool lt_simplifile_FileError(simplifile_FileError a, simplifile_FileError b);
-String inspect_simplifile_FileError(simplifile_FileError a);
+Bool eq_List_String(List_String a, List_String b);
+Bool lt_List_String(List_String a, List_String b);
+String inspect_List_String(List_String value);
 extern const simplifile_FileError new_simplifile_Eacces;
 extern const simplifile_FileError new_simplifile_Eagain;
 extern const simplifile_FileError new_simplifile_Ebadf;
@@ -174,47 +426,49 @@ extern const simplifile_FileError new_simplifile_Etxtbsy;
 extern const simplifile_FileError new_simplifile_Exdev;
 extern const simplifile_FileError new_simplifile_NotUtf8;
 simplifile_FileError new_simplifile_Unknown(String inner);
-Bool eq_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a, Result_List_String_simplifile_FileError b);
-Bool lt_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a, Result_List_String_simplifile_FileError b);
-String inspect_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a);
+Bool eq_simplifile_FileError(simplifile_FileError a, simplifile_FileError b);
+Bool lt_simplifile_FileError(simplifile_FileError a, simplifile_FileError b);
+String inspect_simplifile_FileError(simplifile_FileError value);
 Result_List_String_simplifile_FileError new_Ok_List_String_simplifile_FileError(List_String value);
 Result_List_String_simplifile_FileError new_Error_List_String_simplifile_FileError(simplifile_FileError value);
-Bool eq_Result_Int_simplifile_FileError(Result_Int_simplifile_FileError a, Result_Int_simplifile_FileError b);
-Bool lt_Result_Int_simplifile_FileError(Result_Int_simplifile_FileError a, Result_Int_simplifile_FileError b);
-String inspect_Result_Int_simplifile_FileError(Result_Int_simplifile_FileError a);
+Bool eq_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a, Result_List_String_simplifile_FileError b);
+Bool lt_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError a, Result_List_String_simplifile_FileError b);
+String inspect_Result_List_String_simplifile_FileError(Result_List_String_simplifile_FileError value);
 Result_Int_simplifile_FileError new_Ok_Int_simplifile_FileError(Int value);
 Result_Int_simplifile_FileError new_Error_Int_simplifile_FileError(simplifile_FileError value);
-Bool eq_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a, Result_BitArray_simplifile_FileError b);
-Bool lt_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a, Result_BitArray_simplifile_FileError b);
-String inspect_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a);
+Bool eq_Result_Int_simplifile_FileError(Result_Int_simplifile_FileError a, Result_Int_simplifile_FileError b);
+Bool lt_Result_Int_simplifile_FileError(Result_Int_simplifile_FileError a, Result_Int_simplifile_FileError b);
+String inspect_Result_Int_simplifile_FileError(Result_Int_simplifile_FileError value);
 Result_BitArray_simplifile_FileError new_Ok_BitArray_simplifile_FileError(BitArray value);
 Result_BitArray_simplifile_FileError new_Error_BitArray_simplifile_FileError(simplifile_FileError value);
-Bool eq_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a, Result_simplifile_FileInfo_simplifile_FileError b);
-Bool lt_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a, Result_simplifile_FileInfo_simplifile_FileError b);
-String inspect_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a);
+Bool eq_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a, Result_BitArray_simplifile_FileError b);
+Bool lt_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError a, Result_BitArray_simplifile_FileError b);
+String inspect_Result_BitArray_simplifile_FileError(Result_BitArray_simplifile_FileError value);
 Result_simplifile_FileInfo_simplifile_FileError new_Ok_simplifile_FileInfo_simplifile_FileError(simplifile_FileInfo value);
 Result_simplifile_FileInfo_simplifile_FileError new_Error_simplifile_FileInfo_simplifile_FileError(simplifile_FileError value);
-Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
-Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
-String inspect_List_UtfCodepoint(List_UtfCodepoint a);
+Bool eq_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a, Result_simplifile_FileInfo_simplifile_FileError b);
+Bool lt_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError a, Result_simplifile_FileInfo_simplifile_FileError b);
+String inspect_Result_simplifile_FileInfo_simplifile_FileError(Result_simplifile_FileInfo_simplifile_FileError value);
 extern const List_UtfCodepoint new_Empty_UtfCodepoint;
 List_UtfCodepoint new_Cons_UtfCodepoint(UtfCodepoint item, List_UtfCodepoint next);
-Bool eq_Result_List_UtfCodepoint_simplifile_FileError(Result_List_UtfCodepoint_simplifile_FileError a, Result_List_UtfCodepoint_simplifile_FileError b);
-Bool lt_Result_List_UtfCodepoint_simplifile_FileError(Result_List_UtfCodepoint_simplifile_FileError a, Result_List_UtfCodepoint_simplifile_FileError b);
-String inspect_Result_List_UtfCodepoint_simplifile_FileError(Result_List_UtfCodepoint_simplifile_FileError a);
+Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
+Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
+String inspect_List_UtfCodepoint(List_UtfCodepoint value);
 Result_List_UtfCodepoint_simplifile_FileError new_Ok_List_UtfCodepoint_simplifile_FileError(List_UtfCodepoint value);
 Result_List_UtfCodepoint_simplifile_FileError new_Error_List_UtfCodepoint_simplifile_FileError(simplifile_FileError value);
-Bool eq_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a, Result_Nil_simplifile_FileError b);
-Bool lt_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a, Result_Nil_simplifile_FileError b);
-String inspect_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a);
+Bool eq_Result_List_UtfCodepoint_simplifile_FileError(Result_List_UtfCodepoint_simplifile_FileError a, Result_List_UtfCodepoint_simplifile_FileError b);
+Bool lt_Result_List_UtfCodepoint_simplifile_FileError(Result_List_UtfCodepoint_simplifile_FileError a, Result_List_UtfCodepoint_simplifile_FileError b);
+String inspect_Result_List_UtfCodepoint_simplifile_FileError(Result_List_UtfCodepoint_simplifile_FileError value);
 Result_Nil_simplifile_FileError new_Ok_Nil_simplifile_FileError(Nil value);
 Result_Nil_simplifile_FileError new_Error_Nil_simplifile_FileError(simplifile_FileError value);
-Bool eq_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a, Result_Bool_simplifile_FileError b);
-Bool lt_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a, Result_Bool_simplifile_FileError b);
-String inspect_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a);
+Bool eq_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a, Result_Nil_simplifile_FileError b);
+Bool lt_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError a, Result_Nil_simplifile_FileError b);
+String inspect_Result_Nil_simplifile_FileError(Result_Nil_simplifile_FileError value);
 Result_Bool_simplifile_FileError new_Ok_Bool_simplifile_FileError(Bool value);
 Result_Bool_simplifile_FileError new_Error_Bool_simplifile_FileError(simplifile_FileError value);
-
+Bool eq_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a, Result_Bool_simplifile_FileError b);
+Bool lt_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError a, Result_Bool_simplifile_FileError b);
+String inspect_Result_Bool_simplifile_FileError(Result_Bool_simplifile_FileError value);
 Result_Bool_simplifile_FileError simplifile_is_symlink(String filepath);
 Result_Nil_simplifile_FileError simplifile_rename_file(String src, String dest);
 Result_List_UtfCodepoint_simplifile_FileError simplifile_erl_do_current_directory();
@@ -234,179 +488,3 @@ Result_List_String_simplifile_FileError simplifile_read_directory(String path);
 Result_Nil_simplifile_FileError simplifile_set_permissions_octal(String filepath, Int permissions);
 Result_Nil_simplifile_FileError simplifile_rename(String src, String dest);
 Result_Nil_simplifile_FileError simplifile_create_directory(String filepath);
-
-struct simplifile_FileInfo{
-Int size;
-Int mode;
-Int nlinks;
-Int inode;
-Int user_id;
-Int group_id;
-Int dev;
-Int atime_seconds;
-Int mtime_seconds;
-Int ctime_seconds;
-};
-
-struct Empty_String{
-};
-struct Cons_String{
-String item;
-List_String next;
-};
-
-struct simplifile_Eacces{
-};
-struct simplifile_Eagain{
-};
-struct simplifile_Ebadf{
-};
-struct simplifile_Ebadmsg{
-};
-struct simplifile_Ebusy{
-};
-struct simplifile_Edeadlk{
-};
-struct simplifile_Edeadlock{
-};
-struct simplifile_Edquot{
-};
-struct simplifile_Eexist{
-};
-struct simplifile_Efault{
-};
-struct simplifile_Efbig{
-};
-struct simplifile_Eftype{
-};
-struct simplifile_Eintr{
-};
-struct simplifile_Einval{
-};
-struct simplifile_Eio{
-};
-struct simplifile_Eisdir{
-};
-struct simplifile_Eloop{
-};
-struct simplifile_Emfile{
-};
-struct simplifile_Emlink{
-};
-struct simplifile_Emultihop{
-};
-struct simplifile_Enametoolong{
-};
-struct simplifile_Enfile{
-};
-struct simplifile_Enobufs{
-};
-struct simplifile_Enodev{
-};
-struct simplifile_Enolck{
-};
-struct simplifile_Enolink{
-};
-struct simplifile_Enoent{
-};
-struct simplifile_Enomem{
-};
-struct simplifile_Enospc{
-};
-struct simplifile_Enosr{
-};
-struct simplifile_Enostr{
-};
-struct simplifile_Enosys{
-};
-struct simplifile_Enotblk{
-};
-struct simplifile_Enotdir{
-};
-struct simplifile_Enotsup{
-};
-struct simplifile_Enxio{
-};
-struct simplifile_Eopnotsupp{
-};
-struct simplifile_Eoverflow{
-};
-struct simplifile_Eperm{
-};
-struct simplifile_Epipe{
-};
-struct simplifile_Erange{
-};
-struct simplifile_Erofs{
-};
-struct simplifile_Espipe{
-};
-struct simplifile_Esrch{
-};
-struct simplifile_Estale{
-};
-struct simplifile_Etxtbsy{
-};
-struct simplifile_Exdev{
-};
-struct simplifile_NotUtf8{
-};
-struct simplifile_Unknown{
-String inner;
-};
-
-struct Ok_List_String_simplifile_FileError{
-List_String value;
-};
-struct Error_List_String_simplifile_FileError{
-simplifile_FileError value;
-};
-
-struct Ok_Int_simplifile_FileError{
-Int value;
-};
-struct Error_Int_simplifile_FileError{
-simplifile_FileError value;
-};
-
-struct Ok_BitArray_simplifile_FileError{
-BitArray value;
-};
-struct Error_BitArray_simplifile_FileError{
-simplifile_FileError value;
-};
-
-struct Ok_simplifile_FileInfo_simplifile_FileError{
-simplifile_FileInfo value;
-};
-struct Error_simplifile_FileInfo_simplifile_FileError{
-simplifile_FileError value;
-};
-
-struct Empty_UtfCodepoint{
-};
-struct Cons_UtfCodepoint{
-UtfCodepoint item;
-List_UtfCodepoint next;
-};
-
-struct Ok_List_UtfCodepoint_simplifile_FileError{
-List_UtfCodepoint value;
-};
-struct Error_List_UtfCodepoint_simplifile_FileError{
-simplifile_FileError value;
-};
-
-struct Ok_Nil_simplifile_FileError{
-Nil value;
-};
-struct Error_Nil_simplifile_FileError{
-simplifile_FileError value;
-};
-
-struct Ok_Bool_simplifile_FileError{
-Bool value;
-};
-struct Error_Bool_simplifile_FileError{
-simplifile_FileError value;
-};

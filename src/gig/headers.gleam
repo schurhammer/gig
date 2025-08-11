@@ -1,5 +1,5 @@
+import anf/codegen
 import gig/closure
-import gig/codegen
 import gig/core
 import gig/mono
 import gleam/dict
@@ -42,7 +42,7 @@ pub fn module_headers(c: core.Context) {
         mono.instantiate_type(c, external.typ)
       })
       |> closure.cc_module
-      |> codegen.module_header
+      |> codegen.compile_module_header
 
     let header =
       string.join(

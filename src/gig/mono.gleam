@@ -63,15 +63,14 @@ pub type Function {
 }
 
 pub type FieldAccessKind {
-  StructPointerAccess
   StructAccess
+  StructPointerAccess
   TaggedUnionAccess
 }
 
 pub type Op {
   FieldAccess(kind: FieldAccessKind, variant: String, field: String)
   VariantCheck(variant: String)
-  Panic
 }
 
 pub type Exp {
@@ -84,6 +83,7 @@ pub type Exp {
   Fn(typ: Type, parameters: List(Field), body: Exp)
   Let(typ: Type, var: String, val: Exp, exp: Exp)
   If(typ: Type, cond: Exp, then_exp: Exp, else_exp: Exp)
+  Panic(typ: Type, value: Exp)
 }
 
 pub fn init_context(in: t.Context) -> Context {
@@ -154,8 +154,6 @@ fn unify_poly(c: Context, poly: t.Poly, mono: Type) -> List(#(Int, Type)) {
     case list.find(sub, fn(s) { s.0 == x }) {
       Ok(s) -> #(x, s.1)
       Error(Nil) -> {
-        io.debug(poly)
-        io.debug(mono)
         panic as "could not unify poly type"
       }
     }
@@ -171,8 +169,6 @@ fn unify_type(c: Context, poly: t.Type, mono: Type) -> List(#(Int, Type)) {
           list.zip(aa, ba)
           |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) })
         False -> {
-          io.debug(poly)
-          io.debug(mono)
           panic as "could not unify types"
         }
       }
@@ -183,8 +179,6 @@ fn unify_type(c: Context, poly: t.Type, mono: Type) -> List(#(Int, Type)) {
           |> list.flat_map(fn(x) { unify_type(c, x.0, x.1) }),
       )
     _, _ -> {
-      io.debug(poly)
-      io.debug(mono)
       panic as "could not unify types"
     }
   }
@@ -266,8 +260,8 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
       let mono_name = fun.id <> type_string
 
       case fun.body {
-        t.Op(_, t.Panic, _) -> {
-          io.println("instantiating unimplemented function " <> fun.id)
+        t.Panic(_, _) -> {
+          io.println_error("instantiating unimplemented function " <> fun.id)
         }
         _ -> Nil
       }
@@ -309,8 +303,9 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
             True -> #(c, external.external_name)
             False -> {
               let sub = unify_poly(c, external.typ, mono)
+              let type_string = get_type_string(sub)
               case external.mono {
-                True -> #(c, external.external_name <> get_type_string(sub))
+                True -> #(c, external.external_name <> type_string)
                 False -> {
                   let typ = sub_type([], external.typ.typ)
                   let c = instantiate_type(c, typ)
@@ -399,7 +394,6 @@ fn typed_to_mono_exp(
           FieldAccess(kind:, variant:, field:)
         }
         t.VariantCheck(variant:) -> VariantCheck(variant:)
-        t.Panic -> Panic
       }
       #(c, Op(typ, op, args))
     }
@@ -425,6 +419,11 @@ fn typed_to_mono_exp(
       let #(c, else_e) = typed_to_mono_exp(c, sub, else_e)
       let typ = sub_type(sub, typ)
       #(c, If(typ, cond, then_e, else_e))
+    }
+    t.Panic(typ, arg) -> {
+      let #(c, arg) = typed_to_mono_exp(c, sub, arg)
+      let typ = sub_type(sub, typ)
+      #(c, Panic(typ, arg))
     }
   }
 }
