@@ -17,6 +17,7 @@ pub type Context {
     used_functions: set.Set(String),
     used_externals: set.Set(String),
     used_modules: set.Set(String),
+    used_builtin: set.Set(String),
   )
 }
 
@@ -106,6 +107,7 @@ pub fn init_context(in: t.Context) -> Context {
     used_functions: set.new(),
     used_externals: set.new(),
     used_modules: set.new(),
+    used_builtin: set.new(),
   )
 }
 
@@ -298,14 +300,44 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
     }
     Error(_) ->
       case dict.get(c.in_externals, name) {
-        Ok(external) ->
-          case set.contains(c.used_externals, external.internal_name) {
-            True -> #(c, external.external_name)
-            False -> {
+        Ok(external) -> {
+          case external.mono {
+            True -> {
               let sub = unify_poly(c, external.typ, mono)
               let type_string = get_type_string(sub)
-              case external.mono {
-                True -> #(c, external.external_name <> type_string)
+              let lookup_name = external.external_name <> type_string
+              case set.contains(c.used_builtin, lookup_name) {
+                True -> #(c, lookup_name)
+                False -> {
+                  // also instantiate builtins used by this builtin
+                  let source_type = case mono {
+                    // this happens with unary constructors
+                    NamedType(..) -> mono
+                    FunctionType([], ret) -> ret
+                    FunctionType([a, ..], _ret) -> a
+                  }
+                  let c = case name {
+                    "lt" -> {
+                      let c = instantiate_builtin(c, "eq", source_type)
+                      instantiate_builtin(c, name, source_type)
+                    }
+                    "eq" | "inspect" -> {
+                      instantiate_builtin(c, name, source_type)
+                    }
+                    _constructor -> {
+                      let used_builtin = set.insert(c.used_builtin, lookup_name)
+                      Context(..c, used_builtin:)
+                    }
+                  }
+
+                  #(c, lookup_name)
+                }
+              }
+            }
+            False -> {
+              let lookup_name = external.external_name
+              case set.contains(c.used_externals, lookup_name) {
+                True -> #(c, lookup_name)
                 False -> {
                   let typ = sub_type([], external.typ.typ)
                   let c = instantiate_type(c, typ)
@@ -325,22 +357,54 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
                       mono: external.mono,
                       typ: typ,
                     )
+
                   let externals = [external, ..c.externals]
                   let used_modules = set.insert(c.used_modules, external.module)
-                  let used_externals =
-                    set.insert(c.used_externals, external.internal_name)
+                  let used_externals = set.insert(c.used_externals, lookup_name)
 
                   let c =
                     Context(..c, externals:, used_modules:, used_externals:)
-                  #(c, external.external_name)
+                  #(c, lookup_name)
                 }
               }
             }
           }
+        }
         Error(_) -> {
           panic as { "invalid reference " <> name }
         }
       }
+  }
+}
+
+/// Mark the builtin as used and also transitive builtins
+fn instantiate_builtin(c: Context, fun_name: String, mono: Type) -> Context {
+  let lookup_name = fun_name <> "_" <> type_name(mono)
+  case set.contains(c.used_builtin, lookup_name) {
+    True -> c
+    False -> {
+      // mark as used
+      let used_builtin = set.insert(c.used_builtin, lookup_name)
+      let c = Context(..c, used_builtin:)
+
+      // also instantiate builtins used by this builtin
+      let assert NamedType(custom_type_name, _) = mono
+      case dict.get(c.in_types, custom_type_name) {
+        Ok(custom) -> {
+          let sub = unify_poly(c, custom.typ, mono)
+          list.fold(custom.variants, c, fn(c, v) {
+            list.fold(v.fields, c, fn(c, f) {
+              let field_typ = sub_type(sub, f.typ)
+              case field_typ {
+                NamedType(..) -> instantiate_builtin(c, fun_name, field_typ)
+                _ -> c
+              }
+            })
+          })
+        }
+        Error(_) -> c
+      }
+    }
   }
 }
 

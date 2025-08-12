@@ -748,7 +748,12 @@ type Context {
     type_impl: List(String),
     fun_decl: List(String),
     fun_impl: List(String),
+    used_builtin: set.Set(String),
   )
+}
+
+fn is_builtin_used(c: Context, name: String) -> Bool {
+  set.contains(c.used_builtin, name)
 }
 
 fn record_type(c: Context, t: CustomType, v: Variant) -> Context {
@@ -759,13 +764,22 @@ fn record_type(c: Context, t: CustomType, v: Variant) -> Context {
   let cons_impl = generate_record_constructor(t, v)
 
   let eq_decl = generate_eq_header(t) <> ";"
-  let eq_impl = generate_record_eq(t, v)
+  let eq_impl = case is_builtin_used(c, "eq_" <> t.name) {
+    True -> generate_record_eq(t, v)
+    False -> ""
+  }
 
   let lt_decl = generate_lt_header(t) <> ";"
-  let lt_impl = generate_record_lt(t, v)
+  let lt_impl = case is_builtin_used(c, "lt_" <> t.name) {
+    True -> generate_record_lt(t, v)
+    False -> ""
+  }
 
   let inspect_decl = generate_inspect_header(t) <> ";"
-  let inspect_impl = generate_record_inspect(t, v)
+  let inspect_impl = case is_builtin_used(c, "inspect_" <> t.name) {
+    True -> generate_record_inspect(t, v)
+    False -> ""
+  }
 
   let fun_decl = [inspect_decl, lt_decl, eq_decl, cons_decl, ..c.fun_decl]
   let fun_impl = [inspect_impl, lt_impl, eq_impl, cons_impl, ..c.fun_impl]
@@ -797,24 +811,34 @@ fn sumtype_type(c: Context, t: CustomType) -> Context {
     |> string.join("\n")
 
   let cons_impl =
-    list.map(t.variants, fn(v) { generate_sumtype_constructor(t, v) })
+    t.variants
+    |> list.map(fn(v) { generate_sumtype_constructor(t, v) })
     |> string.join("\n")
 
   let eq_decl = generate_eq_header(t) <> ";"
-  let eq_impl = generate_sumtype_eq(t)
+  let eq_impl = case is_builtin_used(c, "eq_" <> t.name) {
+    True -> generate_sumtype_eq(t)
+    False -> ""
+  }
 
   let lt_decl = generate_lt_header(t) <> ";"
-  let lt_impl = generate_sumtype_lt(t)
+  let lt_impl = case is_builtin_used(c, "lt_" <> t.name) {
+    True -> generate_sumtype_lt(t)
+    False -> ""
+  }
 
   let inspect_decl = generate_inspect_header(t) <> ";"
-  let inspect_impl = generate_sumtype_inspect(t)
+  let inspect_impl = case is_builtin_used(c, "inspect_" <> t.name) {
+    True -> generate_sumtype_inspect(t)
+    False -> ""
+  }
 
   let fun_decl = [inspect_decl, lt_decl, eq_decl, cons_decl, ..c.fun_decl]
   let fun_impl = [inspect_impl, lt_impl, eq_impl, cons_impl, ..c.fun_impl]
   let type_decl = [struct, union, enum, typedef, ..c.type_decl]
   let type_impl = [structs, ..c.type_impl]
 
-  Context(type_decl:, type_impl:, fun_decl:, fun_impl:, generated_enums:)
+  Context(..c, type_decl:, type_impl:, fun_decl:, fun_impl:, generated_enums:)
 }
 
 fn sort_types_by_dependency(mod: Module) -> List(CustomType) {
@@ -844,6 +868,7 @@ pub fn compile_module(mod: Module) -> String {
   let c =
     Context(
       generated_enums: set.new(),
+      used_builtin: mod.used_builtin,
       type_decl: [],
       type_impl: [],
       fun_decl: [],
@@ -895,6 +920,7 @@ pub fn compile_module_header(mod: Module) -> String {
   let c =
     Context(
       generated_enums: set.new(),
+      used_builtin: mod.used_builtin,
       type_decl: [],
       type_impl: [],
       fun_decl: [],

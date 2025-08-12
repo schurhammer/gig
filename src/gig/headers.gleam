@@ -11,6 +11,7 @@ pub fn module_headers(c: core.Context) {
   |> list.filter(fn(x) { !x.mono })
   |> list.group(fn(x) { x.module })
   |> dict.to_list()
+  |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
   |> list.map(fn(entry) {
     let #(module_name, externals) = entry
 

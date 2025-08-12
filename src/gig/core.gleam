@@ -95,7 +95,9 @@ pub type Context {
 
 pub fn lower_context(c: t.Context) {
   let acc = Context(types: [], functions: [], externals: [])
-  dict.fold(c.modules, acc, fn(acc, _, module) { lower_module(c, acc, module) })
+  dict.values(c.modules)
+  |> list.sort(fn(a, b) { string.compare(a.name, b.name) })
+  |> list.fold(acc, fn(acc, module) { lower_module(c, acc, module) })
 }
 
 fn lower_module(c: t.Context, acc: Context, module: t.Module) {
@@ -1088,9 +1090,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let assert [field, ..] = list.drop(variant.fields, index)
       let field = option.unwrap(field.label, "")
       let field = gen_names.get_field_name(field, index)
-      Op(typ, FieldAccess(variant.name, field), [
-        container,
-      ])
+      Op(typ, FieldAccess(variant.name, field), [container])
     }
     t.Call(typ, function, args) -> {
       let typ = map_type(c, typ)

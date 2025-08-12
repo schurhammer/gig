@@ -1,5 +1,6 @@
 import gig/core
 import gig/mono
+import gleam/set
 
 import gleam/int
 import gleam/list
@@ -13,6 +14,7 @@ pub type Module {
     types: List(CustomType),
     functions: List(Function),
     externals: List(Function),
+    used_builtin: set.Set(String),
   )
 }
 
@@ -55,7 +57,7 @@ pub type Exp {
 }
 
 pub fn cc_module(mod: mono.Context) {
-  let c = CC(Module([], [], []), 1)
+  let c = CC(Module([], [], [], mod.used_builtin), 1)
 
   let c =
     list.fold(mod.functions, c, fn(c, fun) {
