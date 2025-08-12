@@ -7,5 +7,5 @@
 
 
 String gleam_io_do_get_line(Int length);
-Nil gleam_io_do_print(String s);
 Nil gleam_io_do_print_error(String s);
+Nil gleam_io_do_print(String s);

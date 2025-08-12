@@ -8,101 +8,69 @@ pub fn apply(module: glance.Module, polyfill: glance.Module) -> glance.Module {
   let imports =
     module.imports
     |> list.map(fn(i) { #(i.definition.module, i) })
-    |> dict.from_list()
-
+  let polyfill_imports =
+    polyfill.imports
+    |> list.map(fn(i) { #(i.definition.module, i) })
   let merged_imports =
-    list.fold(polyfill.imports, imports, fn(acc, i) {
-      let i = case dict.get(acc, i.definition.module) {
-        Ok(existing) -> {
-          glance.Definition(
-            i.attributes,
-            glance.Import(
-              module: i.definition.module,
-              alias: i.definition.alias,
-              unqualified_types: list.append(
-                existing.definition.unqualified_types,
-                i.definition.unqualified_types,
-              ),
-              unqualified_values: list.append(
-                existing.definition.unqualified_values,
-                i.definition.unqualified_values,
-              ),
-            ),
-          )
-        }
-        Error(_) -> i
-      }
-      dict.insert(acc, i.definition.module, i)
+    merge(imports, polyfill_imports, fn(a, b) {
+      glance.Definition(
+        b.attributes,
+        glance.Import(
+          module: b.definition.module,
+          alias: b.definition.alias,
+          unqualified_types: list.append(
+            a.definition.unqualified_types,
+            b.definition.unqualified_types,
+          ),
+          unqualified_values: list.append(
+            a.definition.unqualified_values,
+            b.definition.unqualified_values,
+          ),
+        ),
+      )
     })
-    |> dict.values()
 
   // polyfill functions
   let functions =
     module.functions
     |> list.map(fn(f) { #(f.definition.name, f) })
-    |> dict.from_list()
-
+  let polyfill_functions =
+    polyfill.functions
+    |> list.map(fn(f) { #(f.definition.name, f) })
   let merged_functions =
-    list.fold(polyfill.functions, functions, fn(funs, i) {
-      case dict.get(funs, i.definition.name) {
-        Ok(existing) -> check_matching_args(existing.definition, i.definition)
-        Error(_) -> Nil
-      }
-      dict.insert(funs, i.definition.name, i)
+    merge(functions, polyfill_functions, fn(a, b) {
+      check_matching_args(a.definition, b.definition)
+      b
     })
-    |> dict.values()
 
   // polyfill custom types
   let custom_types =
-    module.custom_types
-    |> list.map(fn(t) { #(t.definition.name, t) })
-    |> dict.from_list()
-
+    list.map(module.custom_types, fn(t) { #(t.definition.name, t) })
   let polyfill_custom_types =
-    polyfill.custom_types
-    |> list.map(fn(t) { #(t.definition.name, t) })
-    |> dict.from_list()
-
+    list.map(polyfill.custom_types, fn(t) { #(t.definition.name, t) })
   let merged_custom_types =
-    dict.merge(custom_types, polyfill_custom_types)
-    |> dict.values()
+    merge(custom_types, polyfill_custom_types, fn(_, b) { b })
 
   // polyfill constants
-  let constants =
-    module.constants
-    |> list.map(fn(c) { #(c.definition.name, c) })
-    |> dict.from_list()
-
+  let constants = list.map(module.constants, fn(c) { #(c.definition.name, c) })
   let polyfill_constants =
-    polyfill.constants
-    |> list.map(fn(c) { #(c.definition.name, c) })
-    |> dict.from_list()
-
-  let merged_constants =
-    dict.merge(constants, polyfill_constants)
-    |> dict.values()
+    list.map(polyfill.constants, fn(c) { #(c.definition.name, c) })
+  let merged_constants = merge(constants, polyfill_constants, fn(_, b) { b })
 
   // polyfill type aliases
   let type_aliases =
-    module.type_aliases
-    |> list.map(fn(a) { #(a.definition.name, a) })
-    |> dict.from_list()
-
+    list.map(module.type_aliases, fn(a) { #(a.definition.name, a) })
   let polyfill_type_aliases =
-    polyfill.type_aliases
-    |> list.map(fn(a) { #(a.definition.name, a) })
-    |> dict.from_list()
-
+    list.map(polyfill.type_aliases, fn(a) { #(a.definition.name, a) })
   let merged_type_aliases =
-    dict.merge(type_aliases, polyfill_type_aliases)
-    |> dict.values()
+    merge(type_aliases, polyfill_type_aliases, fn(_, b) { b })
 
   glance.Module(
+    imports: merged_imports,
     functions: merged_functions,
     custom_types: merged_custom_types,
     constants: merged_constants,
     type_aliases: merged_type_aliases,
-    imports: merged_imports,
   )
 }
 
@@ -126,17 +94,52 @@ fn check_matching_args(af: glance.Function, bf: glance.Function) {
     case a.label == b.label {
       False -> {
         panic as {
-          "polyfill should have matching labels. \n at "
-          <> bf.name
-          <> " "
-          <> a_label
-          <> "!="
-          <> b_label
-        }
+            "polyfill should have matching labels. \n at "
+            <> bf.name
+            <> " "
+            <> a_label
+            <> "!="
+            <> b_label
+          }
       }
       True -> Nil
     }
     Nil
   })
   Nil
+}
+
+fn merge(
+  a: List(#(String, glance.Definition(d))),
+  b: List(#(String, glance.Definition(d))),
+  merge_item: fn(glance.Definition(d), glance.Definition(d)) ->
+    glance.Definition(d),
+) -> List(glance.Definition(d)) {
+  // filter out other targets
+  let a =
+    list.filter(a, fn(a) {
+      !list.any({ a.1 }.attributes, fn(attr) {
+        case attr {
+          glance.Attribute("target", [glance.Variable(c)]) if c != "c" -> True
+          _ -> False
+        }
+      })
+    })
+
+  // merge a's that are in b using the merge function
+  let bd = dict.from_list(b)
+  let a =
+    list.map(a, fn(a) {
+      case dict.get(bd, a.0) {
+        Ok(b) -> #(a.0, merge_item(a.1, b))
+        _ -> a
+      }
+    })
+
+  // keep b's that are not in a
+  let ad = dict.from_list(a)
+  let b = list.filter(b, fn(b) { !dict.has_key(ad, b.0) })
+
+  list.append(a, b)
+  |> list.map(fn(a) { a.1 })
 }

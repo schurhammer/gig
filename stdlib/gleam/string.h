@@ -63,12 +63,12 @@ List_UtfCodepoint new_Cons_UtfCodepoint(UtfCodepoint item, List_UtfCodepoint nex
 Bool eq_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
 Bool lt_List_UtfCodepoint(List_UtfCodepoint a, List_UtfCodepoint b);
 String inspect_List_UtfCodepoint(List_UtfCodepoint value);
-Bool starts_with_string(String string, String prefix);
-Bool ends_with_string(String string, String suffix);
-List_UtfCodepoint gleam_string_do_to_utf_codepoints(String string);
 String gleam_string_from_utf_codepoints(List_UtfCodepoint utf_codepoints);
-Int compare_string(String a, String b);
 UtfCodepoint gleam_string_unsafe_int_to_utf_codepoint(Int a);
 String append_string(String first, String second);
+Bool ends_with_string(String string, String suffix);
+Bool starts_with_string(String string, String prefix);
 Result_Tuple2_String_String_Nil pop_grapheme_string(String string);
 String slice_string(String string, Int idx, Int len);
+List_UtfCodepoint gleam_string_do_to_utf_codepoints(String string);
+Int compare_string(String a, String b);

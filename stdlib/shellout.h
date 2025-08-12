@@ -7,20 +7,11 @@
 typedef struct Tuple2_Int_String Tuple2_Int_String;
 typedef struct Tuple2_String_String Tuple2_String_String;
 typedef struct Tuple2_shellout_CommandOpt_Bool Tuple2_shellout_CommandOpt_Bool;
-typedef struct T_Result_String_String Result_String_String;
+typedef struct T_Result_String_Tuple2_Int_String Result_String_Tuple2_Int_String;
 enum E_Result {
   E_Ok,
   E_Error
 };
-union U_Result_String_String {
-  struct Ok_String_String *Ok;
-  struct Error_String_String *Error;
-};
-struct T_Result_String_String {
-  enum E_Result tag;
-  union U_Result_String_String val;
-};
-typedef struct T_Result_String_Tuple2_Int_String Result_String_Tuple2_Int_String;
 union U_Result_String_Tuple2_Int_String {
   struct Ok_String_Tuple2_Int_String *Ok;
   struct Error_String_Tuple2_Int_String *Error;
@@ -77,6 +68,15 @@ struct T_List_String {
   enum E_List tag;
   union U_List_String val;
 };
+typedef struct T_Result_String_String Result_String_String;
+union U_Result_String_String {
+  struct Ok_String_String *Ok;
+  struct Error_String_String *Error;
+};
+struct T_Result_String_String {
+  enum E_Result tag;
+  union U_Result_String_String val;
+};
 struct Tuple2_Int_String {
   Int field0;
   String field1;
@@ -88,12 +88,6 @@ struct Tuple2_String_String {
 struct Tuple2_shellout_CommandOpt_Bool {
   shellout_CommandOpt field0;
   Bool field1;
-};
-struct Ok_String_String {
-  String value;
-};
-struct Error_String_String {
-  String value;
 };
 struct Ok_String_Tuple2_Int_String {
   String value;
@@ -128,6 +122,12 @@ struct Cons_String {
   String item;
   List_String next;
 };
+struct Ok_String_String {
+  String value;
+};
+struct Error_String_String {
+  String value;
+};
 
 
 Tuple2_Int_String new_Tuple2_Int_String(Int field0, String field1);
@@ -142,11 +142,6 @@ Tuple2_shellout_CommandOpt_Bool new_Tuple2_shellout_CommandOpt_Bool(shellout_Com
 Bool eq_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool a, Tuple2_shellout_CommandOpt_Bool b);
 Bool lt_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool a, Tuple2_shellout_CommandOpt_Bool b);
 String inspect_Tuple2_shellout_CommandOpt_Bool(Tuple2_shellout_CommandOpt_Bool value);
-Result_String_String new_Ok_String_String(String value);
-Result_String_String new_Error_String_String(String value);
-Bool eq_Result_String_String(Result_String_String a, Result_String_String b);
-Bool lt_Result_String_String(Result_String_String a, Result_String_String b);
-String inspect_Result_String_String(Result_String_String value);
 Result_String_Tuple2_Int_String new_Ok_String_Tuple2_Int_String(String value);
 Result_String_Tuple2_Int_String new_Error_String_Tuple2_Int_String(Tuple2_Int_String value);
 Bool eq_Result_String_Tuple2_Int_String(Result_String_Tuple2_Int_String a, Result_String_Tuple2_Int_String b);
@@ -174,7 +169,12 @@ List_String new_Cons_String(String item, List_String next);
 Bool eq_List_String(List_String a, List_String b);
 Bool lt_List_String(List_String a, List_String b);
 String inspect_List_String(List_String value);
+Result_String_String new_Ok_String_String(String value);
+Result_String_String new_Error_String_String(String value);
+Bool eq_Result_String_String(Result_String_String a, Result_String_String b);
+Bool lt_Result_String_String(Result_String_String a, Result_String_String b);
+String inspect_Result_String_String(Result_String_String value);
+Result_String_String shellout_which(String executable);
+Nil shellout_exit(Int status);
 List_String shellout_arguments();
 Result_String_Tuple2_Int_String shellout_c_do_command(String executable, List_String arguments, String directory, List_Tuple2_shellout_CommandOpt_Bool options, List_Tuple2_String_String environment);
-Nil shellout_exit(Int status);
-Result_String_String shellout_which(String executable);
