@@ -741,6 +741,28 @@ fn generate_sumtype_inspect(t: CustomType) {
   <> "}"
 }
 
+fn generate_list_inspect(t: CustomType) {
+  generate_inspect_header(t) <> " " <> generate_list_inspect_body(t)
+}
+
+fn generate_list_inspect_body(t: CustomType) -> String {
+  let assert Ok(cons) =
+    list.find(t.variants, fn(v) { v.display_name == "Cons" })
+  let assert Ok(item) = list.find(cons.fields, fn(f) { f.name == "item" })
+  "{
+  String result = new_String(\"[\", 1);
+  while (value.tag == E_Cons) {
+    result = append_string(result, inspect_Item(value.val.Cons->item));
+    value = value.val.Cons->next;
+    if (value.tag == E_Cons) {
+      result = append_string(result, new_String(\", \", 2));
+    }
+  }
+  return append_string(result, new_String(\"]\", 1));
+}"
+  |> string.replace("Item", generate_type(item.typ))
+}
+
 type Context {
   Context(
     generated_enums: set.Set(String),
@@ -829,7 +851,11 @@ fn sumtype_type(c: Context, t: CustomType) -> Context {
 
   let inspect_decl = generate_inspect_header(t) <> ";"
   let inspect_impl = case is_builtin_used(c, "inspect_" <> t.name) {
-    True -> generate_sumtype_inspect(t)
+    True ->
+      case t.name {
+        "List_" <> _ -> generate_list_inspect(t)
+        _ -> generate_sumtype_inspect(t)
+      }
     False -> ""
   }
 

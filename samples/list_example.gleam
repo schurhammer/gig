@@ -1,8 +1,10 @@
+//// [1, 2, 3]
 //// 6
 
 import gleam/io
 
 pub fn main() {
+  io.debug([1, 2, 3])
   io.debug(sum(range(3)))
 }
 

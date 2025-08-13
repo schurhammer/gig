@@ -41,7 +41,7 @@ pub fn compare(a: String, b: String) -> order.Order {
 pub fn pop_grapheme(string: String) -> Result(#(String, String), Nil)
 
 pub fn inspect(value: a) -> String {
-    gleam.inspect(value)
+  gleam.inspect(value)
 }
 
 pub fn join(strings: List(String), with separator: String) -> String {

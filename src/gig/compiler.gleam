@@ -96,11 +96,11 @@ pub fn compile(
   // process the prelude
   let assert Ok(prelude) = read_source(sources, "gleam")
   let assert Ok(prelude) = glance.module(prelude)
-  let c = typed_ast.new_context()
-  let c = typed_ast.infer_module(c, prelude, "gleam")
+  let typed = typed_ast.new_context()
+  let typed = typed_ast.infer_module(typed, prelude, "gleam")
 
   // parse and typecheck input (recursively)
-  let #(typed, _done) = infer_file(sources, c, ["gleam"], module_id)
+  let #(typed, _done) = infer_file(sources, typed, ["gleam"], module_id)
 
   let core = core.lower_context(typed)
 
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
       }
     })
 
-  // compile the c file
+  // compile the c file to binary
   let binary_name = target_path <> module_id <> ".exe"
   let args = [
     "-lm",

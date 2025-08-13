@@ -908,11 +908,7 @@ fn infer_function_parameters(
     None -> vars
   }
 
-  // sort by name just for fun
-  let vars =
-    vars
-    |> list.unique()
-    |> list.sort(string.compare)
+  let vars = list.unique(vars)
 
   // create an env for the type variables
   let #(c, type_env) =

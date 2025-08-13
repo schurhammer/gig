@@ -1,4 +1,6 @@
 import gig/compiler
+import gleam/io
+import startest/assertion_error
 
 import gleam/list
 import gleam/string
@@ -9,7 +11,44 @@ import startest.{describe, it, xit}
 import startest/expect
 
 pub fn main() {
+  // self-compile if binary doesn't exist
+  case simplifile.is_file("src/gig.exe") {
+    Ok(True) -> Nil
+    _ -> {
+      io.println_error("gig.exe does not exist, compiling now ..")
+      compiler.compile(
+        "src/gig",
+        compiler: "clang",
+        gc: True,
+        release: True,
+        debug: False,
+      )
+      Nil
+    }
+  }
+
+  // run the tests
   startest.run(startest.default_config())
+}
+
+pub fn expect_equal_string(actual: String, expected: String) -> Nil {
+  let diff =
+    shellout.command(
+      run: "bash",
+      with: [
+        "-c",
+        "diff -u --color=always --label Actual --label Expected <(printf '%s' \"$A\") <(printf '%s' \"$B\")",
+      ],
+      in: ".",
+      opt: [shellout.SetEnvironment([#("A", actual), #("B", expected)])],
+    )
+
+  case diff {
+    Ok(_) -> Nil
+    Error(#(_, diff)) ->
+      assertion_error.AssertionError(diff, "", "")
+      |> assertion_error.raise
+  }
 }
 
 pub fn all_samples_tests() {
@@ -44,7 +83,7 @@ fn expected_output(file: String) {
 
 fn sample_test(file) {
   describe(string.replace(file, "./test/samples/", ""), [
-    it("self compiled", fn() {
+    it("native compiled", fn() {
       let assert Ok(_) =
         shellout.command("src/gig.exe", ["--gc", "--release", file], ".", [])
 
@@ -52,23 +91,9 @@ fn sample_test(file) {
       let expected_output = expected_output(file)
       let assert Ok(output) = shellout.command(binary, [], ".", [])
 
-      expect.to_equal(string.trim(output), string.trim(expected_output))
+      expect_equal_string(string.trim(output), string.trim(expected_output))
     }),
-    it("without gc", fn() {
-      let binary =
-        compiler.compile(
-          file,
-          compiler: "clang",
-          gc: False,
-          release: True,
-          debug: False,
-        )
-      let expected_output = expected_output(file)
-      let assert Ok(output) = shellout.command(binary, [], ".", [])
-
-      expect.to_equal(string.trim(output), string.trim(expected_output))
-    }),
-    it("with gc", fn() {
+    it("erlang compiled", fn() {
       let binary =
         compiler.compile(
           file,
@@ -80,7 +105,27 @@ fn sample_test(file) {
       let expected_output = expected_output(file)
       let assert Ok(output) = shellout.command(binary, [], ".", [])
 
-      expect.to_equal(string.trim(output), string.trim(expected_output))
+      expect_equal_string(string.trim(output), string.trim(expected_output))
+    }),
+    it("native/erlang diff", fn() {
+      // compile using native binary
+      let assert Ok(_) =
+        shellout.command("src/gig.exe", ["--gc", "--release", file], ".", [])
+      let c_file = string.replace(file, ".gleam", ".c")
+      let assert Ok(self_compiled_c) = simplifile.read(c_file)
+      let assert Ok(_) = simplifile.write(c_file <> ".bak", self_compiled_c)
+
+      // compile using erlang runtime
+      compiler.compile(
+        file,
+        compiler: "clang",
+        gc: True,
+        release: True,
+        debug: False,
+      )
+      let assert Ok(erlang_compiled_c) = simplifile.read(c_file)
+
+      expect_equal_string(self_compiled_c, erlang_compiled_c)
     }),
     xit("passes valgrind", fn() {
       let binary =
