@@ -268,9 +268,7 @@ fn cc(c: CC, e: mono.Exp) -> #(CC, Exp) {
                     env_type_name,
                     name,
                   ),
-                  [
-                    Var(env_type, "ENV"),
-                  ],
+                  [Var(env_type, "ENV")],
                 )
 
               Let(exp.typ, name, access, exp)

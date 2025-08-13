@@ -94,13 +94,13 @@ fn check_matching_args(af: glance.Function, bf: glance.Function) {
     case a.label == b.label {
       False -> {
         panic as {
-            "polyfill should have matching labels. \n at "
-            <> bf.name
-            <> " "
-            <> a_label
-            <> "!="
-            <> b_label
-          }
+          "polyfill should have matching labels. \n at "
+          <> bf.name
+          <> " "
+          <> a_label
+          <> "!="
+          <> b_label
+        }
       }
       True -> Nil
     }
