@@ -62,7 +62,7 @@ pub fn all_samples_tests() {
   let tests =
     files
     |> list.filter(fn(file) { string.ends_with(file, ".gleam") })
-    |> list.filter(fn(file) { !string.ends_with(file, ".polyfill.gleam") })
+    |> list.filter(fn(file) { !string.ends_with(file, ".patch.gleam") })
     |> list.sort(string.compare)
     |> list.map(fn(file) { sample_test(file) })
   describe("samples", tests)

@@ -6,12 +6,13 @@ It is mostly just a place to keep my thoughts in order.
 ## Compiler flow
 
 - lexing & parsing (glance)
-- apply polyfills
+- apply patches
 - process imports
 - type check
 - lower to core language
 - monomorphise
 - closure conversion
+- ANF normalisation
 - code gen
 
 ## Type Checking
@@ -68,12 +69,12 @@ parameters. This results in a Poly type, short for polymorphic, allowing the
 function to be used with multiple different types.
 
 Mutually recursive functions need to be type checked as a group. The call graph
-helps us figoure out what these groups are.
+helps us figure out what these groups are.
 
 ## Constructors
 
 Constructors are considered external functions in the core language. This is
-because the implementation is not defined in gleam, only the type signature.
+because the implementation of them is not defined in gleam code.
 
 ## Dynamic
 
@@ -90,6 +91,9 @@ type Dynamic {
   ...
 }
 ```
+
+update: gleam stdlib has removed `dynamic.from`, so auto generating these
+functions is out of scope now.
 
 For every type in your program, the compiler would then generate a function to
 convert your type into Dynamic.
@@ -128,13 +132,3 @@ for each i starting from offset/8 until (offset+length)/8
   bit shift them to byte-align
   write the first byte to the output
 ```
-
-## Polyfill System
-
-(Not yet implemented.)
-
-Since gig is a third party project, most gleam libraries in the wild are
-unlikely to support it. For these situations we have a polyfill system that
-lets you override some modules that would otherwise not work. To do this simply
-create a module called `x.polyfill.gleam` where `x` is the name of the module
-you wish to patch.

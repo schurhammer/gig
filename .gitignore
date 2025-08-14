@@ -7,3 +7,5 @@ samples/nested/*
 src/gig.c
 src/gig.exe
 .zed
+**/*.o
+**/*.exe

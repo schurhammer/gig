@@ -3,16 +3,16 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 
-pub fn apply(module: glance.Module, polyfill: glance.Module) -> glance.Module {
-  // polyfill imports
+pub fn apply(module: glance.Module, patch: glance.Module) -> glance.Module {
+  // patch imports
   let imports =
     module.imports
     |> list.map(fn(i) { #(i.definition.module, i) })
-  let polyfill_imports =
-    polyfill.imports
+  let patch_imports =
+    patch.imports
     |> list.map(fn(i) { #(i.definition.module, i) })
   let merged_imports =
-    merge(imports, polyfill_imports, fn(a, b) {
+    merge(imports, patch_imports, fn(a, b) {
       glance.Definition(
         b.attributes,
         glance.Import(
@@ -30,40 +30,40 @@ pub fn apply(module: glance.Module, polyfill: glance.Module) -> glance.Module {
       )
     })
 
-  // polyfill functions
+  // patch functions
   let functions =
     module.functions
     |> list.map(fn(f) { #(f.definition.name, f) })
-  let polyfill_functions =
-    polyfill.functions
+  let patch_functions =
+    patch.functions
     |> list.map(fn(f) { #(f.definition.name, f) })
   let merged_functions =
-    merge(functions, polyfill_functions, fn(a, b) {
+    merge(functions, patch_functions, fn(a, b) {
       check_matching_args(a.definition, b.definition)
       b
     })
 
-  // polyfill custom types
+  // patch custom types
   let custom_types =
     list.map(module.custom_types, fn(t) { #(t.definition.name, t) })
-  let polyfill_custom_types =
-    list.map(polyfill.custom_types, fn(t) { #(t.definition.name, t) })
+  let patch_custom_types =
+    list.map(patch.custom_types, fn(t) { #(t.definition.name, t) })
   let merged_custom_types =
-    merge(custom_types, polyfill_custom_types, fn(_, b) { b })
+    merge(custom_types, patch_custom_types, fn(_, b) { b })
 
-  // polyfill constants
+  // patch constants
   let constants = list.map(module.constants, fn(c) { #(c.definition.name, c) })
-  let polyfill_constants =
-    list.map(polyfill.constants, fn(c) { #(c.definition.name, c) })
-  let merged_constants = merge(constants, polyfill_constants, fn(_, b) { b })
+  let patch_constants =
+    list.map(patch.constants, fn(c) { #(c.definition.name, c) })
+  let merged_constants = merge(constants, patch_constants, fn(_, b) { b })
 
-  // polyfill type aliases
+  // patch type aliases
   let type_aliases =
     list.map(module.type_aliases, fn(a) { #(a.definition.name, a) })
-  let polyfill_type_aliases =
-    list.map(polyfill.type_aliases, fn(a) { #(a.definition.name, a) })
+  let patch_type_aliases =
+    list.map(patch.type_aliases, fn(a) { #(a.definition.name, a) })
   let merged_type_aliases =
-    merge(type_aliases, polyfill_type_aliases, fn(_, b) { b })
+    merge(type_aliases, patch_type_aliases, fn(_, b) { b })
 
   glance.Module(
     imports: merged_imports,
@@ -78,7 +78,7 @@ fn check_matching_args(af: glance.Function, bf: glance.Function) {
   let args = case list.strict_zip(af.parameters, bf.parameters) {
     Ok(args) -> args
     Error(_) -> {
-      panic as { "polyfill should have matching parameters. \n at " <> bf.name }
+      panic as { "patch should have matching parameters. \n at " <> bf.name }
     }
   }
   list.each(args, fn(arg) {
@@ -94,13 +94,13 @@ fn check_matching_args(af: glance.Function, bf: glance.Function) {
     case a.label == b.label {
       False -> {
         panic as {
-          "polyfill should have matching labels. \n at "
-          <> bf.name
-          <> " "
-          <> a_label
-          <> "!="
-          <> b_label
-        }
+            "patch should have matching labels. \n at "
+            <> bf.name
+            <> " "
+            <> a_label
+            <> "!="
+            <> b_label
+          }
       }
       True -> Nil
     }

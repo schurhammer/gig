@@ -3,7 +3,7 @@ import gig/closure
 import gig/core
 import gig/headers
 import gig/mono
-import gig/polyfill
+import gig/patch
 import gig/typed_ast
 import gleam/dict
 import gleam/set
@@ -90,7 +90,7 @@ pub fn compile(
 
   let sources =
     sources
-    |> include_sources("./stdlib/")
+    |> include_sources("./patch/")
     |> include_sources("./" <> target_path)
 
   // process the prelude
@@ -108,17 +108,14 @@ pub fn compile(
   headers.module_headers(core)
   |> list.each(fn(item) {
     let #(module, header) = item
-    let filepath = case dict.get(sources, module <> ".polyfill") {
-      Ok(path) -> path
+    // prefer the patch file location for placing the header
+    let filepath = case dict.get(sources, module <> ".patch") {
+      Ok(path) -> string.replace(path, ".patch.gleam", ".h")
       _ -> {
-        let assert Ok(filepath) = dict.get(sources, module)
-        filepath
+        let assert Ok(path) = dict.get(sources, module)
+        string.replace(path, ".gleam", ".h")
       }
     }
-    let filepath =
-      filepath
-      |> string.replace(".polyfill.gleam", ".h")
-      |> string.replace(".gleam", ".h")
     case header {
       "" -> Nil
       _ -> {
@@ -165,7 +162,7 @@ int main(int argc, char **argv) {
     |> set.delete("")
     |> set.to_list()
     |> list.filter_map(fn(module) {
-      let filepath = case dict.get(sources, module <> ".polyfill") {
+      let filepath = case dict.get(sources, module <> ".patch") {
         Ok(path) -> path
         _ -> {
           let assert Ok(filepath) = dict.get(sources, module)
@@ -174,7 +171,7 @@ int main(int argc, char **argv) {
       }
       let filepath =
         filepath
-        |> string.replace(".polyfill.gleam", ".c")
+        |> string.replace(".patch.gleam", ".c")
         |> string.replace(".gleam", ".c")
 
       case simplifile.is_file(filepath) {
@@ -187,11 +184,11 @@ int main(int argc, char **argv) {
   let binary_name = target_path <> module_id <> ".exe"
   let args = [
     "-lm",
-    "-Isrc",
+    "-Ipatch",
     "-o",
     binary_name,
     c_file,
-    "./src/builtin.c",
+    "patch/builtin.c",
     ..external_c_files
   ]
 
@@ -262,13 +259,13 @@ fn infer_file(
     Error(error) -> panic as error
   }
 
-  let polyfill_module_id = module_id <> ".polyfill"
-  let polyfill_module =
-    read_source(sources, polyfill_module_id)
-    |> result.try(parse_module(polyfill_module_id, _))
+  let patch_module_id = module_id <> ".patch"
+  let patch_module =
+    read_source(sources, patch_module_id)
+    |> result.try(parse_module(patch_module_id, _))
 
-  let module = case polyfill_module {
-    Ok(polyfill) -> polyfill.apply(module, polyfill)
+  let module = case patch_module {
+    Ok(patch) -> patch.apply(module, patch)
     Error(_) -> module
   }
 

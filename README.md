@@ -4,45 +4,143 @@ Gig is a gleam compiler written in gleam.
 
 ## How to use
 
-```
+### Compile and run a sample file:
+
+```bash
+# clone the repository
 git clone https://github.com/schurhammer/gig
 cd gig
+
+# compile a sample
 gleam run samples/hello_world.gleam
-./samples/hello_world.exe
+
+# run the sample
+samples/hello_world.exe
 ```
 
-This will compile the file `samples/hello_world.gleam` to `samples/hello_world.c` and then use a c compiler to create a binary at `samples/hello_world`.
+- This will compile the file `samples/hello_world.gleam` to `samples/hello_world.c` and then use a c compiler to create the binary at `samples/hello_world.exe`.
+- Gig adds the `.exe` extension to avoid common naming conflicts with source directories.
 
-Optional flags:
+### Compile gig:
 
-- `--release`: enable optimisation
-- `--gc`: enable garbage collection (otherwise no garbage collection)
-- `--debug`: include debug symbols
-- `--compiler=name`: the name/path of the c compiler
+```bash
+# compile gig into a binary
+gleam run src/gig.gleam --gc --release
 
-Dependencies:
+# compile a sample using the gig binary
+src/gig.exe samples/hello_world.gleam
 
-- clang/gcc/tcc is needed to compile to binary (clang seems to work best for gc)
-- Boehm GC library needs to be available for --gc
+# run the sample
+samples/hello_world.exe
+```
 
-You may wish to increase your stack size `ulimit -s unlimited` to avoid stack overflows. (Highly recommended)
+### Compile your project using the gig binary:
+
+- Add the `gig` executable to your path or copy it into your project.
+- Copy the `patch` directory into your project.
+
+```bash
+# you should be in your project root
+cd <your project root>
+
+# copy patch directory (adjust file paths to match your system)
+cp -r ../gig/patch patch
+
+# ensure dependencies are downloaded
+gleam deps download
+
+# compile your main module
+gig src/<main module>.gleam
+
+# run your main module
+src/<main module>.exe
+```
+
+- You should run gig from the root directory of the project.
+- Gig will include source files from the main module's directory, the `patch` directory, and each source directory of downloaded dependencies (i.e. `build/packages/<package_name>/src`).
+- Download dependencies using `gleam deps download`.
+- Your main module should be non-nested i.e. directly in the `src` directory.
+
+### Compile your project using gig as a path dependency
+
+- Add gig as a path dependency in your `gleam.toml` file `gig = { path = "../gig" }`.
+- Copy the `patch` directory into your project.
+
+```bash
+# you should be in your project root
+cd <your project root>
+
+# copy patch directory (adjust file paths to match your system)
+cp -r ../gig/patch patch
+
+# ensure dependencies are downloaded
+gleam deps download
+
+# compile your project using gig as a path dependency
+gleam run -m gig src/<main module>.gleam
+
+# run your main module
+src/<main module>.exe
+```
+
+### Optional flags:
+
+- `--release`: enable optimisation.
+- `--gc`: enable garbage collection (otherwise no garbage collection).
+- `--debug`: include debug symbols.
+- `--compiler=name`: the name/path of the c compiler.
+
+> [!IMPORTANT]
+> In the likely case you encounter stack overflows, increase your stack size. These often show up as segfaults.
+>
+> ```
+> ulimit -s unlimited
+> ```
+
+## Required Dependencies:
+
+- C compiler (clang seems to work best)
+- Boehm GC is needed for `--gc` (aka `libgc`)
+
+## Standard Library
+
+Since much of the standard library is implemented with `@external` calls, not all functions are available at this time.
+Some functions have already been re-implemented with patches, see the `patch` directory. The compiler will print a warning if an unimplemented function is used, and compilation will fail.
+
+## Patch System
+
+Since gig is a third party project, most gleam libraries in the wild are
+unlikely to support it. For these situations we have a patch system that
+lets you override some modules that would otherwise not work. To do this simply
+create a module called `x.patch.gleam` where `x` is the name of the module
+you wish to patch. The patch will be merged with the original module, so you
+only need to implement the functions that are broken.
+Patches can be placed in the `patch` directory or any of the source directories.
+
+## FFI
+
+You can use the `@external(c, "", "function_name")` annotation to call C functions.
+The compiler will then generate a header file with a function declaration that
+you can include and implement your function against. Your implementation C file
+should be named in the same way as the header file.
+Preferably your functions should be namespaced e.g. `module_name_function_name()`.
 
 ## Feature / Todo List
 
 ### Basics
 
-- [x] Bools
-- [x] Ints
-- [x] Floats
+- [x] Bool
+- [x] Int
+- [x] Float
 - [x] Number formats (other than decimal)
-- [x] Strings
-- [x] Lists
+- [x] String
+- [x] List
 - [x] Equality
 - [x] Assignments
 - [x] Discard patterns
 - [x] Type inference
 - [x] Type annotations
-- [x] Modules (note: modules are resolved relative to the root file)
+- [x] Modules (note: modules are resolved relative to the target file)
 - [x] Dependencies
 - [x] Unqualified imports
 - [x] Type aliases
@@ -58,9 +156,9 @@ You may wish to increase your stack size `ulimit -s unlimited` to avoid stack ov
 - [x] Function captures
 - [x] Generic functions
 - [x] Pipelines
-- [x] Labelled arguments
-- [ ] Documentation comments
-- [ ] Deprecations
+- [x] Labeled arguments
+- [ ] Documentation comments (ignored)
+- [ ] Deprecations (ignored)
 
 ### Flow control
 
@@ -80,17 +178,13 @@ You may wish to increase your stack size `ulimit -s unlimited` to avoid stack ov
 ### Other Data types
 
 - [x] Tuples
-- [x] Custom types
+- [x] Custom Types
 - [x] Records
 - [x] Record accessors
 - [x] Record updates
 - [x] Generic custom types
 - [x] Results
 - [ ] Bit arrays (partial support)
-
-### Standard library
-
-There is limited support for standard library functions, see `stdlib/`.
 
 ### Advanced features
 
