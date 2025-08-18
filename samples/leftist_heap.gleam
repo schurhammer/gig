@@ -1,7 +1,5 @@
 //// 21
 
-import gleam/io
-
 pub fn main() {
   let h = new(compare)
   let h = insert(h, 3)
@@ -16,7 +14,7 @@ pub fn main() {
     True -> 21
     False -> 22
   }
-  io.debug(r)
+  echo r
 }
 
 fn compare(a: Int, with b: Int) -> Order {

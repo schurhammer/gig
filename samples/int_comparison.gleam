@@ -1,7 +1,5 @@
 //// 1111111111111
 
-import gleam/io
-
 pub fn main() {
   // lt
   let t0 = case 1 < 1 {
@@ -63,5 +61,5 @@ pub fn main() {
     True -> 1_000_000_000_000
     False -> 2_000_000_000_000
   }
-  io.debug(t0 + t1 + t2 + t3 + t4 + t5 + t6 + t7 + t8 + t9 + t10 + t11 + t12)
+  echo t0 + t1 + t2 + t3 + t4 + t5 + t6 + t7 + t8 + t9 + t10 + t11 + t12
 }

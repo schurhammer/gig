@@ -8,7 +8,7 @@ import gleam/string
 
 pub fn module_headers(c: core.Context) {
   c.externals
-  |> list.filter(fn(x) { !x.mono })
+  |> list.filter(fn(x) { !x.builtin })
   |> list.group(fn(x) { x.module })
   |> dict.to_list()
   |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
@@ -30,7 +30,7 @@ pub fn module_headers(c: core.Context) {
             external_name: external.external_name,
             parameters: params,
             module: external.module,
-            mono: external.mono,
+            builtin: external.builtin,
             typ: typ,
           )
         external

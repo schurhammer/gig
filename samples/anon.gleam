@@ -1,7 +1,5 @@
 //// Unselected
 
-import gleam/io
-
 pub type Status {
   Selected
   Unselected
@@ -17,5 +15,5 @@ pub fn main() {
 
   let do_toggle = fn(status) { toggle(status) }
 
-  io.debug(do_toggle(Selected))
+  echo do_toggle(Selected)
 }

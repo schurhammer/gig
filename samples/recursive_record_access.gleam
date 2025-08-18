@@ -1,6 +1,5 @@
 //// 1
 
-import gleam/io
 import gleam/list
 
 type Foo {
@@ -8,7 +7,7 @@ type Foo {
 }
 
 pub fn main() {
-  io.debug(rec(0).bar)
+  echo rec(0).bar
 }
 
 fn rec(f: Int) -> Foo {

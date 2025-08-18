@@ -4,8 +4,6 @@
 // B is never constructed and as such List(Int) isn't either
 // but we need to make sure the List(Int) type is still generated
 
-import gleam/io
-
 type Foo {
   A(Int)
   B(List(Int))
@@ -13,10 +11,10 @@ type Foo {
 
 pub fn main() {
   case A(1) {
-    A(1) -> io.debug(1)
-    _ -> io.debug(2)
+    A(1) -> echo 1
+    _ -> echo 2
   }
   let x = fn(x) { x }
   let y = fn(y) { x(y) }
-  io.debug(y(1))
+  echo y(1)
 }

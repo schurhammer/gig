@@ -1,7 +1,5 @@
 //// 3
 
-import gleam/io
-
 type Point {
   A(x: Int, y: Int)
   B(z: Int)
@@ -14,5 +12,5 @@ pub fn main() {
     Ok(B(z)) -> z
     _ -> 0
   }
-  io.debug(r)
+  echo r
 }

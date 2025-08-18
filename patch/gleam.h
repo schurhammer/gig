@@ -6,6 +6,7 @@
 
 
 
+Nil print_string(String message);
 Nil panic_exit(String message);
 Int length_bit_array(BitArray a);
 BitArray slice_bit_array(BitArray a, Int offset, Int length);

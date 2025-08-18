@@ -33,7 +33,7 @@ pub type External {
     internal_name: String,
     external_name: String,
     parameters: List(Field),
-    mono: Bool,
+    builtin: Bool,
   )
 }
 
@@ -127,7 +127,7 @@ pub fn run(in: t.Context, main_name: String) {
   let c =
     in.externals
     |> list.filter(fn(x) { set.contains(c.used_modules, x.module) })
-    |> list.filter(fn(x) { !x.mono })
+    |> list.filter(fn(x) { !x.builtin })
     |> list.fold(c, fn(c, external) {
       let used_externals = set.insert(c.used_externals, external.internal_name)
       let c = Context(..c, used_externals:)
@@ -301,7 +301,7 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
     Error(_) ->
       case dict.get(c.in_externals, name) {
         Ok(external) -> {
-          case external.mono {
+          case external.builtin {
             True -> {
               let sub = unify_poly(c, external.typ, mono)
               let type_string = get_type_string(sub)
@@ -354,7 +354,7 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
                       external_name: external.external_name,
                       module: external.module,
                       parameters: params,
-                      mono: external.mono,
+                      builtin: external.builtin,
                       typ: typ,
                     )
 

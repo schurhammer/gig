@@ -389,12 +389,12 @@ String cstring_to_string(char *bytes) {
   return str;
 }
 
-Int print_string(String a) {
+Nil print_string(String a) {
   printf("%.*s", a.byte_length, a.bytes);
   return 0;
 }
 
-Int print_string_error(String a) {
+Nil print_string_error(String a) {
   fprintf(stderr, "%.*s", a.byte_length, a.bytes);
   return 0;
 }

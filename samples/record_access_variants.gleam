@@ -1,7 +1,5 @@
 //// "Bob"
 
-import gleam/io
-
 type Animal {
   Cat(name: String)
   Fox(name: String)
@@ -9,5 +7,5 @@ type Animal {
 
 pub fn main() {
   let cat = Cat("Bob")
-  io.debug(cat.name)
+  echo cat.name
 }

@@ -7,8 +7,6 @@
 //// 5
 //// 6
 
-import gleam/io
-
 pub fn main() {
   use <- simple
   use <- simple()
@@ -16,14 +14,14 @@ pub fn main() {
   use a, b <- continuation_args
   let a = a
   let b = b
-  io.debug(a)
-  io.debug(b)
+  echo a
+  echo b
   use a, b <- continuation_args()
-  io.debug(a)
-  io.debug(b)
+  echo a
+  echo b
   use a, b <- complex(2, 3)
-  io.debug(a)
-  io.debug(b)
+  echo a
+  echo b
 }
 
 fn simple(f: fn() -> Int) {
@@ -31,8 +29,8 @@ fn simple(f: fn() -> Int) {
 }
 
 fn args(a: Int, b: Int, f: fn() -> Int) {
-  io.debug(a)
-  io.debug(b)
+  echo a
+  echo b
   f()
 }
 

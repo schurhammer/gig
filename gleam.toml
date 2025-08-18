@@ -13,15 +13,12 @@ version = "1.0.0"
 # https://gleam.run/writing-gleam/gleam-toml/.
 
 [dependencies]
-gleam_stdlib = "0.59.0"
-pprint = ">= 1.0.3 and < 2.0.0"
-shellout = ">= 1.6.0 and < 2.0.0"
-startest = ">= 0.2.4 and < 1.0.0"
+gleam_stdlib = ">= 0.62.1 and < 1.0.0"
+shellout = ">= 1.7.0 and < 2.0.0"
 argv = ">= 1.0.2 and < 2.0.0"
-simplifile = ">= 2.0.0"
-
-glance = ">= 3.0.0 and < 4.0.0"
+simplifile = ">= 2.3.0 and < 3.0.0"
+glance = ">= 5.0.0 and < 6.0.0"
 glexer = ">= 2.2.1 and < 3.0.0"
-# glance = { path = "../glance" }
 
 [dev-dependencies]
+startest = ">= 0.7.0 and < 1.0.0"

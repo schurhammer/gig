@@ -29,15 +29,15 @@ pub type List(a) {
 
 // Auto Generated Functions
 
-@monomorphise()
+@builtin()
 @external(c, "", "eq")
 pub fn eq(a: a, b: a) -> Bool
 
-@monomorphise()
+@builtin()
 @external(c, "", "lt")
 pub fn lt(a: a, b: a) -> Bool
 
-@monomorphise()
+@builtin()
 @external(c, "", "inspect")
 pub fn inspect(a: a) -> String
 
@@ -151,3 +151,12 @@ pub fn length_bit_array(a: BitArray) -> Int
 
 @external(c, "", "panic_exit")
 pub fn panic_exit(message: String) -> a
+
+@external(c, "", "print_string")
+pub fn print_string(message: String) -> Nil
+
+pub fn echo_(value: a) -> a {
+  print_string(inspect(value))
+  print_string("\n")
+  value
+}

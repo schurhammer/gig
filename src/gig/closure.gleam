@@ -101,7 +101,7 @@ pub fn cc_module(mod: mono.Context) {
 
   let externals =
     mod.externals
-    |> list.filter(fn(ext) { !ext.mono })
+    |> list.filter(fn(ext) { !ext.builtin })
     |> list.map(fn(external) {
       let assert mono.FunctionType(_, ret) = external.typ
       let params =

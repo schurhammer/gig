@@ -81,7 +81,7 @@ pub type External {
     internal_name: String,
     external_name: String,
     parameters: List(Parameter),
-    mono: Bool,
+    builtin: Bool,
   )
 }
 
@@ -154,7 +154,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
           let module = c.current_module
           let name = fun.name
           let internal_name = get_id(module, name)
-          let mono = list.any(attrs, fn(x) { x.name == "monomorphise" })
+          let builtin = list.any(attrs, fn(x) { x.name == "builtin" })
           let parameters = list.map(fun.parameters, lower_parameter(c, _))
           let fun =
             External(
@@ -163,7 +163,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
               internal_name:,
               external_name:,
               module:,
-              mono:,
+              builtin:,
             )
           Context(..acc, externals: [fun, ..acc.externals])
         }
@@ -237,7 +237,7 @@ pub fn register_variant_functions(
       external_name: "new_" <> variant.id,
       parameters: params,
       module: module_name,
-      mono: True,
+      builtin: True,
     )
   Context(..c, externals: [fun, ..c.externals])
 }
@@ -253,7 +253,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
 
           // check assertions
           case kind {
-            t.Assert -> {
+            t.LetAssert -> {
               let subject = t.LocalVariable(value.typ, "S")
               let value = lower_expression(c, value)
               let body = check_assertions(c, pattern, subject, value, body)
@@ -261,6 +261,12 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
             }
             t.Let -> body
           }
+        }
+        t.Assert(typ, expression, message) -> {
+          let expression = lower_expression(c, expression)
+          let body = lower_body(c, body)
+          let message = lower_expression(c, t.Panic(typ, message))
+          If(typ: body.typ, condition: expression, then: body, els: message)
         }
         t.Use(..) -> todo
       }
@@ -291,11 +297,17 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
 
           // check assertions
           let body = case kind {
-            t.Assert -> check_assertions(c, pattern, subject, value, body)
+            t.LetAssert -> check_assertions(c, pattern, subject, value, body)
             t.Let -> body
           }
 
           Let(body.typ, "S", value, body)
+        }
+        t.Assert(typ, expression, message) -> {
+          let expression = lower_expression(c, expression)
+          let body = lower_body(c, body)
+          let message = lower_expression(c, t.Panic(typ, message))
+          If(typ: body.typ, condition: expression, then: body, els: message)
         }
         t.Use(..) -> todo
       }
@@ -1303,6 +1315,13 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       let function_type = FunctionType([left.typ, right.typ], typ)
       let function = Global(function_type, function_name)
       Call(typ, function, [left, right])
+    }
+    t.Echo(typ:, value:) -> {
+      let assert Some(value) = value
+      let value = lower_expression(c, value)
+      let typ = map_type(c, typ)
+      let print_typ = FunctionType([value.typ], value.typ)
+      Call(typ, Global(print_typ, "echo_"), [value])
     }
   }
 }

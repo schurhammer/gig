@@ -1,7 +1,5 @@
 //// 0
 
-import gleam/io
-
 pub fn main() {
   let x = 3
   let r = case
@@ -18,5 +16,5 @@ pub fn main() {
         n -> n
       }
   }
-  io.debug(r)
+  echo r
 }

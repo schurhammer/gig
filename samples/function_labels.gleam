@@ -1,7 +1,5 @@
 //// 1
 
-import gleam/io
-
 fn sub(x x, y y) {
   x - y
 }
@@ -16,5 +14,5 @@ pub fn main() {
   foo(b: "bar", a: 1)
 
   // make sure it is really applied in the correct order
-  io.debug(sub(y: 1, x: 2))
+  echo sub(y: 1, x: 2)
 }

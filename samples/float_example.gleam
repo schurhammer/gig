@@ -11,11 +11,11 @@ pub fn main() {
   let x = 0.1
   let y = 0.1
   let z = 0.2
-  io.debug(z)
-  io.debug(z +. x)
-  io.debug(z -. x)
-  io.debug(z *. x)
-  io.debug(z /. x)
+  echo z
+  echo z +. x
+  echo z -. x
+  echo z *. x
+  echo z /. x
   case x == y {
     True -> io.print("1")
     False -> io.print("0")

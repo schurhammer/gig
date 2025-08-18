@@ -52,19 +52,23 @@ fn walk_body(g: Graph, n: Env, r: String, body: List(g.Statement)) -> Graph {
     [] -> g
     [x, ..xs] ->
       case x {
-        g.Use(patterns, expression) -> {
-          let g = walk_expression(g, n, r, expression)
+        g.Use(_, patterns, function) -> {
+          let g = walk_expression(g, n, r, function)
           let n =
-            list.fold(patterns, n, fn(n, pattern) {
-              let p = pattern_bindings(pattern)
+            list.fold(patterns, n, fn(n, use_pattern) {
+              let p = pattern_bindings(use_pattern.pattern)
               combine_env(p, n)
             })
           walk_body(g, n, r, xs)
         }
-        g.Assignment(_, pattern, _, e) -> {
-          let g = walk_expression(g, n, r, e)
+        g.Assignment(_, _kind, pattern, _annotation, value) -> {
+          let g = walk_expression(g, n, r, value)
           let p = pattern_bindings(pattern)
           let n = combine_env(p, n)
+          walk_body(g, n, r, xs)
+        }
+        g.Assert(_, expression, _message) -> {
+          let g = walk_expression(g, n, r, expression)
           walk_body(g, n, r, xs)
         }
         g.Expression(e) -> {
@@ -78,27 +82,27 @@ fn walk_body(g: Graph, n: Env, r: String, body: List(g.Statement)) -> Graph {
 // returns a list of the names of variables that are bound
 fn pattern_bindings(pattern: g.Pattern) -> List(String) {
   case pattern {
-    g.PatternInt(_) -> []
-    g.PatternFloat(_) -> []
-    g.PatternString(_) -> []
-    g.PatternDiscard(_) -> []
-    g.PatternVariable(x) -> [x]
-    g.PatternAssignment(pattern, var) -> [var, ..pattern_bindings(pattern)]
-    g.PatternTuple(args) -> list.flat_map(args, pattern_bindings)
-    g.PatternList(elements, tail) -> {
+    g.PatternInt(_, _) -> []
+    g.PatternFloat(_, _) -> []
+    g.PatternString(_, _) -> []
+    g.PatternDiscard(_, _) -> []
+    g.PatternVariable(_, x) -> [x]
+    g.PatternAssignment(_, pattern, name) -> [name, ..pattern_bindings(pattern)]
+    g.PatternTuple(_, args) -> list.flat_map(args, pattern_bindings)
+    g.PatternList(_, elements, tail) -> {
       let x = list.flat_map(elements, pattern_bindings)
       case tail {
         Some(tail) -> combine_env(x, pattern_bindings(tail))
         _ -> x
       }
     }
-    g.PatternBitString(segs) ->
+    g.PatternBitString(_, segs) ->
       list.flat_map(segs, fn(seg) { pattern_bindings(seg.0) })
-    g.PatternConstructor(_mod, _cons, args, _spread) ->
+    g.PatternVariant(_, _mod, _cons, args, _spread) ->
       list.flat_map(args, fn(x) {
         pattern_bindings(field_item(x, g.PatternVariable))
       })
-    g.PatternConcatenate(_prefix, prefix_name, rest_name) -> {
+    g.PatternConcatenate(_, _prefix, prefix_name, rest_name) -> {
       let prefix = case prefix_name {
         Some(g.Named(name)) -> [name]
         _ -> []
@@ -112,10 +116,10 @@ fn pattern_bindings(pattern: g.Pattern) -> List(String) {
   }
 }
 
-fn field_item(field: g.Field(a), constructer: fn(String) -> a) {
+fn field_item(field: g.Field(a), constructer: fn(g.Span, String) -> a) {
   case field {
     g.LabelledField(_, item) -> item
-    g.ShorthandField(name) -> constructer(name)
+    g.ShorthandField(name) -> constructer(g.Span(0, 0), name)
     g.UnlabelledField(item) -> item
   }
 }
@@ -125,53 +129,53 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
     g.Int(..) -> g
     g.Float(..) -> g
     g.String(..) -> g
-    g.FieldAccess(subject, _) -> walk_expression(g, n, r, subject)
-    g.Variable(s) ->
+    g.FieldAccess(_, subject, _) -> walk_expression(g, n, r, subject)
+    g.Variable(_, s) ->
       //  it's a function reference if the variable is not in the local env
       case list.contains(n, s) {
         False -> graph.insert_edge(g, r, s)
         True -> g
       }
-    g.NegateBool(e) -> walk_expression(g, n, r, e)
-    g.NegateInt(e) -> walk_expression(g, n, r, e)
-    g.Block(statements) -> walk_body(g, n, r, statements)
-    g.Panic(e) ->
+    g.NegateBool(_, e) -> walk_expression(g, n, r, e)
+    g.NegateInt(_, e) -> walk_expression(g, n, r, e)
+    g.Block(_, statements) -> walk_body(g, n, r, statements)
+    g.Panic(_, e) ->
       case e {
         Some(e) -> walk_expression(g, n, r, e)
         None -> g
       }
-    g.Todo(e) ->
+    g.Todo(_, e) ->
       case e {
         Some(e) -> walk_expression(g, n, r, e)
         None -> g
       }
-    g.Tuple(args) ->
+    g.Tuple(_, args) ->
       list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e) })
-    g.List(elements, rest) -> {
+    g.List(_, elements, rest) -> {
       let g = list.fold(elements, g, fn(g, e) { walk_expression(g, n, r, e) })
       case rest {
         Some(rest) -> walk_expression(g, n, r, rest)
         None -> g
       }
     }
-    g.Call(fun, args) -> {
+    g.Call(_, fun, args) -> {
       let g = walk_expression(g, n, r, fun)
       list.fold(args, g, fn(g, e) {
         walk_expression(g, n, r, field_item(e, g.Variable))
       })
     }
-    g.TupleIndex(tuple, _index) -> walk_expression(g, n, r, tuple)
-    g.FnCapture(_label, fun, before, after) -> {
+    g.TupleIndex(_, tuple, _index) -> walk_expression(g, n, r, tuple)
+    g.FnCapture(_, _label, fun, before, after) -> {
       let before = list.map(before, field_item(_, g.Variable))
       let after = list.map(after, field_item(_, g.Variable))
       let args = list.flatten([[fun], before, after])
       list.fold(args, g, fn(g, e) { walk_expression(g, n, r, e) })
     }
-    g.BinaryOperator(_, left, right) -> {
+    g.BinaryOperator(_, _, left, right) -> {
       let g = walk_expression(g, n, r, left)
       walk_expression(g, n, r, right)
     }
-    g.Case(subjects, clauses) -> {
+    g.Case(_, subjects, clauses) -> {
       let g = list.fold(subjects, g, fn(g, e) { walk_expression(g, n, r, e) })
 
       let clauses =
@@ -188,7 +192,7 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
         walk_expression(g, n, r, e)
       })
     }
-    g.Fn(params, _, body) -> {
+    g.Fn(_, params, _return_annotation, body) -> {
       let params =
         list.map(params, fn(x) {
           case x.name {
@@ -199,7 +203,7 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
       let n = combine_env(params, n)
       walk_body(g, n, r, body)
     }
-    g.RecordUpdate(_module, _constructor, record, fields) -> {
+    g.RecordUpdate(_, _module, _constructor, record, fields) -> {
       let g = walk_expression(g, n, r, record)
       list.fold(fields, g, fn(g, f) {
         case f.item {
@@ -208,7 +212,12 @@ fn walk_expression(g: Graph, n: Env, r: String, e: g.Expression) -> Graph {
         }
       })
     }
-    g.BitString(segs) ->
+    g.BitString(_, segs) ->
       list.fold(segs, g, fn(g, seg) { walk_expression(g, n, r, seg.0) })
+    g.Echo(_, expression) ->
+      case expression {
+        Some(e) -> walk_expression(g, n, r, e)
+        None -> g
+      }
   }
 }

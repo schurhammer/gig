@@ -1,9 +1,7 @@
 //// 1
 
-import gleam/io
-
 pub fn main() {
-  io.debug(a(10))
+  echo a(10)
 }
 
 fn a(x) {

@@ -16,6 +16,7 @@ pub fn apply(module: glance.Module, patch: glance.Module) -> glance.Module {
       glance.Definition(
         b.attributes,
         glance.Import(
+          location: b.definition.location,
           module: b.definition.module,
           alias: b.definition.alias,
           unqualified_types: list.append(
@@ -120,7 +121,8 @@ fn merge(
     list.filter(a, fn(a) {
       !list.any({ a.1 }.attributes, fn(attr) {
         case attr {
-          glance.Attribute("target", [glance.Variable(c)]) if c != "c" -> True
+          glance.Attribute("target", [glance.Variable(_, c)]) if c != "c" ->
+            True
           _ -> False
         }
       })

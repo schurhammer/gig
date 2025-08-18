@@ -13,28 +13,27 @@
 //// 2
 //// 1
 
-import gleam/io
 import gleam/list
 
 fn main() {
-  foo(io.debug(0), io.debug(1), io.debug(2))
+  foo(echo 0, echo 1, echo 2)
   let x = {
-    io.debug(4)
-    io.debug(5)
+    echo 4
+    echo 5
   }
-  io.debug(6)
-  io.debug(7)
+  echo 6
+  echo 7
   list.fold([1, 2, 3], Nil, fn(a, i) {
-    io.debug(i)
+    echo i
     Nil
   })
   list.fold_right([1, 2, 3], Nil, fn(a, i) {
-    io.debug(i)
+    echo i
     Nil
   })
 }
 
 fn foo(a, b, c) {
-  io.debug(3)
+  echo 3
   Nil
 }

@@ -1,7 +1,5 @@
 //// 1
 
-import gleam/io
-
 pub fn main() {
   let r = case 1 < 2 {
     True -> 1
@@ -11,5 +9,5 @@ pub fn main() {
         False -> panic
       }
   }
-  io.debug(r)
+  echo r
 }

@@ -1,7 +1,5 @@
 //// 21
 
-import gleam/io
-
 type Point {
   Point(x: Int, y: Int)
 }
@@ -18,7 +16,7 @@ pub fn main() {
       ConsList(Point(3, 4), ConsList(Point(5, 6), NullList)),
     )
   let ints = map(points, fn(point: Point) { point.x + point.y })
-  io.debug(sum(ints))
+  echo sum(ints)
 }
 
 fn map(l, f) {

@@ -6,8 +6,6 @@
 //// 2
 //// 3
 
-import gleam/io
-
 pub fn main() {
   f(1)
   f(2)
@@ -21,16 +19,16 @@ pub fn main() {
 fn f(n) {
   // Test alternative patterns
   case n {
-    1 | 2 -> io.debug(1)
-    n -> io.debug(2)
+    1 | 2 -> echo 1
+    n -> echo 2
   }
 }
 
 fn g(n) {
   // Test that "as" works correctly
   case n {
-    [1, 2, 0 as x, ..rest] -> io.debug(1)
-    [1, 2, ..rest] -> io.debug(2)
+    [1, 2, 0 as x, ..rest] -> echo 1
+    [1, 2, ..rest] -> echo 2
   }
 }
 
@@ -42,8 +40,8 @@ type Foo {
 fn h(n) {
   // Test that the guard is evaluated after the type check
   case n {
-    Baz(var) if var == 1 -> io.debug(1)
-    Baz(var) -> io.debug(2)
-    Bar -> io.debug(3)
+    Baz(var) if var == 1 -> echo 1
+    Baz(var) -> echo 2
+    Bar -> echo 3
   }
 }
