@@ -1,4 +1,4 @@
-name: test
+name: Gig CI
 
 on:
   push:
@@ -10,12 +10,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang/OTP and Gleam
+        uses: erlef/setup-beam@v1
         with:
           otp-version: "28"
           gleam-version: "1.11.1"
           rebar3-version: "3"
-      - run: gleam format --check src test
-      - run: gleam deps download
-      - run: gleam test
+
+      - name: Install libgc Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgc-dev
+
+      - name: Check Code Formatting
+        run: gleam format --check src test
+
+      - name: Download Project Dependencies
+        run: gleam deps download
+
+      - name: Run Project Tests
+        run: gleam test
