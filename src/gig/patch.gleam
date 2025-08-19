@@ -95,13 +95,13 @@ fn check_matching_args(af: glance.Function, bf: glance.Function) {
     case a.label == b.label {
       False -> {
         panic as {
-            "patch should have matching labels. \n at "
-            <> bf.name
-            <> " "
-            <> a_label
-            <> "!="
-            <> b_label
-          }
+          "patch should have matching labels. \n at "
+          <> bf.name
+          <> " "
+          <> a_label
+          <> "!="
+          <> b_label
+        }
       }
       True -> Nil
     }
