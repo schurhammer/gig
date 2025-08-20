@@ -355,8 +355,14 @@ Bool ends_with_string(String string, String with) {
 }
 
 String slice_string(String in, Int offset, Int length) {
-  if (offset < 0 || length < 0 || offset + length > in.byte_length) {
-    return new_String(in.bytes + in.byte_length, 0);
+  if (length < 0) {
+    return new_String(in.bytes, 0);
+  }
+  if (offset < 0) {
+    offset = 0;
+  }
+  if (offset + length > in.byte_length) {
+    length = in.byte_length - offset;
   }
   return new_String(in.bytes + offset, length);
 }

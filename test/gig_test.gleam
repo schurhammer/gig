@@ -113,7 +113,6 @@ fn sample_test(file) {
         shellout.command("src/gig.exe", ["--gc", "--release", file], ".", [])
       let c_file = string.replace(file, ".gleam", ".c")
       let assert Ok(self_compiled_c) = simplifile.read(c_file)
-      let assert Ok(_) = simplifile.write(c_file <> ".bak", self_compiled_c)
 
       // compile using erlang runtime
       compiler.compile(

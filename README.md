@@ -105,7 +105,7 @@ src/<main module>.exe
 ## Standard Library
 
 Since much of the standard library is implemented with `@external` calls, not all functions are available at this time.
-Some functions have already been re-implemented with patches, see the `patch` directory. The compiler will print a warning if an unimplemented function is used, and compilation will fail.
+Some functions have already been re-implemented with patches, see the `patch` directory. The compiler will print a warning if an unimplemented function is used, and a "todo" will be used as the function body.
 
 ## Patch System
 

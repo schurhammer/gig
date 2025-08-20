@@ -1,6 +1,7 @@
 import gig/call_graph
 import gig/graph
-import glance as g
+import glance.{Span} as g
+import gleam/bit_array
 import listx
 
 import gleam/dict.{type Dict}
@@ -73,10 +74,8 @@ pub type FunctionDefinition {
   )
 }
 
-pub type Span {
-  /// A span within a file, indicated by byte offsets.
-  Span(start: Int, end: Int)
-}
+pub type Span =
+  g.Span
 
 pub type Statement {
   Use(typ: Type, patterns: List(Pattern), function: Expression)
@@ -331,14 +330,13 @@ pub type QualifiedName {
   QualifiedName(module: String, name: String)
 }
 
-pub type TypeVarEnv =
-  Dict(Ref, TypeVar)
-
 pub type Context {
   Context(
+    module_source: String,
     current_module: String,
     current_definition: String,
-    type_vars: TypeVarEnv,
+    current_span: Span,
+    type_vars: Dict(Ref, TypeVar),
     modules: Dict(String, Module),
     type_uid: Int,
     temp_uid: Int,
@@ -353,8 +351,10 @@ pub type TypeEnv =
 
 pub fn new_context() -> Context {
   Context(
+    module_source: "",
     current_module: "",
     current_definition: "",
+    current_span: Span(0, 0),
     type_vars: dict.new(),
     modules: dict.new(),
     type_uid: 0,
@@ -365,14 +365,15 @@ pub fn new_context() -> Context {
 pub fn infer_module(
   c: Context,
   module: g.Module,
-  current_module: String,
+  module_name: String,
+  module_source: String,
 ) -> Context {
   let modules =
     dict.insert(
       c.modules,
-      current_module,
+      module_name,
       Module(
-        name: current_module,
+        name: module_name,
         module_env: dict.new(),
         type_env: dict.new(),
         value_env: dict.new(),
@@ -384,7 +385,7 @@ pub fn infer_module(
       ),
     )
 
-  let c = Context(..c, modules:, current_module:)
+  let c = Context(..c, modules:, current_module: module_name, module_source:)
 
   // handle module imports
   let c =
@@ -435,6 +436,7 @@ pub fn infer_module(
     list.fold(module.custom_types, c, fn(c, def) {
       let custom = def.definition
       let c = Context(..c, current_definition: custom.name)
+      let c = Context(..c, current_span: def.definition.location)
 
       let #(c, parameters) =
         list.fold(custom.parameters, #(c, []), fn(acc, p) {
@@ -462,6 +464,7 @@ pub fn infer_module(
     list.fold(module.type_aliases, #(c, []), fn(acc, def) {
       let #(c, aliases) = acc
       let c = Context(..c, current_definition: def.definition.name)
+      let c = Context(..c, current_span: def.definition.location)
 
       // infer the alias type
       let #(c, alias) = infer_alias_type(c, def.definition)
@@ -480,6 +483,7 @@ pub fn infer_module(
     list.fold(aliases, c, fn(c, alias) {
       let #(def, alias) = alias
       let c = Context(..c, current_definition: alias.name)
+      let c = Context(..c, current_span: def.definition.location)
 
       // create alias entry
       let poly = generalise(c, alias.aliased.typ)
@@ -496,6 +500,7 @@ pub fn infer_module(
     list.fold(module.custom_types, c, fn(c, def) {
       let custom = def.definition
       let c = Context(..c, current_definition: custom.name)
+      let c = Context(..c, current_span: def.definition.location)
 
       // reconstruct the type parameters
       let assert Ok(#(_, poly, _)) =
@@ -527,6 +532,7 @@ pub fn infer_module(
     list.fold(module.functions, c, fn(c, def) {
       let fun = def.definition
       let c = Context(..c, current_definition: fun.name)
+      let c = Context(..c, current_span: def.definition.location)
 
       // create placeholder function type based on function signature
       let #(c, parameters, return) =
@@ -549,6 +555,7 @@ pub fn infer_module(
     list.fold(constants, c, fn(c, def) {
       let #(c, constant) = infer_constant(c, def.definition)
       let c = Context(..c, current_definition: constant.name)
+      let c = Context(..c, current_span: def.definition.location)
 
       let poly = generalise(c, constant.value.typ)
       let c = register_constant(c, constant.name, poly, constant.value)
@@ -577,6 +584,7 @@ pub fn infer_module(
       list.fold(group, #(c, []), fn(acc, def) {
         let #(c, group) = acc
         let c = Context(..c, current_definition: def.definition.name)
+        let c = Context(..c, current_span: def.definition.location)
 
         // infer function
         let #(c, fun) = infer_function(c, def.definition)
@@ -1306,7 +1314,8 @@ fn infer_pattern(
                 g.Utf8Option -> #(c, n, Utf8Option, Some(string_type))
               }
               let typ = case typ, option_type {
-                Some(_), Some(_) -> panic as "type set twice"
+                Some(_), Some(_) ->
+                  panic as error(c, "segment type was set multiple times")
                 Some(_), None -> typ
                 _, _ -> option_type
               }
@@ -1320,7 +1329,7 @@ fn infer_pattern(
       let segs = list.reverse(segs)
       #(c, n, PatternBitString(bit_array_type, segs))
     }
-    g.PatternVariant(_, module, constructor, arguments, with_spread) -> {
+    g.PatternVariant(span, module, constructor, arguments, with_spread) -> {
       // was a module name provided
       let with_module = case module {
         Some(_) -> True
@@ -1339,7 +1348,7 @@ fn infer_pattern(
           let #(item, label) = case arg {
             g.LabelledField(label, item) -> #(item, Some(label))
             g.ShorthandField(label) -> #(
-              g.PatternVariable(g.Span(0, 0), label),
+              g.PatternVariable(span, label),
               Some(label),
             )
             g.UnlabelledField(item) -> #(item, None)
@@ -1369,7 +1378,7 @@ fn infer_pattern(
           #(c, list.reverse(args))
         }
         False -> {
-          let args = match_labels(arguments, labels)
+          let args = match_labels(c, arguments, labels)
           #(c, args)
         }
       }
@@ -1495,26 +1504,26 @@ fn infer_body(
           let #(c, rest) = infer_body(c, n, xs)
           #(c, [statement, ..rest])
         }
-        g.Use(_, patterns, function) -> {
+        g.Use(span, patterns, function) -> {
           // TODO infer without desugaring
           let fun = case function {
             g.Call(..) -> function
-            _ -> g.Call(g.Span(0, 0), function, [])
+            _ -> g.Call(span, function, [])
           }
           case fun {
-            g.Call(_, fun, args) -> {
+            g.Call(span, fun, args) -> {
               let params =
                 list.index_map(patterns, fn(_pat, i) {
                   g.FnParameter(g.Named("P" <> int.to_string(i)), None)
                 })
               let body =
                 list.index_fold(patterns, xs, fn(body, pat, i) {
-                  let param = g.Variable(g.Span(0, 0), "P" <> int.to_string(i))
+                  let param = g.Variable(span, "P" <> int.to_string(i))
                   let assignment =
-                    g.Assignment(g.Span(0, 0), g.Let, pat.pattern, None, param)
+                    g.Assignment(span, g.Let, pat.pattern, None, param)
                   [assignment, ..body]
                 })
-              let callback = g.Fn(g.Span(0, 0), params, None, body)
+              let callback = g.Fn(span, params, None, body)
               let assert Ok(#(_, ifun)) = infer_expression(c, n, fun)
               let field = case ifun {
                 Function(labels:, ..) ->
@@ -1524,19 +1533,64 @@ fn infer_body(
                   }
                 _ -> g.UnlabelledField(callback)
               }
-              let call = g.Call(g.Span(0, 0), fun, list.append(args, [field]))
+              let call = g.Call(span, fun, list.append(args, [field]))
               let assert Ok(#(c, exp)) = infer_expression(c, n, call)
               let statement = Expression(exp.typ, exp)
               #(c, [statement])
             }
-            _ -> panic as "expected a function call"
+            _ -> panic as error(c, "expected a function call")
           }
         }
       }
   }
 }
 
+fn error(c: Context, message: String) -> String {
+  let start = c.current_span.start
+  let end = c.current_span.end
+
+  let context_before = case start {
+    start if start < 100 -> string.slice(c.module_source, 0, start)
+    start -> string.slice(c.module_source, start - 100, 100)
+  }
+  let context_before = string.split(context_before, "\n")
+  let context_before =
+    context_before
+    |> list.drop(list.length(context_before) - 3)
+    |> list.drop_while(fn(x) { x == "" })
+    |> string.join("\n")
+
+  let context_after =
+    c.module_source
+    |> string.slice(end, 100)
+    |> string.split("\n")
+    |> list.take(3)
+    |> string.join("\n")
+
+  let error_part = string.slice(c.module_source, start, end - start)
+
+  // TODO this unicode escape sequence is not valid in c, needs compilation
+  // let escape = "\u{001b}["
+  let assert Ok(escape) = bit_array.to_string(<<27, 91>>)
+  let clear = escape <> "0m"
+  let red_underline = escape <> "4;31m"
+
+  "Error: "
+  <> message
+  <> "\n\nat: "
+  <> c.current_module
+  <> "."
+  <> c.current_definition
+  <> "\n\n"
+  <> context_before
+  <> red_underline
+  <> error_part
+  <> clear
+  <> context_after
+}
+
 fn match_labels(
+  c: Context,
   args: List(Field(a)),
   params: List(Option(String)),
 ) -> List(Field(a)) {
@@ -1546,15 +1600,19 @@ fn match_labels(
     [] ->
       case args {
         [] -> []
-        _ -> panic as "too many arguments"
+        _ -> panic as error(c, "too many arguments given")
       }
     [p, ..p_rest] ->
       case listx.pop(args, fn(a) { a.label == p }) {
-        Ok(#(a, a_rest)) -> [a, ..match_labels(a_rest, p_rest)]
+        Ok(#(a, a_rest)) -> [a, ..match_labels(c, a_rest, p_rest)]
         Error(_) ->
           case listx.pop(args, fn(a) { a.label == None }) {
-            Ok(#(a, a_rest)) -> [a, ..match_labels(a_rest, p_rest)]
-            Error(_) -> panic as "no matching label"
+            Ok(#(a, a_rest)) -> [a, ..match_labels(c, a_rest, p_rest)]
+            Error(_) ->
+              case p {
+                Some(l) -> panic as error(c, "no matching label '" <> l <> "'")
+                None -> panic as error(c, "not enough arguments given")
+              }
           }
       }
   }
@@ -1580,6 +1638,7 @@ fn infer_expression(
   n: LocalEnv,
   exp: g.Expression,
 ) -> Result(#(Context, Expression), String) {
+  let c = Context(..c, current_span: exp.location)
   case exp {
     g.Int(_, s) -> Ok(#(c, Int(int_type, s)))
     g.Float(_, s) -> Ok(#(c, Float(float_type, s)))
@@ -1706,7 +1765,7 @@ fn infer_expression(
     g.Fn(_, parameters, return_annotation, body) -> {
       infer_fn(c, n, parameters, return_annotation, body, None)
     }
-    g.RecordUpdate(_, module, constructor, record, fields) -> {
+    g.RecordUpdate(span, module, constructor, record, fields) -> {
       // Infer the type of the base record expression
       use #(c, base_expr) <- try(infer_expression(c, n, record))
 
@@ -1728,7 +1787,7 @@ fn infer_expression(
           let #(c, updated_fields) = acc
           let item = case field.item {
             Some(item) -> item
-            None -> g.Variable(g.Span(0, 0), field.label)
+            None -> g.Variable(span, field.label)
           }
           use #(c, value) <- try(infer_expression(c, n, item))
           Ok(#(c, [#(field.label, value), ..updated_fields]))
@@ -1839,7 +1898,7 @@ fn infer_expression(
         }
       }
     }
-    g.Call(_, function, arguments) -> {
+    g.Call(span, function, arguments) -> {
       // infer the type of the function
       use #(c, fun) <- try(infer_expression(c, n, function))
 
@@ -1853,16 +1912,13 @@ fn infer_expression(
         list.map(arguments, fn(arg) {
           let #(label, arg) = case arg {
             g.LabelledField(label, item) -> #(Some(label), item)
-            g.ShorthandField(label) -> #(
-              Some(label),
-              g.Variable(g.Span(0, 0), label),
-            )
+            g.ShorthandField(label) -> #(Some(label), g.Variable(span, label))
             g.UnlabelledField(item) -> #(None, item)
           }
           Field(label, arg)
         })
 
-      let args = match_labels(args, labels)
+      let args = match_labels(c, args, labels)
 
       // use fun parameter type as type hints for inferring arguments
       let args = case resolve_type(c, fun.typ) {
@@ -1915,20 +1971,20 @@ fn infer_expression(
         _ -> Error("tuple index on non-tuple")
       }
     }
-    g.FnCapture(_, label, function, arguments_before, arguments_after) -> {
+    g.FnCapture(span, label, function, arguments_before, arguments_after) -> {
       // TODO return non-desugared version
       let #(c, x) = new_temp_var(c)
       let arg = case label {
-        Some(label) -> g.LabelledField(label, g.Variable(g.Span(0, 0), x))
-        None -> g.UnlabelledField(g.Variable(g.Span(0, 0), x))
+        Some(label) -> g.LabelledField(label, g.Variable(span, x))
+        None -> g.UnlabelledField(g.Variable(span, x))
       }
       let args = list.flatten([arguments_before, [arg], arguments_after])
       let param = g.FnParameter(g.Named(x), None)
-      let abs =
-        g.Fn(g.Span(0, 0), [param], None, [
-          g.Expression(g.Call(g.Span(0, 0), function, args)),
+      let lambda =
+        g.Fn(span, [param], None, [
+          g.Expression(g.Call(span, function, args)),
         ])
-      infer_expression(c, n, abs)
+      infer_expression(c, n, lambda)
     }
     g.BitString(_, segments) -> {
       use #(c, segs) <- try(
@@ -1966,7 +2022,8 @@ fn infer_expression(
                 }
               }
               let typ = case typ, option_type {
-                Some(_), Some(_) -> panic as "type set twice"
+                Some(_), Some(_) ->
+                  panic as error(c, "segment type was set multiple times")
                 Some(_), None -> typ
                 _, _ -> option_type
               }
@@ -2056,25 +2113,24 @@ fn infer_expression(
     g.BinaryOperator(span, g.Pipe, left, right) -> {
       // TODO return a not-desugared version
       case right {
-        g.Call(_, fun, args) -> {
-          let call =
-            g.Call(g.Span(0, 0), fun, [g.UnlabelledField(left), ..args])
+        g.Call(span, fun, args) -> {
+          let call = g.Call(span, fun, [g.UnlabelledField(left), ..args])
           infer_expression(c, n, call)
         }
-        g.FnCapture(_, label, fun, before, after) -> {
+        g.FnCapture(span, label, fun, before, after) -> {
           let args = case label {
             Some(label) -> [before, [g.LabelledField(label, left)], after]
             None -> [before, [g.UnlabelledField(left)], after]
           }
-          infer_expression(c, n, g.Call(g.Span(0, 0), fun, list.flatten(args)))
+          infer_expression(c, n, g.Call(span, fun, list.flatten(args)))
         }
-        g.Echo(echo_span, None) -> {
-          let echo_ = g.Variable(echo_span, "echo_")
-          let pipe = g.BinaryOperator(echo_span, g.Pipe, left, echo_)
+        g.Echo(span, None) -> {
+          let echo_ = g.Variable(span, "echo_")
+          let pipe = g.BinaryOperator(span, g.Pipe, left, echo_)
           infer_expression(c, n, pipe)
         }
         _ -> {
-          let call = g.Call(g.Span(0, 0), right, [g.UnlabelledField(left)])
+          let call = g.Call(span, right, [g.UnlabelledField(left)])
           infer_expression(c, n, call)
         }
       }
@@ -2102,7 +2158,7 @@ fn infer_expression(
         )
 
         // Functions
-        g.Pipe -> panic as "pipe should be handeled elsewhere"
+        g.Pipe -> panic as error(c, "pipe should be handeled elsewhere")
 
         // Maths
         g.AddInt | g.SubInt | g.MultInt | g.DivInt | g.RemainderInt -> #(
@@ -2151,7 +2207,7 @@ fn tuple_index_type(c: Context, elements: List(Type), index: Int) {
   case index, elements {
     0, [x, ..] -> x
     _, [_, ..xs] -> tuple_index_type(c, xs, index - 1)
-    _, _ -> panic as "tuple index out of bounds"
+    _, _ -> panic as error(c, "tuple index out of bounds")
   }
 }
 
@@ -2279,7 +2335,7 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
           let #(c, occurs) = occurs(c, aid, b)
           case occurs {
             True -> {
-              panic as "recursive type"
+              panic as error(c, "recursive type")
             }
             False -> {
               set_type_var(c, ref, Bound(b))
@@ -2291,19 +2347,19 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
     NamedType(aname, amodule, _), NamedType(bname, bmodule, _)
       if aname != bname || amodule != bmodule
     -> {
-      // Debug info: #(aname, amodule) vs #(bname, bmodule)
-      let message =
-        "failed to unify types in "
-        <> c.current_module
-        <> "."
-        <> c.current_definition
-      panic as message
+      panic as error(
+          c,
+          "failed to unify types \n\n"
+            <> string.inspect(a)
+            <> "\n"
+            <> string.inspect(b),
+        )
     }
     NamedType(_, _, aargs), NamedType(_, _, bargs) -> {
       case list.strict_zip(aargs, bargs) {
         Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
         Error(_) -> {
-          panic as "incorrect number of type arguments"
+          panic as error(c, "incorrect number of type arguments")
         }
       }
     }
@@ -2312,7 +2368,7 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
       case list.strict_zip(aargs, bargs) {
         Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
         Error(_) -> {
-          panic as "incorrect number of function arguments"
+          panic as error(c, "incorrect number of function arguments")
         }
       }
     }
@@ -2320,13 +2376,18 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
       case list.strict_zip(aelements, belements) {
         Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
         Error(_) -> {
-          panic as "incorrect tuple size"
+          panic as error(c, "incorrect tuple size")
         }
       }
     }
     _, _ -> {
-      // Debug info: failed to unify types
-      panic as "failed to unify types"
+      panic as error(
+          c,
+          "failed to unify types \n\n"
+            <> string.inspect(a)
+            <> "\n"
+            <> string.inspect(b),
+        )
     }
   }
 }

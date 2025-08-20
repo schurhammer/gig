@@ -94,10 +94,10 @@ pub fn compile(
     |> include_sources("./" <> target_path)
 
   // process the prelude
-  let assert Ok(prelude) = read_source(sources, "gleam")
-  let assert Ok(prelude) = glance.module(prelude)
+  let assert Ok(source_text) = read_source(sources, "gleam")
+  let assert Ok(prelude) = glance.module(source_text)
   let typed = typed_ast.new_context()
-  let typed = typed_ast.infer_module(typed, prelude, "gleam")
+  let typed = typed_ast.infer_module(typed, prelude, "gleam", source_text)
 
   // parse and typecheck input (recursively)
   let #(typed, _done) = infer_file(sources, typed, ["gleam"], module_id)
@@ -250,14 +250,8 @@ fn infer_file(
   let assert Ok(source) = dict.get(sources, module_id)
 
   io.println("Parse " <> source)
-
-  let module =
-    read_source(sources, module_id)
-    |> result.try(parse_module(module_id, _))
-  let module = case module {
-    Ok(module) -> module
-    Error(error) -> panic as error
-  }
+  let assert Ok(source_text) = read_source(sources, module_id)
+  let assert Ok(module) = parse_module(module_id, source_text)
 
   let patch_module_id = module_id <> ".patch"
   let patch_module =
@@ -282,7 +276,7 @@ fn infer_file(
 
   // infer this file
   io.println("Check " <> source)
-  let c = typed_ast.infer_module(c, module, module_id)
+  let c = typed_ast.infer_module(c, module, module_id, source_text)
 
   #(c, done)
 }
