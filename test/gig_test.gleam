@@ -7,8 +7,15 @@ import gleam/string
 
 import shellout
 import simplifile
-import startest.{describe, it, xit}
-import startest/expect
+import startest.{describe, it}
+
+const compile_options = compiler.CompileOptions(
+  compiler: "clang",
+  gc: True,
+  release: True,
+  debug: False,
+  c_only: False,
+)
 
 pub fn main() {
   // self-compile if binary doesn't exist
@@ -16,13 +23,7 @@ pub fn main() {
     Ok(True) -> Nil
     _ -> {
       io.println_error("gig.exe does not exist, compiling now ..")
-      compiler.compile(
-        "src/gig",
-        compiler: "clang",
-        gc: True,
-        release: True,
-        debug: False,
-      )
+      compiler.compile("src/gig", compile_options)
       Nil
     }
   }
@@ -94,14 +95,7 @@ fn sample_test(file) {
       expect_equal_string(string.trim(output), string.trim(expected_output))
     }),
     it("erlang compiled", fn() {
-      let binary =
-        compiler.compile(
-          file,
-          compiler: "clang",
-          gc: True,
-          release: True,
-          debug: False,
-        )
+      let binary = compiler.compile(file, compile_options)
       let expected_output = expected_output(file)
       let assert Ok(output) = shellout.command(binary, [], ".", [])
 
@@ -109,36 +103,17 @@ fn sample_test(file) {
     }),
     it("native/erlang diff", fn() {
       // compile using native binary
-      let assert Ok(_) =
-        shellout.command("src/gig.exe", ["--gc", "--release", file], ".", [])
+      let args = ["--gc", "--release", "-c", file]
+      let assert Ok(_) = shellout.command("src/gig.exe", args, ".", [])
       let c_file = string.replace(file, ".gleam", ".c")
       let assert Ok(self_compiled_c) = simplifile.read(c_file)
 
       // compile using erlang runtime
-      compiler.compile(
-        file,
-        compiler: "clang",
-        gc: True,
-        release: True,
-        debug: False,
-      )
+      let options = compiler.CompileOptions(..compile_options, c_only: True)
+      compiler.compile(file, options)
       let assert Ok(erlang_compiled_c) = simplifile.read(c_file)
 
       expect_equal_string(self_compiled_c, erlang_compiled_c)
-    }),
-    xit("passes valgrind", fn() {
-      let binary =
-        compiler.compile(
-          file,
-          compiler: "clang",
-          gc: False,
-          release: True,
-          debug: False,
-        )
-      let args = ["--error-exitcode=1", binary]
-      let output = shellout.command("valgrind", args, ".", [])
-      expect.to_be_ok(output)
-      Nil
     }),
   ])
 }

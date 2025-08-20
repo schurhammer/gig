@@ -55,14 +55,28 @@ fn include_sources(
   })
 }
 
+pub type CompileOptions {
+  CompileOptions(
+    compiler: String,
+    gc: Bool,
+    release: Bool,
+    debug: Bool,
+    c_only: Bool,
+  )
+}
+
+pub fn default_options() -> CompileOptions {
+  CompileOptions(
+    compiler: "clang",
+    gc: False,
+    release: False,
+    debug: False,
+    c_only: False,
+  )
+}
+
 // returns the file name of the binary
-pub fn compile(
-  gleam_file_name: String,
-  compiler compiler: String,
-  gc gc: Bool,
-  release release: Bool,
-  debug debug: Bool,
-) {
+pub fn compile(gleam_file_name: String, options: CompileOptions) {
   let split = string.split(gleam_file_name, "/")
   let assert Ok(target_file) = list.last(split)
   let module_id = string.replace(target_file, ".gleam", "")
@@ -192,27 +206,33 @@ int main(int argc, char **argv) {
     ..external_c_files
   ]
 
-  let args = case gc {
+  let args = case options.gc {
     True -> ["-DGC", "-lgc", ..args]
     False -> args
   }
 
-  let args = case release {
+  let args = case options.release {
     True -> ["-O3", ..args]
     False -> args
   }
 
-  let args = case debug {
+  let args = case options.debug {
     True -> ["-g3", ..args]
     False -> args
   }
 
-  io.println(string.join([compiler, ..args], " "))
-
-  io.println("Generating ./" <> binary_name)
-  case shellout.command(compiler, args, ".", []) {
-    Ok(_) -> Nil
-    Error(message) -> panic as { "Failed to generate binary:\n" <> message.1 }
+  io.println(string.join([options.compiler, ..args], " "))
+  case options.c_only {
+    False -> {
+      io.println("Generating ./" <> binary_name)
+      let result = shellout.command(options.compiler, args, ".", [])
+      case result {
+        Ok(_) -> Nil
+        Error(message) ->
+          panic as { "Failed to generate binary:\n" <> message.1 }
+      }
+    }
+    True -> Nil
   }
 
   binary_name
