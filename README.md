@@ -88,7 +88,9 @@ src/<main module>.exe
 - `--release`: enable optimisation.
 - `--gc`: enable garbage collection (otherwise no garbage collection).
 - `--debug`: include debug symbols.
+- `--headers`: generate header files for FFI functions.
 - `--compiler=name`: the name/path of the c compiler.
+- `-c`: only generate the c file (not the binary).
 
 > [!IMPORTANT]
 > In the likely case you encounter stack overflows, increase your stack size. These often show up as segfaults.

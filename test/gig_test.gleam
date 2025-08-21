@@ -15,6 +15,7 @@ const compile_options = compiler.CompileOptions(
   release: True,
   debug: False,
   c_only: False,
+  headers: False,
 )
 
 pub fn main() {

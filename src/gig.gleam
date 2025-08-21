@@ -23,9 +23,10 @@ pub fn main() {
   let release = list.contains(flags, "--release")
   let debug = list.contains(flags, "--debug")
   let c_only = list.contains(flags, "-c")
+  let headers = list.contains(flags, "--headers")
 
   let options =
-    compiler.CompileOptions(compiler:, gc:, release:, debug:, c_only:)
+    compiler.CompileOptions(compiler:, gc:, release:, debug:, c_only:, headers:)
 
   case files {
     [file, ..] -> compiler.compile(file, options)

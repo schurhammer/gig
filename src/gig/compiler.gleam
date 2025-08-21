@@ -7,6 +7,7 @@ import gig/patch
 import gig/typed_ast
 import gleam/dict
 import gleam/set
+import listx
 
 import gleam/int
 import gleam/result
@@ -18,13 +19,6 @@ import simplifile
 import gleam/io
 import gleam/list
 import gleam/string
-
-fn all_but_last(l: List(a)) -> List(a) {
-  case l {
-    [] | [_] -> []
-    [x, ..xs] -> [x, ..all_but_last(xs)]
-  }
-}
 
 fn read_source(sources: dict.Dict(String, String), name: String) {
   case dict.get(sources, name) {
@@ -62,6 +56,7 @@ pub type CompileOptions {
     release: Bool,
     debug: Bool,
     c_only: Bool,
+    headers: Bool,
   )
 }
 
@@ -72,17 +67,18 @@ pub fn default_options() -> CompileOptions {
     release: False,
     debug: False,
     c_only: False,
+    headers: False,
   )
 }
 
-// returns the file name of the binary
+// returns the file name of the binary (empty string for headers-only mode)
 pub fn compile(gleam_file_name: String, options: CompileOptions) {
   let split = string.split(gleam_file_name, "/")
   let assert Ok(target_file) = list.last(split)
   let module_id = string.replace(target_file, ".gleam", "")
 
   let target_path =
-    all_but_last(split)
+    listx.delete_last(split)
     |> string.join("/")
 
   let target_path = case target_path {
@@ -118,7 +114,16 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
 
   let core = core.lower_context(typed)
 
-  // generate header files for ffi
+  case options.headers {
+    True -> generate_headers_only(core, sources)
+    False -> compile_to_binary(core, sources, module_id, target_path, options)
+  }
+}
+
+fn generate_headers_only(
+  core: core.Context,
+  sources: dict.Dict(String, String),
+) -> String {
   headers.module_headers(core)
   |> list.each(fn(item) {
     let #(module, header) = item
@@ -139,7 +144,16 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
       }
     }
   })
+  ""
+}
 
+fn compile_to_binary(
+  core: core.Context,
+  sources: dict.Dict(String, String),
+  module_id: String,
+  target_path: String,
+  options: CompileOptions,
+) -> String {
   // compile to c
   let c_file = target_path <> module_id <> ".c"
   io.println("Generating ./" <> c_file)

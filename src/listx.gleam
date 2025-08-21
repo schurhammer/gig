@@ -18,6 +18,13 @@ pub fn pop(
   pop_loop(list, is_desired, [])
 }
 
+pub fn delete_last(l: List(a)) -> List(a) {
+  case l {
+    [] | [_] -> []
+    [x, ..xs] -> [x, ..delete_last(xs)]
+  }
+}
+
 fn pop_loop(haystack, predicate, checked) {
   case haystack {
     [] -> Error(Nil)
