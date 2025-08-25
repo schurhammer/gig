@@ -335,10 +335,16 @@ fn check_assertions(
 }
 
 type BitArrayMode {
+  IntMode
+  FloatMode
+  Utf8CodepointMode
+  Utf16CodepointMode
+  Utf32CodepointMode
   BitsMode
   BytesMode
-  IntMode
   Utf8Mode
+  Utf16Mode
+  Utf32Mode
 }
 
 type Signedness {
@@ -364,22 +370,22 @@ fn parse_bitstring_segment_expression(
   let mode =
     list.find_map(options, fn(option) {
       case option {
+        t.IntOption -> Ok(IntMode)
+        t.FloatOption -> Ok(FloatMode)
+        t.Utf8CodepointOption -> Ok(Utf8CodepointMode)
+        t.Utf16CodepointOption -> Ok(Utf16CodepointMode)
+        t.Utf32CodepointOption -> Ok(Utf32CodepointMode)
         t.BitsOption -> Ok(BitsMode)
         t.BytesOption -> Ok(BytesMode)
-        t.FloatOption -> todo
-        t.IntOption -> Ok(IntMode)
-        t.Utf16CodepointOption -> todo
-        t.Utf16Option -> todo
-        t.Utf32CodepointOption -> todo
-        t.Utf32Option -> todo
-        t.Utf8CodepointOption -> todo
         t.Utf8Option -> Ok(Utf8Mode)
+        t.Utf16Option -> Ok(Utf16Mode)
+        t.Utf32Option -> Ok(Utf32Mode)
         _ -> Error(Nil)
       }
     })
     |> result.unwrap(case value {
       t.Int(typ, value) -> IntMode
-      t.Float(typ, value) -> todo
+      t.Float(typ, value) -> FloatMode
       t.String(typ, value) -> Utf8Mode
       _ -> IntMode
     })
@@ -394,9 +400,15 @@ fn parse_bitstring_segment_expression(
     })
     |> result.unwrap(case mode {
       IntMode -> Sized(t.Int(t.int_type, "8"))
+      FloatMode -> Sized(t.Int(t.int_type, "64"))
+      Utf8CodepointMode -> Unsized
+      Utf16CodepointMode -> Unsized
+      Utf32CodepointMode -> Unsized
       BitsMode -> Unsized
       BytesMode -> Unsized
       Utf8Mode -> Unsized
+      Utf16Mode -> Unsized
+      Utf32Mode -> Unsized
     })
 
   let unit =
@@ -442,22 +454,22 @@ fn parse_bitstring_segment_pattern(
   let mode =
     list.find_map(options, fn(option) {
       case option {
+        t.IntOption -> Ok(IntMode)
+        t.FloatOption -> Ok(FloatMode)
+        t.Utf8CodepointOption -> Ok(Utf8CodepointMode)
+        t.Utf16CodepointOption -> Ok(Utf16CodepointMode)
+        t.Utf32CodepointOption -> Ok(Utf32CodepointMode)
         t.BitsOption -> Ok(BitsMode)
         t.BytesOption -> Ok(BytesMode)
-        t.FloatOption -> todo
-        t.IntOption -> Ok(IntMode)
-        t.Utf16CodepointOption -> todo
-        t.Utf16Option -> todo
-        t.Utf32CodepointOption -> todo
-        t.Utf32Option -> todo
-        t.Utf8CodepointOption -> todo
         t.Utf8Option -> Ok(Utf8Mode)
+        t.Utf16Option -> Ok(Utf16Mode)
+        t.Utf32Option -> Ok(Utf32Mode)
         _ -> Error(Nil)
       }
     })
     |> result.unwrap(case value {
       t.PatternInt(typ, value) -> IntMode
-      t.PatternFloat(typ, value) -> todo
+      t.PatternFloat(typ, value) -> FloatMode
       t.PatternString(typ, value) -> Utf8Mode
       _ -> IntMode
     })
@@ -478,9 +490,15 @@ fn parse_bitstring_segment_pattern(
     })
     |> result.unwrap(case mode {
       IntMode -> Sized(t.Int(t.int_type, "8"))
+      FloatMode -> Sized(t.Int(t.int_type, "64"))
+      Utf8CodepointMode -> Unsized
+      Utf16CodepointMode -> Unsized
+      Utf32CodepointMode -> Unsized
       BitsMode -> Unsized
       BytesMode -> Unsized
       Utf8Mode -> Unsized
+      Utf16Mode -> Unsized
+      Utf32Mode -> Unsized
     })
 
   let unit =
@@ -519,6 +537,14 @@ fn parse_bitstring_segment_pattern(
   #(mode, size, unit, signed, endian)
 }
 
+fn endian_expression(endian: Endianness) -> t.Expression {
+  case endian {
+    NativeEndian -> t.Int(t.int_type, "0")
+    BigEndian -> t.Int(t.int_type, "1")
+    LittleEndian -> t.Int(t.int_type, "2")
+  }
+}
+
 fn index_bit_array(
   options: List(t.BitStringSegmentOption(t.Pattern)),
   subject: t.Expression,
@@ -531,7 +557,19 @@ fn index_bit_array(
   case mode {
     BitsMode | BytesMode -> {
       let #(size, match_to_end) = case size_value {
-        Sized(size) -> #(size, False)
+        Sized(size) -> {
+          let size = case unit {
+            1 -> size
+            _ ->
+              t.BinaryOperator(
+                t.int_type,
+                g.MultInt,
+                size,
+                t.Int(t.int_type, int.to_string(unit)),
+              )
+          }
+          #(size, False)
+        }
         Unsized -> #(t.Int(t.int_type, "-1"), True)
       }
 
@@ -549,17 +587,6 @@ fn index_bit_array(
           ),
           [subject, offset, size],
         )
-
-      let size = case unit {
-        1 -> size
-        _ ->
-          t.BinaryOperator(
-            t.int_type,
-            g.MultInt,
-            size,
-            t.Int(t.int_type, int.to_string(unit)),
-          )
-      }
 
       #(size, match_to_end, inner_subject)
     }
@@ -581,19 +608,64 @@ fn index_bit_array(
           )
       }
 
+      // Choose the appropriate function based on signedness and endianness
+      let function_name = case signed {
+        Unsigned -> "index_bit_array_int"
+        Signed -> "index_bit_array_int_signed"
+      }
+
+      let endian = endian_expression(endian)
+
       let inner_subject =
         t.Call(
           t.int_type,
           t.Function(
             t.FunctionType(
-              [t.bit_array_type, t.int_type, t.int_type],
+              [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.int_type,
             ),
             t.builtin,
-            "index_bit_array_int",
+            function_name,
             [],
           ),
-          [subject, offset, size],
+          [subject, offset, size, endian],
+        )
+
+      #(size, False, inner_subject)
+    }
+
+    FloatMode -> {
+      let size = case size_value {
+        Sized(size) -> size
+        Unsized -> t.Int(t.int_type, "64")
+      }
+
+      let size = case unit {
+        1 -> size
+        _ ->
+          t.BinaryOperator(
+            t.int_type,
+            g.MultInt,
+            size,
+            t.Int(t.int_type, int.to_string(unit)),
+          )
+      }
+
+      let endian = endian_expression(endian)
+
+      let inner_subject =
+        t.Call(
+          t.float_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type, t.int_type],
+              t.float_type,
+            ),
+            t.builtin,
+            "index_bit_array_float",
+            [],
+          ),
+          [subject, offset, size, endian],
         )
 
       #(size, False, inner_subject)
@@ -602,33 +674,169 @@ fn index_bit_array(
     Utf8Mode -> {
       let size = case size_value {
         Sized(_size) -> panic as "size not supported"
-        Unsized ->
-          case expr {
-            t.PatternString(_typ, s) -> {
-              let assert Ok(unescaped) = glexer.unescape_string(s)
-              let size = string.byte_size(unescaped)
-              t.Int(t.int_type, int.to_string(8 * size))
-            }
-            _ -> {
-              // TODO actually need to read a utf8 char (variable size)?
-              t.Int(t.int_type, "8")
-            }
-          }
+        Unsized -> {
+          let assert t.PatternString(_, value) = expr
+          let assert Ok(unescaped) = glexer.unescape_string(value)
+          let size = string.byte_size(unescaped)
+          t.Int(t.int_type, int.to_string(8 * size))
+        }
       }
+
+      let endian = endian_expression(endian)
 
       let inner_subject =
         t.Call(
           t.string_type,
           t.Function(
             t.FunctionType(
-              [t.bit_array_type, t.int_type, t.int_type],
+              [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.string_type,
             ),
             t.builtin,
-            "index_bit_array_string",
+            "index_bit_array_utf8_string",
             [],
           ),
-          [subject, offset, size],
+          [subject, offset, size, endian],
+        )
+
+      #(size, False, inner_subject)
+    }
+
+    Utf16Mode -> {
+      let size = case size_value {
+        Sized(_size) -> panic as "size not supported for UTF-16"
+        Unsized -> {
+          let assert t.PatternString(_, value) = expr
+          let fun_type = t.FunctionType([t.string_type], t.int_type)
+          let fun = t.Function(fun_type, t.builtin, "utf16_string_bit_size", [])
+          t.Call(t.int_type, fun, [t.String(t.string_type, value)])
+        }
+      }
+
+      let endian = endian_expression(endian)
+
+      let inner_subject =
+        t.Call(
+          t.string_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type, t.int_type],
+              t.string_type,
+            ),
+            t.builtin,
+            "index_bit_array_utf16_string",
+            [],
+          ),
+          [subject, offset, size, endian],
+        )
+
+      #(size, False, inner_subject)
+    }
+
+    Utf32Mode -> {
+      let size = case size_value {
+        Sized(_size) -> panic as "size not supported for UTF-32"
+        Unsized -> {
+          let assert t.PatternString(_, value) = expr
+          let fun_type = t.FunctionType([t.string_type], t.int_type)
+          let fun = t.Function(fun_type, t.builtin, "utf32_string_bit_size", [])
+          t.Call(t.int_type, fun, [t.String(t.string_type, value)])
+        }
+      }
+
+      let endian = endian_expression(endian)
+
+      let inner_subject =
+        t.Call(
+          t.string_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type, t.int_type],
+              t.string_type,
+            ),
+            t.builtin,
+            "index_bit_array_utf32_string",
+            [],
+          ),
+          [subject, offset, size, endian],
+        )
+
+      #(size, False, inner_subject)
+    }
+
+    Utf8CodepointMode -> {
+      let size = case size_value {
+        Sized(_size) -> panic as "size not supported for UTF-8 codepoint"
+        Unsized -> t.Int(t.int_type, "8")
+      }
+
+      let endian = endian_expression(endian)
+
+      let inner_subject =
+        t.Call(
+          t.codepoint_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type],
+              t.codepoint_type,
+            ),
+            t.builtin,
+            "index_bit_array_utf8",
+            [],
+          ),
+          [subject, offset, endian],
+        )
+
+      #(size, False, inner_subject)
+    }
+
+    Utf16CodepointMode -> {
+      let size = case size_value {
+        Sized(_size) -> panic as "size not supported for UTF-16 codepoint"
+        Unsized -> t.Int(t.int_type, "16")
+      }
+
+      let endian = endian_expression(endian)
+
+      let inner_subject =
+        t.Call(
+          t.codepoint_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type],
+              t.codepoint_type,
+            ),
+            t.builtin,
+            "index_bit_array_utf16",
+            [],
+          ),
+          [subject, offset, endian],
+        )
+
+      #(size, False, inner_subject)
+    }
+
+    Utf32CodepointMode -> {
+      let size = case size_value {
+        Sized(_size) -> panic as "size not supported for UTF-32 codepoint"
+        Unsized -> t.Int(t.int_type, "32")
+      }
+
+      let endian = endian_expression(endian)
+
+      let inner_subject =
+        t.Call(
+          t.codepoint_type,
+          t.Function(
+            t.FunctionType(
+              [t.bit_array_type, t.int_type, t.int_type],
+              t.codepoint_type,
+            ),
+            t.builtin,
+            "index_bit_array_utf32",
+            [],
+          ),
+          [subject, offset, endian],
         )
 
       #(size, False, inner_subject)
@@ -717,6 +925,7 @@ fn lower_pattern_bindings(
           #(offset, list.append(bindings, new_binding))
         })
       segs
+      |> list.reverse()
     }
     t.PatternConstructor(
       typ,
@@ -1137,15 +1346,25 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
                   let fun = Global(fun_type, "length_bit_array")
                   Call(int_type, fun, [exp])
                 }
-                Utf8Mode ->
-                  case exp {
-                    Literal(_, String(s)) -> {
-                      let assert Ok(unescaped) = glexer.unescape_string(s)
-                      let size = string.byte_size(unescaped)
-                      Literal(int_type, Int(int.to_string(8 * size)))
-                    }
-                    _ -> panic as "expected string value for utf8"
-                  }
+                FloatMode -> Literal(int_type, Int("64"))
+                Utf8Mode -> {
+                  let fun_type = FunctionType([string_type], int_type)
+                  let fun = Global(fun_type, "utf8_string_bit_size")
+                  Call(int_type, fun, [exp])
+                }
+                Utf16Mode -> {
+                  let fun_type = FunctionType([string_type], int_type)
+                  let fun = Global(fun_type, "utf16_string_bit_size")
+                  Call(int_type, fun, [exp])
+                }
+                Utf32Mode -> {
+                  let fun_type = FunctionType([string_type], int_type)
+                  let fun = Global(fun_type, "utf32_string_bit_size")
+                  Call(int_type, fun, [exp])
+                }
+                Utf8CodepointMode -> Literal(int_type, Int("8"))
+                Utf16CodepointMode -> Literal(int_type, Int("16"))
+                Utf32CodepointMode -> Literal(int_type, Int("32"))
               }
           }
 
@@ -1175,15 +1394,40 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
 
           let write_fun_name = case mode {
             IntMode -> "write_bit_array_int"
-            BitsMode | BytesMode -> "write_bit_array"
-            Utf8Mode -> "write_bit_array_string"
+            FloatMode -> "write_bit_array_float"
+
+            // TODO codepoint writing
+            Utf8CodepointMode -> "write_bit_array_int"
+            Utf16CodepointMode -> "write_bit_array_int"
+            Utf32CodepointMode -> "write_bit_array_int"
+
+            BitsMode -> "write_bit_array"
+            BytesMode -> "write_bit_array"
+
+            Utf8Mode -> "write_bit_array_utf8_string"
+            Utf16Mode -> "write_bit_array_utf16_string"
+            Utf32Mode -> "write_bit_array_utf32_string"
+          }
+
+          let #(endian, endian_type) = case mode {
+            BitsMode | BytesMode -> #([], [])
+            _ -> #([lower_expression(c, endian_expression(endian))], [int_type])
           }
 
           let write_typ =
-            FunctionType([seg_value.typ, typ, int_type, int_type], nil_type)
+            FunctionType(
+              [seg_value.typ, typ, int_type, int_type, ..endian_type],
+              nil_type,
+            )
           let write_fun = Global(write_typ, write_fun_name)
           let write_call =
-            Call(nil_type, write_fun, [seg_value, target, offset, seg_size])
+            Call(nil_type, write_fun, [
+              seg_value,
+              target,
+              offset,
+              seg_size,
+              ..endian
+            ])
 
           let new_offset = add_exp(Local(int_type, "offset"), seg_size)
           let update_offset = Let(typ, "offset", new_offset, exp)

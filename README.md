@@ -123,8 +123,8 @@ Patches can be placed in the `patch` directory or any of the source directories.
 
 You can use the `@external(c, "", "function_name")` annotation to call C functions.
 The compiler will then generate a header file with a function declaration that
-you can include and implement your function against. Your implementation C file
-should be named in the same way as the header file.
+you can include and implement your function against (use the `--headers` option).
+Your implementation C file should be named in the same way as the header file.
 Preferably your functions should be namespaced e.g. `module_name_function_name()`.
 
 ## Feature / Todo List

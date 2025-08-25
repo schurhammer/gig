@@ -44,6 +44,8 @@ struct Closure {
   void *env;
 };
 
+enum Endian { NATIVE, BIG, LITTLE };
+
 _Noreturn Nil panic_exit(String message);
 
 Bool eq_Nil(Nil x, Nil y);
@@ -86,12 +88,42 @@ Float sub_Float(Float x, Float y);
 Float mul_Float(Float x, Float y);
 Float div_Float(Float x, Float y);
 
-BitArray new_bit_array(size_t len);
-Nil write_bit_array(BitArray src, BitArray dst, Int offset, Int len);
+BitArray new_bit_array(Int len);
 Nil write_bit_array_string(String value, BitArray dst, Int offset, Int len);
-Nil write_bit_array_int(Int value, BitArray dst, Int offset, Int len);
-String index_bit_array_string(BitArray ba, Int bit_offset, Int bit_length);
-Int index_bit_array_int(BitArray ba, Int bit_offset, Int bit_length);
+Nil write_bit_array_int(Int value, BitArray dst, Int offset, Int len,
+                        Int endian);
+Nil write_bit_array_float(Float value, BitArray dst, Int offset, Int len,
+                          Int endian);
+
+Nil write_bit_array_utf8_string(String value, BitArray dst, Int offset, Int len,
+                                Int endian);
+Nil write_bit_array_utf16_string(String value, BitArray dst, Int offset,
+                                 Int len, Int endian);
+Nil write_bit_array_utf32_string(String value, BitArray dst, Int offset,
+                                 Int len, Int endian);
+
+Int index_bit_array_int(BitArray ba, Int bit_offset, Int bit_length,
+                        Int endian);
+Int index_bit_array_int_signed(BitArray ba, Int bit_offset, Int bit_length,
+                               Int endian);
+Float index_bit_array_float(BitArray ba, Int bit_offset, Int bit_length,
+                            Int endian);
+
+UtfCodepoint index_bit_array_utf8(BitArray ba, Int bit_offset, Int endian);
+UtfCodepoint index_bit_array_utf16(BitArray ba, Int bit_offset, Int endian);
+UtfCodepoint index_bit_array_utf32(BitArray ba, Int bit_offset, Int endian);
+
+String index_bit_array_utf8_string(BitArray ba, Int bit_offset, Int bit_length,
+                                   Int endian);
+String index_bit_array_utf16_string(BitArray ba, Int bit_offset, Int bit_length,
+                                    Int endian);
+String index_bit_array_utf32_string(BitArray ba, Int bit_offset, Int bit_length,
+                                    Int endian);
+
+Int utf8_string_bit_size(String value);
+Int utf16_string_bit_size(String value);
+Int utf32_string_bit_size(String value);
+
 BitArray slice_bit_array(BitArray ba, Int offset, Int len);
 Int length_bit_array(BitArray ba);
 

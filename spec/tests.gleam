@@ -1,4 +1,5 @@
 import ffi.{type Dynamic}
+import gleam/bit_array
 
 pub opaque type Test {
   Example(name: String, proc: fn() -> Outcome)
@@ -21,7 +22,7 @@ pub opaque type Pass {
 }
 
 pub opaque type Fail {
-  Fail(left: Dynamic, right: Dynamic)
+  Fail(left: String, right: String)
 }
 
 pub type Outcome =
@@ -34,7 +35,7 @@ pub fn pass() -> Outcome {
 pub fn assert_equal(right: a, left: a) -> Outcome {
   case left == right {
     True -> pass()
-    _ -> Error(Fail(left: ffi.to_dynamic(left), right: ffi.to_dynamic(right)))
+    _ -> Error(Fail(left: ffi.to_string(left), right: ffi.to_string(right)))
   }
 }
 
@@ -100,9 +101,13 @@ fn run_list_of_tests(suite_name, tests, stats) -> Stats {
 }
 
 fn run_test(testcase: Test, suite_name: String, stats) {
+  // ffi.print(testcase.name)
+  // ffi.print("\n")
+
   case testcase.proc() {
     Ok(Pass) -> {
-      ffi.print("\u{001b}[32m.\u{001b}[0m")
+      let assert Ok(escape) = bit_array.to_string(<<27, 91>>)
+      ffi.print(escape <> "32m." <> escape <> "0m")
       Stats(..stats, passes: stats.passes + 1)
     }
     Error(Fail(left: left, right: right)) -> {
@@ -113,10 +118,10 @@ fn run_test(testcase: Test, suite_name: String, stats) {
       ffi.print(testcase.name)
       ffi.print(" failed!\n")
       ffi.print(" left: ")
-      ffi.print(ffi.to_string(left))
+      ffi.print(left)
       ffi.print("\n")
       ffi.print("right: ")
-      ffi.print(ffi.to_string(right))
+      ffi.print(right)
       ffi.print("\n")
       Stats(..stats, failures: stats.failures + 1)
     }

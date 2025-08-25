@@ -175,7 +175,7 @@ fn binary_to_decimal(binary_str: String) -> Result(String, Nil) {
 }
 
 fn float_literal(val: String) -> String {
-  string.replace(val, "_", "") <> "L"
+  string.replace(val, "_", "")
 }
 
 fn generate_literal(lit: core.LiteralKind) -> String {

@@ -19,6 +19,8 @@ pub const bool_type = NamedType("Bool", builtin, [])
 
 pub const int_type = NamedType("Int", builtin, [])
 
+pub const codepoint_type = NamedType("UtfCodepoint", builtin, [])
+
 pub const float_type = NamedType("Float", builtin, [])
 
 pub const string_type = NamedType("String", builtin, [])
@@ -1138,8 +1140,8 @@ pub fn resolve_global_type_name(
   name: String,
 ) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
   case dict.get(c.modules, module) {
-    Ok(c) ->
-      case dict.get(c.type_env, name) {
+    Ok(mod) ->
+      case dict.get(mod.type_env, name) {
         Ok(#(typ, variants)) ->
           Ok(#(QualifiedName(module, name), typ, variants))
         Error(_) -> Error("Could not resolve type " <> name)
@@ -1280,38 +1282,49 @@ fn infer_pattern(
       let #(c, n, segs) =
         list.fold(segments, #(c, n, []), fn(acc, seg) {
           let #(c, n, segs) = acc
-          // TODO handle options
-          // TODO unify type of pattern according to options
           let #(pattern, options) = seg
 
           let #(c, n, options, typ) =
             list.fold(options, #(c, n, [], None), fn(acc, option) {
               let #(c, n, options, typ) = acc
-              // TODO handle all options
               let #(c, n, option, option_type) = case option {
-                g.BigOption -> todo
+                g.BigOption -> #(c, n, BigOption, None)
+                g.LittleOption -> #(c, n, LittleOption, None)
+                g.NativeOption -> #(c, n, NativeOption, None)
+                g.SignedOption -> #(c, n, SignedOption, None)
+                g.UnsignedOption -> #(c, n, UnsignedOption, None)
                 g.BytesOption -> #(c, n, BytesOption, Some(bit_array_type))
                 g.BitsOption -> #(c, n, BitsOption, Some(bit_array_type))
-                g.FloatOption -> todo
-                g.IntOption -> todo
-                g.LittleOption -> todo
-                g.NativeOption -> todo
-                g.SignedOption -> todo
+                g.IntOption -> #(c, n, IntOption, Some(int_type))
+                g.FloatOption -> #(c, n, FloatOption, Some(float_type))
+                g.Utf8Option -> #(c, n, Utf8Option, Some(string_type))
+                g.Utf16Option -> #(c, n, Utf16Option, Some(string_type))
+                g.Utf32Option -> #(c, n, Utf32Option, Some(string_type))
+                g.Utf8CodepointOption -> #(
+                  c,
+                  n,
+                  Utf8CodepointOption,
+                  Some(codepoint_type),
+                )
+                g.Utf16CodepointOption -> #(
+                  c,
+                  n,
+                  Utf16CodepointOption,
+                  Some(codepoint_type),
+                )
+                g.Utf32CodepointOption -> #(
+                  c,
+                  n,
+                  Utf32CodepointOption,
+                  Some(codepoint_type),
+                )
                 g.SizeOption(size) -> #(c, n, SizeOption(size), None)
                 g.SizeValueOption(pattern) -> {
-                  // TODO should this be infer_expression???
                   let #(c, n, p) = infer_pattern(c, n, pattern)
                   let c = unify(c, p.typ, int_type)
                   #(c, n, SizeValueOption(p), None)
                 }
-                g.UnitOption(_) -> todo
-                g.UnsignedOption -> todo
-                g.Utf16CodepointOption -> todo
-                g.Utf16Option -> todo
-                g.Utf32CodepointOption -> todo
-                g.Utf32Option -> todo
-                g.Utf8CodepointOption -> todo
-                g.Utf8Option -> #(c, n, Utf8Option, Some(string_type))
+                g.UnitOption(unit) -> #(c, n, UnitOption(unit), None)
               }
               let typ = case typ, option_type {
                 Some(_), Some(_) ->
@@ -1323,10 +1336,19 @@ fn infer_pattern(
             })
           let options = list.reverse(options)
 
+          // If no type option was specified, default to int_type
+          let expected_type = case typ {
+            Some(t) -> t
+            None -> int_type
+          }
+
           let #(c, n, pattern) = infer_pattern(c, n, pattern)
+          let c = unify(c, pattern.typ, expected_type)
           #(c, n, [#(pattern, options), ..segs])
         })
       let segs = list.reverse(segs)
+
+      // The overall pattern type should be bit_array_type
       #(c, n, PatternBitString(bit_array_type, segs))
     }
     g.PatternVariant(span, module, constructor, arguments, with_spread) -> {
@@ -1490,12 +1512,12 @@ fn infer_body(
         g.Assert(_, expression, message) -> {
           let assert Ok(#(c, expression)) = infer_expression(c, n, expression)
 
-          let message = case message {
+          let #(c, message) = case message {
             Some(msg) -> {
               let assert Ok(#(c, msg)) = infer_expression(c, n, msg)
-              Some(msg)
+              #(c, Some(msg))
             }
-            None -> None
+            None -> #(c, None)
           }
 
           let statement = Assert(expression.typ, expression, message)
@@ -1996,27 +2018,39 @@ fn infer_expression(
               let #(c, options, typ) = acc
               // TODO handle all options
               let #(c, option, option_type) = case option {
-                g.BigOption -> todo
+                g.BigOption -> #(c, BigOption, None)
                 g.BytesOption -> #(c, BytesOption, Some(bit_array_type))
                 g.BitsOption -> #(c, BitsOption, Some(bit_array_type))
-                g.FloatOption -> todo
+                g.FloatOption -> #(c, FloatOption, Some(float_type))
                 g.IntOption -> #(c, IntOption, Some(int_type))
-                g.LittleOption -> todo
-                g.NativeOption -> todo
-                g.SignedOption -> todo
+                g.LittleOption -> #(c, LittleOption, None)
+                g.NativeOption -> #(c, NativeOption, None)
+                g.SignedOption -> #(c, SignedOption, None)
                 g.SizeOption(size) -> #(c, SizeOption(size), None)
                 g.SizeValueOption(e) -> {
                   let assert Ok(#(c, e)) = infer_expression(c, n, e)
                   let c = unify(c, e.typ, int_type)
                   #(c, SizeValueOption(e), None)
                 }
-                g.UnitOption(_) -> todo
-                g.UnsignedOption -> todo
-                g.Utf16CodepointOption -> todo
-                g.Utf16Option -> todo
-                g.Utf32CodepointOption -> todo
-                g.Utf32Option -> todo
-                g.Utf8CodepointOption -> todo
+                g.UnitOption(unit) -> #(c, UnitOption(unit), None)
+                g.UnsignedOption -> #(c, UnsignedOption, None)
+                g.Utf16CodepointOption -> #(
+                  c,
+                  Utf16CodepointOption,
+                  Some(codepoint_type),
+                )
+                g.Utf16Option -> #(c, Utf16Option, Some(string_type))
+                g.Utf32CodepointOption -> #(
+                  c,
+                  Utf32CodepointOption,
+                  Some(codepoint_type),
+                )
+                g.Utf32Option -> #(c, Utf32Option, Some(string_type))
+                g.Utf8CodepointOption -> #(
+                  c,
+                  Utf8CodepointOption,
+                  Some(codepoint_type),
+                )
                 g.Utf8Option -> {
                   #(c, Utf8Option, Some(string_type))
                 }

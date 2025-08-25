@@ -126,20 +126,59 @@ pub fn drop_start_string(string: String, count: Int) -> String
 
 // BitArray Operators
 
-@external(c, "", "write_bit_array_string")
-pub fn write_bit_array_string(value: String, to: BitArray, at_offset: Int, len: Int) -> Nil
-
 @external(c, "", "write_bit_array_int")
-pub fn write_bit_array_int(value: Int, to: BitArray, at_offset: Int, len: Int) -> Nil
+pub fn write_bit_array_int(value: Int, to: BitArray, at_offset: Int, len: Int, endian: Int) -> Nil
+
+@external(c, "", "write_bit_array_float")
+pub fn write_bit_array_float(value: Float, to: BitArray, at_offset: Int, len: Int, endian: Int) -> Nil
 
 @external(c, "", "write_bit_array")
 pub fn write_bit_array(value: BitArray, to: BitArray, to_offset: Int, len: Int) -> Nil
 
-@external(c, "", "index_bit_array_string")
-pub fn index_bit_array_string(a: BitArray, offset: Int, length: Int) -> String
+@external(c, "", "write_bit_array_utf8_string")
+pub fn write_bit_array_utf8_string(value: String, to: BitArray, at_offset: Int, len: Int, endian: Int) -> Nil
+
+@external(c, "", "write_bit_array_utf16_string")
+pub fn write_bit_array_utf16_string(value: String, to: BitArray, at_offset: Int, len: Int, endian: Int) -> Nil
+
+@external(c, "", "write_bit_array_utf32_string")
+pub fn write_bit_array_utf32_string(value: String, to: BitArray, at_offset: Int, len: Int, endian: Int) -> Nil
 
 @external(c, "", "index_bit_array_int")
-pub fn index_bit_array_int(a: BitArray, offset: Int, length: Int) -> Int
+pub fn index_bit_array_int(a: BitArray, offset: Int, length: Int, endian: Int) -> Int
+
+@external(c, "", "index_bit_array_int_signed")
+pub fn index_bit_array_int_signed(a: BitArray, offset: Int, length: Int, endian: Int) -> Int
+
+@external(c, "", "index_bit_array_float")
+pub fn index_bit_array_float(a: BitArray, offset: Int, length: Int, endian: Int) -> Float
+
+@external(c, "", "index_bit_array_utf8")
+pub fn index_bit_array_utf8(a: BitArray, offset: Int, endian: Int) -> UtfCodepoint
+
+@external(c, "", "index_bit_array_utf16")
+pub fn index_bit_array_utf16(a: BitArray, offset: Int, endian: Int) -> UtfCodepoint
+
+@external(c, "", "index_bit_array_utf32")
+pub fn index_bit_array_utf32(a: BitArray, offset: Int, endian: Int) -> UtfCodepoint
+
+@external(c, "", "index_bit_array_utf8_string")
+pub fn index_bit_array_utf8_string(a: BitArray, offset: Int, length: Int, endian: Int) -> String
+
+@external(c, "", "index_bit_array_utf16_string")
+pub fn index_bit_array_utf16_string(a: BitArray, offset: Int, length: Int, endian: Int) -> String
+
+@external(c, "", "index_bit_array_utf32_string")
+pub fn index_bit_array_utf32_string(a: BitArray, offset: Int, length: Int, endian: Int) -> String
+
+@external(c, "", "utf8_string_bit_size")
+pub fn utf8_string_bit_size(value: String) -> Int
+
+@external(c, "", "utf16_string_bit_size")
+pub fn utf16_string_bit_size(value: String) -> Int
+
+@external(c, "", "utf32_string_bit_size")
+pub fn utf32_string_bit_size(value: String) -> Int
 
 @external(c, "", "slice_bit_array")
 pub fn slice_bit_array(a: BitArray, offset: Int, length: Int) -> BitArray
