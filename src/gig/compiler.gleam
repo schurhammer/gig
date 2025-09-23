@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
   }
 
   let args = case options.release {
-    True -> ["-O3", ..args]
+    True -> ["-O3", "-flto", ..args]
     False -> args
   }
 
