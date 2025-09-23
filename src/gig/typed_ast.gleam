@@ -2003,9 +2003,7 @@ fn infer_expression(
       let args = list.flatten([arguments_before, [arg], arguments_after])
       let param = g.FnParameter(g.Named(x), None)
       let lambda =
-        g.Fn(span, [param], None, [
-          g.Expression(g.Call(span, function, args)),
-        ])
+        g.Fn(span, [param], None, [g.Expression(g.Call(span, function, args))])
       infer_expression(c, n, lambda)
     }
     g.BitString(_, segments) -> {
@@ -2382,12 +2380,12 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
       if aname != bname || amodule != bmodule
     -> {
       panic as error(
-          c,
-          "failed to unify types \n\n"
-            <> string.inspect(a)
-            <> "\n"
-            <> string.inspect(b),
-        )
+        c,
+        "failed to unify types \n\n"
+          <> string.inspect(a)
+          <> "\n"
+          <> string.inspect(b),
+      )
     }
     NamedType(_, _, aargs), NamedType(_, _, bargs) -> {
       case list.strict_zip(aargs, bargs) {
@@ -2416,12 +2414,12 @@ fn unify(c: Context, a: Type, b: Type) -> Context {
     }
     _, _ -> {
       panic as error(
-          c,
-          "failed to unify types \n\n"
-            <> string.inspect(a)
-            <> "\n"
-            <> string.inspect(b),
-        )
+        c,
+        "failed to unify types \n\n"
+          <> string.inspect(a)
+          <> "\n"
+          <> string.inspect(b),
+      )
     }
   }
 }

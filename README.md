@@ -119,8 +119,8 @@ you wish to patch. The patch will be merged with the original module, so you
 only need to implement the functions that are broken.
 Patches can be placed in the `patch` directory or any of the source directories.
 
-> For better c language support in your editor, you can add a `.clangd` and
-> `compile_flags.txt` file to the project.
+For better c language support in your editor, you can add a `.clangd` and
+`compile_flags.txt` file to your project.
 
 `.clangd`:
 
