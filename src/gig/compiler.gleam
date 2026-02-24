@@ -107,7 +107,8 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
   let assert Ok(source_text) = read_source(sources, "gleam")
   let assert Ok(prelude) = glance.module(source_text)
   let typed = typed_ast.new_context()
-  let typed = typed_ast.infer_module(typed, prelude, "gleam", source_text)
+  let assert Ok(typed) =
+    typed_ast.infer_module(typed, prelude, "gleam", source_text)
 
   // parse and typecheck input (recursively)
   let #(typed, _done) = infer_file(sources, typed, ["gleam"], module_id)
@@ -310,7 +311,7 @@ fn infer_file(
 
   // infer this file
   io.println("Check " <> source)
-  let c = typed_ast.infer_module(c, module, module_id, source_text)
+  let assert Ok(c) = typed_ast.infer_module(c, module, module_id, source_text)
 
   #(c, done)
 }
