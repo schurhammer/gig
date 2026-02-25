@@ -8,7 +8,7 @@ import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result.{try}
+import gleam/result
 import gleam/string
 
 pub const builtin = "gleam"
@@ -338,6 +338,8 @@ pub type Error {
   WrongArity(expected_arg_count: Int, actual_arg_count: Int)
   LabelNotFound(String)
   TupleIndexOutOfBounds(tuple_size: Int, index: Int)
+  IncompatibleTypes(Type, Type)
+  RecursiveTypeError
 }
 
 pub type QualifiedName {
@@ -491,12 +493,12 @@ pub fn infer_module(
       use #(c, alias) <- result.try(infer_alias_type(c, def.definition))
 
       // update the placeholder type
-      use #(_, placeholder, _) <- result.map(resolve_global_type_name(
+      use #(_, placeholder, _) <- result.try(resolve_global_type_name(
         c,
         c.current_module,
         alias.name,
       ))
-      let c = unify(c, alias.aliased.typ, placeholder.typ)
+      use c <- result.map(unify(c, alias.aliased.typ, placeholder.typ))
 
       #(c, [#(def, alias), ..aliases])
     }),
@@ -641,12 +643,12 @@ pub fn infer_module(
       let fun = def.definition
 
       // unify placeholder type
-      use placeholder <- result.map(resolve_global_name(
+      use placeholder <- result.try(resolve_global_name(
         c,
         c.current_module,
         fun.name,
       ))
-      let c = unify(c, placeholder.typ.typ, fun.typ.typ)
+      use c <- result.map(unify(c, placeholder.typ.typ, fun.typ.typ))
 
       // generalise
       let typ = generalise(c, fun.typ.typ)
@@ -810,17 +812,17 @@ fn infer_function(
     })
 
   // infer body
-  use #(c, body) <- result.map(infer_body(c, n, fun.body))
+  use #(c, body) <- result.try(infer_body(c, n, fun.body))
 
   // compute function type
   let parameter_types = list.map(parameters, fn(x) { x.typ })
   let typ = FunctionType(parameter_types, return_type)
 
   // unify the return type with the last statement
-  let c = case list.last(body) {
+  use c <- result.map(case list.last(body) {
     Ok(statement) -> unify(c, return_type, statement.typ)
-    Error(_) -> c
-  }
+    Error(_) -> Ok(c)
+  })
 
   let name = fun.name
 
@@ -1300,8 +1302,9 @@ fn infer_pattern(
       let #(c, elem_type) = new_type_var_ref(c)
 
       // Unify all element types with the element type variable
-      let c =
-        list.fold(elements, c, fn(c, elem) { unify(c, elem.typ, elem_type) })
+      use c <- result.try(
+        list.try_fold(elements, c, fn(c, elem) { unify(c, elem.typ, elem_type) }),
+      )
 
       // Create the list type
       let typ = NamedType("List", builtin, [elem_type])
@@ -1309,9 +1312,9 @@ fn infer_pattern(
       // Handle the tail pattern if present
       use #(c, n, tail) <- result.map(case tail {
         Some(tail_pattern) -> {
-          use #(c, n, tail) <- result.map(infer_pattern(c, n, tail_pattern))
+          use #(c, n, tail) <- result.try(infer_pattern(c, n, tail_pattern))
           // The tail should be a list of the same type
-          let c = unify(c, tail.typ, typ)
+          use c <- result.map(unify(c, tail.typ, typ))
           #(c, n, Some(tail))
         }
         None -> Ok(#(c, n, None))
@@ -1386,8 +1389,8 @@ fn infer_pattern(
                   Ok(#(c, n, Utf32CodepointOption, Some(codepoint_type)))
                 g.SizeOption(size) -> Ok(#(c, n, SizeOption(size), None))
                 g.SizeValueOption(pattern) -> {
-                  use #(c, n, p) <- result.map(infer_pattern(c, n, pattern))
-                  let c = unify(c, p.typ, int_type)
+                  use #(c, n, p) <- result.try(infer_pattern(c, n, pattern))
+                  use c <- result.map(unify(c, p.typ, int_type))
                   #(c, n, SizeValueOption(p), None)
                 }
                 g.UnitOption(unit) -> Ok(#(c, n, UnitOption(unit), None))
@@ -1409,8 +1412,8 @@ fn infer_pattern(
             None -> int_type
           }
 
-          use #(c, n, pattern) <- result.map(infer_pattern(c, n, pattern))
-          let c = unify(c, pattern.typ, expected_type)
+          use #(c, n, pattern) <- result.try(infer_pattern(c, n, pattern))
+          use c <- result.map(unify(c, pattern.typ, expected_type))
           #(c, n, [#(pattern, options), ..segs])
         }),
       )
@@ -1452,7 +1455,7 @@ fn infer_pattern(
       let arguments = list.reverse(arguments)
 
       // handle labels
-      use #(c, ordered_arguments) <- result.map(case with_spread {
+      use #(c, ordered_arguments) <- result.try(case with_spread {
         True -> {
           let #(c, args) =
             match_labels_optional(arguments, labels)
@@ -1477,16 +1480,16 @@ fn infer_pattern(
       let arg_types = list.map(ordered_arguments, fn(x) { x.item.typ })
 
       // handle 0 parameter variants are not functions
-      let #(c, typ) = case arg_types {
-        [] -> instantiate(c, poly)
+      use #(c, typ) <- result.map(case arg_types {
+        [] -> Ok(instantiate(c, poly))
         _ -> {
           // unify the constructor function type with the types of args
           let #(c, fun_typ) = instantiate(c, poly)
           let #(c, typ) = new_type_var_ref(c)
-          let c = unify(c, fun_typ, FunctionType(arg_types, typ))
+          use c <- result.map(unify(c, fun_typ, FunctionType(arg_types, typ)))
           #(c, typ)
         }
-      }
+      })
 
       let pattern =
         PatternConstructor(
@@ -1561,8 +1564,8 @@ fn infer_body(
           // if there is an annotation, the pattern must unify with the annotation
           use #(c, annotation) <- result.try(case annotation {
             Some(typ) -> {
-              use #(c, annotation) <- result.map(infer_annotation(c, typ))
-              let c = unify(c, pattern.typ, annotation.typ)
+              use #(c, annotation) <- result.try(infer_annotation(c, typ))
+              use c <- result.map(unify(c, pattern.typ, annotation.typ))
               #(c, Some(annotation))
             }
             None -> Ok(#(c, None))
@@ -1570,7 +1573,7 @@ fn infer_body(
 
           // the pattern must unify with both the annotation
           // and the assigned value
-          let c = unify(c, pattern.typ, value.typ)
+          use c <- result.try(unify(c, pattern.typ, value.typ))
 
           // TODO check the right "kind" was used (needs exhaustive checking)
           let kind = case kind {
@@ -1767,18 +1770,17 @@ fn infer_expression(
       }
     }
     g.NegateInt(_, value) -> {
-      use #(c, e) <- try(infer_expression(c, n, value))
-      let c = unify(c, e.typ, int_type)
-      Ok(#(c, NegateInt(int_type, e)))
+      use #(c, e) <- result.try(infer_expression(c, n, value))
+      use c <- result.map(unify(c, e.typ, int_type))
+      #(c, NegateInt(int_type, e))
     }
     g.NegateBool(_, value) -> {
-      use #(c, e) <- try(infer_expression(c, n, value))
-      let c = unify(c, e.typ, bool_type)
-      Ok(#(c, NegateBool(bool_type, e)))
+      use #(c, e) <- result.try(infer_expression(c, n, value))
+      use c <- result.map(unify(c, e.typ, bool_type))
+      #(c, NegateBool(bool_type, e))
     }
     g.Block(_, statements) -> {
       use #(c, statements) <- result.try(infer_body(c, n, statements))
-
       case list.last(statements) {
         Ok(last) -> Ok(#(c, Block(last.typ, statements)))
         Error(_) -> Error(EmptyBlock)
@@ -1788,10 +1790,10 @@ fn infer_expression(
       case e {
         Some(e) -> {
           // the expression should be a string
-          use #(c, e) <- try(infer_expression(c, n, e))
-          unify(c, e.typ, string_type)
+          use #(c, e) <- result.try(infer_expression(c, n, e))
+          use c <- result.map(unify(c, e.typ, string_type))
           let #(c, typ) = new_type_var_ref(c)
-          Ok(#(c, Panic(typ, Some(e))))
+          #(c, Panic(typ, Some(e)))
         }
         None -> {
           let #(c, typ) = new_type_var_ref(c)
@@ -1803,10 +1805,10 @@ fn infer_expression(
       case e {
         Some(e) -> {
           // the expression should be a string
-          use #(c, e) <- try(infer_expression(c, n, e))
-          unify(c, e.typ, string_type)
+          use #(c, e) <- result.try(infer_expression(c, n, e))
+          use c <- result.map(unify(c, e.typ, string_type))
           let #(c, typ) = new_type_var_ref(c)
-          Ok(#(c, Todo(typ, Some(e))))
+          #(c, Todo(typ, Some(e)))
         }
         None -> {
           let #(c, typ) = new_type_var_ref(c)
@@ -1816,10 +1818,10 @@ fn infer_expression(
     }
     g.Tuple(_, elements) -> {
       // Infer type of all elements
-      use #(c, elements) <- try(
+      use #(c, elements) <- result.try(
         list.try_fold(elements, #(c, []), fn(acc, e) {
           let #(c, elements) = acc
-          use #(c, e) <- try(infer_expression(c, n, e))
+          use #(c, e) <- result.try(infer_expression(c, n, e))
           Ok(#(c, [e, ..elements]))
         }),
       )
@@ -1832,19 +1834,19 @@ fn infer_expression(
     }
     g.List(_, elements, rest) -> {
       // Infer types for all elements
-      use #(c, elements) <- try(
+      use #(c, elements) <- result.try(
         list.try_fold(elements, #(c, []), fn(acc, e) {
           let #(c, elements) = acc
-          use #(c, e) <- try(infer_expression(c, n, e))
+          use #(c, e) <- result.try(infer_expression(c, n, e))
           Ok(#(c, [e, ..elements]))
         }),
       )
       let elements = list.reverse(elements)
 
       // Infer type for rest (if present)
-      use #(c, rest) <- try(case rest {
+      use #(c, rest) <- result.try(case rest {
         Some(t) -> {
-          use #(c, t) <- try(infer_expression(c, n, t))
+          use #(c, t) <- result.try(infer_expression(c, n, t))
           Ok(#(c, Some(t)))
         }
         None -> Ok(#(c, None))
@@ -1855,22 +1857,24 @@ fn infer_expression(
       let typ = NamedType("List", builtin, [elem_type])
 
       // Unify all element types
-      let c = list.fold(elements, c, fn(c, e) { unify(c, e.typ, elem_type) })
+      use c <- result.try(
+        list.try_fold(elements, c, fn(c, e) { unify(c, e.typ, elem_type) }),
+      )
 
       // Unify rest type with list type (if rest is present)
-      let c = case rest {
+      use c <- result.map(case rest {
         Some(t) -> unify(c, t.typ, typ)
-        None -> c
-      }
+        None -> Ok(c)
+      })
 
-      Ok(#(c, List(typ, elements, rest)))
+      #(c, List(typ, elements, rest))
     }
     g.Fn(_, parameters, return_annotation, body) -> {
       infer_fn(c, n, parameters, return_annotation, body, None)
     }
     g.RecordUpdate(span, module, constructor, record, fields) -> {
       // Infer the type of the base record expression
-      use #(c, base_expr) <- try(infer_expression(c, n, record))
+      use #(c, base_expr) <- result.try(infer_expression(c, n, record))
 
       // Resolve the constructor type
       use #(res_module, constructor, poly, labels) <- result.try(
@@ -1884,18 +1888,18 @@ fn infer_expression(
         constructor_type
 
       // Unify the base expression type with the constructor type
-      let c = unify(c, base_expr.typ, constructor_ret)
+      use c <- result.try(unify(c, base_expr.typ, constructor_ret))
 
       // Infer types for all updated fields
-      use #(c, updated_fields) <- try(
+      use #(c, updated_fields) <- result.try(
         list.try_fold(fields, #(c, []), fn(acc, field) {
           let #(c, updated_fields) = acc
           let item = case field.item {
             Some(item) -> item
             None -> g.Variable(span, field.label)
           }
-          use #(c, value) <- try(infer_expression(c, n, item))
-          Ok(#(c, [#(field.label, value), ..updated_fields]))
+          use #(c, value) <- result.map(infer_expression(c, n, item))
+          #(c, [#(field.label, value), ..updated_fields])
         }),
       )
       let updated_fields = list.reverse(updated_fields)
@@ -1909,20 +1913,20 @@ fn infer_expression(
         }),
       )
 
-      let #(c, ordered_fields) =
-        ordered_fields
-        |> list.fold_right(#(c, []), fn(acc, x) {
+      use #(c, ordered_fields) <- result.map(
+        list.try_fold(ordered_fields, #(c, []), fn(acc, x) {
           let #(c, fields) = acc
           let #(given, expected) = x
-          let #(c, result) = case given {
+          use #(c, result) <- result.map(case given {
             Some(e) -> {
-              let c = unify(c, e.item.typ, expected)
+              use c <- result.map(unify(c, e.item.typ, expected))
               #(c, Ok(e))
             }
-            None -> #(c, Error(expected))
-          }
+            None -> Ok(#(c, Error(expected)))
+          })
           #(c, [result, ..fields])
-        })
+        }),
+      )
 
       // The result type is the same as the constructor type
       let typ = constructor_ret
@@ -1939,19 +1943,19 @@ fn infer_expression(
           ordered_fields: ordered_fields,
         )
 
-      Ok(#(c, record_update))
+      #(c, record_update)
     }
     g.FieldAccess(_, container, label) -> {
       let field_access = {
         // try to infer the value, otherwise it might be a module access
-        use #(c, value) <- try(infer_expression(c, n, container))
+        use #(c, value) <- result.try(infer_expression(c, n, container))
 
         // field access must be on a named type
         let value_typ = case resolve_type(c, value.typ) {
           NamedType(type_name, module, _) -> Ok(#(type_name, module))
           _ -> Error(InvalidFieldAccess)
         }
-        use #(type_name, module) <- try(value_typ)
+        use #(type_name, module) <- result.try(value_typ)
 
         // find the custom type definition
         use custom <- result.try(resolve_custom_type(c, module, type_name))
@@ -1962,7 +1966,7 @@ fn infer_expression(
           [variant, ..] -> Ok(variant)
           _ -> Error(InvalidFieldAccess)
         }
-        use variant <- try(variant)
+        use variant <- result.try(variant)
 
         // find the matching field and index
         let field =
@@ -1970,7 +1974,7 @@ fn infer_expression(
           |> list.index_map(fn(x, i) { #(x, i) })
           |> list.find(fn(x) { { x.0 }.label == Some(label) })
           |> result.replace_error(FieldNotFound)
-        use #(field, index) <- try(field)
+        use #(field, index) <- result.try(field)
 
         // create a getter function type
         let getter = FunctionType([custom.definition.typ.typ], field.item.typ)
@@ -1979,9 +1983,9 @@ fn infer_expression(
 
         // unify the getter as if we're calling it on the value
         let #(c, typ) = new_type_var_ref(c)
-        let c = unify(c, getter, FunctionType([value.typ], typ))
+        use c <- result.map(unify(c, getter, FunctionType([value.typ], typ)))
 
-        Ok(#(c, FieldAccess(typ, value, module, variant.name, label, index)))
+        #(c, FieldAccess(typ, value, module, variant.name, label, index))
       }
       case field_access {
         Ok(access) -> Ok(access)
@@ -2008,7 +2012,7 @@ fn infer_expression(
     }
     g.Call(span, function, arguments) -> {
       // infer the type of the function
-      use #(c, fun) <- try(infer_expression(c, n, function))
+      use #(c, fun) <- result.try(infer_expression(c, n, function))
 
       // handle labels
       let labels = case fun {
@@ -2043,7 +2047,7 @@ fn infer_expression(
         _ -> Ok(list.map(args, fn(arg) { #(None, arg) }))
       })
       // infer the type of all args
-      use #(c, args) <- try(
+      use #(c, args) <- result.try(
         list.try_fold(args, #(c, []), fn(acc, type_hint_and_field) {
           let #(c, args) = acc
           let #(type_hint, field_arg) = type_hint_and_field
@@ -2054,16 +2058,16 @@ fn infer_expression(
               infer_fn(c, n, parameters, return_annotation, body, type_hint)
             _ -> infer_expression(c, n, field_arg.item)
           }
-          use #(c, inferred_arg) <- try(result)
+          use #(c, inferred_arg) <- result.try(result)
 
-          let c = case type_hint {
+          use c <- result.map(case type_hint {
             Some(hint) -> unify(c, hint, inferred_arg.typ)
-            None -> c
-          }
+            None -> Ok(c)
+          })
 
           let field_with_inferred = Field(field_arg.label, inferred_arg)
 
-          Ok(#(c, [field_with_inferred, ..args]))
+          #(c, [field_with_inferred, ..args])
         }),
       )
       let args = list.reverse(args)
@@ -2071,11 +2075,11 @@ fn infer_expression(
       let ordered_arguments = list.map(args, fn(field) { field.item })
       // unify the function type with the types of args
       let #(c, typ) = new_type_var_ref(c)
-      let c = unify(c, fun.typ, FunctionType(arg_types, typ))
-      Ok(#(c, Call(typ, fun, ordered_arguments)))
+      use c <- result.map(unify(c, fun.typ, FunctionType(arg_types, typ)))
+      #(c, Call(typ, fun, ordered_arguments))
     }
     g.TupleIndex(_, tuple, index) -> {
-      use #(c, tuple) <- try(infer_expression(c, n, tuple))
+      use #(c, tuple) <- result.try(infer_expression(c, n, tuple))
       case resolve_type(c, tuple.typ) {
         TupleType(elements) -> {
           tuple_index_type(c, elements, index)
@@ -2098,7 +2102,7 @@ fn infer_expression(
       infer_expression(c, n, lambda)
     }
     g.BitString(_, segments) -> {
-      use #(c, segs) <- try(
+      use #(c, segs) <- result.try(
         list.try_fold(segments, #(c, []), fn(acc, seg) {
           let #(c, segs) = acc
           let #(expression, options) = seg
@@ -2117,8 +2121,8 @@ fn infer_expression(
                 g.SignedOption -> Ok(#(c, SignedOption, None))
                 g.SizeOption(size) -> Ok(#(c, SizeOption(size), None))
                 g.SizeValueOption(e) -> {
-                  use #(c, e) <- result.map(infer_expression(c, n, e))
-                  let c = unify(c, e.typ, int_type)
+                  use #(c, e) <- result.try(infer_expression(c, n, e))
+                  use c <- result.map(unify(c, e.typ, int_type))
                   #(c, SizeValueOption(e), None)
                 }
                 g.UnitOption(unit) -> Ok(#(c, UnitOption(unit), None))
@@ -2148,19 +2152,19 @@ fn infer_expression(
             Some(typ) -> typ
             None -> int_type
           }
-          use #(c, expression) <- try(infer_expression(c, n, expression))
-          let c = unify(c, expression.typ, typ)
-          Ok(#(c, [#(expression, options), ..segs]))
+          use #(c, expression) <- result.try(infer_expression(c, n, expression))
+          use c <- result.map(unify(c, expression.typ, typ))
+          #(c, [#(expression, options), ..segs])
         }),
       )
       let segs = list.reverse(segs)
       Ok(#(c, BitString(bit_array_type, segs)))
     }
     g.Case(_, subjects, clauses) -> {
-      use #(c, subjects) <- try(
+      use #(c, subjects) <- result.try(
         list.try_fold(subjects, #(c, []), fn(acc, sub) {
           let #(c, subjects) = acc
-          use #(c, sub) <- try(infer_expression(c, n, sub))
+          use #(c, sub) <- result.try(infer_expression(c, n, sub))
           Ok(#(c, [sub, ..subjects]))
         }),
       )
@@ -2169,7 +2173,7 @@ fn infer_expression(
       // all of the branches should unify with the case type
       let #(c, typ) = new_type_var_ref(c)
 
-      use #(c, clauses) <- try(
+      use #(c, clauses) <- result.try(
         list.try_fold(clauses, #(c, []), fn(acc, clause) {
           let #(c, clauses) = acc
 
@@ -2191,9 +2195,9 @@ fn infer_expression(
                 list.try_fold(sub_pats, #(c, n, []), fn(acc, sub_pat) {
                   let #(c, n, pats) = acc
                   let #(sub, pat) = sub_pat
-                  use #(c, n, pat) <- result.map(infer_pattern(c, n, pat))
+                  use #(c, n, pat) <- result.try(infer_pattern(c, n, pat))
                   // the pattern type should match the corresponding subject
-                  let c = unify(c, pat.typ, sub.typ)
+                  use c <- result.map(unify(c, pat.typ, sub.typ))
                   #(c, n, [pat, ..pats])
                 }),
               )
@@ -2211,22 +2215,22 @@ fn infer_expression(
           let patterns = list.reverse(patterns)
 
           // if the guard exists ensure it has a boolean result
-          use #(c, guard) <- try(case clause.guard {
+          use #(c, guard) <- result.try(case clause.guard {
             Some(guard) -> {
-              use #(c, guard) <- try(infer_expression(c, n, guard))
-              let c = unify(c, guard.typ, bool_type)
-              Ok(#(c, Some(guard)))
+              use #(c, guard) <- result.try(infer_expression(c, n, guard))
+              use c <- result.map(unify(c, guard.typ, bool_type))
+              #(c, Some(guard))
             }
             None -> Ok(#(c, None))
           })
 
-          use #(c, body) <- try(infer_expression(c, n, clause.body))
+          use #(c, body) <- result.try(infer_expression(c, n, clause.body))
 
           // the body should unify with the case type
-          let c = unify(c, typ, body.typ)
+          use c <- result.map(unify(c, typ, body.typ))
 
           let santa = Clause(patterns:, guard:, body:)
-          Ok(#(c, [santa, ..clauses]))
+          #(c, [santa, ..clauses])
         }),
       )
       let clauses = list.reverse(clauses)
@@ -2301,19 +2305,23 @@ fn infer_expression(
         )
       }
 
-      use #(c, left) <- try(infer_expression(c, n, left))
-      use #(c, right) <- try(infer_expression(c, n, right))
+      use #(c, left) <- result.try(infer_expression(c, n, left))
+      use #(c, right) <- result.try(infer_expression(c, n, right))
 
       // unify the function type with the types of args
       let #(c, typ) = new_type_var_ref(c)
-      let c = unify(c, fun_typ, FunctionType([left.typ, right.typ], typ))
+      use c <- result.map(unify(
+        c,
+        fun_typ,
+        FunctionType([left.typ, right.typ], typ),
+      ))
 
-      Ok(#(c, BinaryOperator(typ, name, left, right)))
+      #(c, BinaryOperator(typ, name, left, right))
     }
     g.Echo(_, expression) -> {
       case expression {
         Some(expr) -> {
-          use #(c, expr) <- try(infer_expression(c, n, expr))
+          use #(c, expr) <- result.try(infer_expression(c, n, expr))
           Ok(#(c, Echo(expr.typ, Some(expr))))
         }
         None -> {
@@ -2377,10 +2385,10 @@ fn infer_fn(
   let typ = FunctionType(parameter_types, return_type)
 
   // unify parameters with type hint
-  let c = case hint {
+  use c <- result.try(case hint {
     Some(hint) -> unify(c, typ, hint)
-    None -> c
-  }
+    None -> Ok(c)
+  })
 
   // put params into local env
   let n =
@@ -2392,13 +2400,13 @@ fn infer_fn(
     })
 
   // infer body
-  use #(c, body) <- result.map(infer_body(c, n, body))
+  use #(c, body) <- result.try(infer_body(c, n, body))
 
   // unify the return type with the last statement
-  let c = case list.last(body) {
+  use c <- result.map(case list.last(body) {
     Ok(statement) -> unify(c, return_type, statement.typ)
-    Error(_) -> c
-  }
+    Error(_) -> Ok(c)
+  })
 
   let fun = Fn(typ:, parameters:, return:, body:)
   #(c, fun)
@@ -2465,74 +2473,52 @@ fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
   }
 }
 
-fn unify(c: Context, a: Type, b: Type) -> Context {
+fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
   let a = resolve_type(c, a)
   let b = resolve_type(c, b)
   case a, b {
     VariableType(ref), b ->
       case a == b {
-        True -> c
+        True -> Ok(c)
         False -> {
           // TODO: guaranteed to succeed?
           let assert Unbound(aid) = get_type_var(c, ref)
           let #(c, occurs) = occurs(c, aid, b)
           case occurs {
-            True -> {
-              panic as error(c, "recursive type")
-            }
-            False -> {
-              set_type_var(c, ref, Bound(b))
-            }
+            True -> Error(RecursiveTypeError)
+            False -> Ok(set_type_var(c, ref, Bound(b)))
           }
         }
       }
     a, VariableType(_) -> unify(c, b, a)
     NamedType(aname, amodule, _), NamedType(bname, bmodule, _)
       if aname != bname || amodule != bmodule
-    -> {
-      panic as error(
-          c,
-          "failed to unify types \n\n"
-            <> string.inspect(a)
-            <> "\n"
-            <> string.inspect(b),
-        )
-    }
-    NamedType(_, _, aargs), NamedType(_, _, bargs) -> {
-      case list.strict_zip(aargs, bargs) {
-        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
-        Error(_) -> {
-          panic as error(c, "incorrect number of type arguments")
-        }
-      }
-    }
+    -> Error(IncompatibleTypes(a, b))
+    NamedType(_, _, aargs), NamedType(_, _, bargs) ->
+      unify_arguments(c, aargs, bargs)
     FunctionType(aargs, aret), FunctionType(bargs, bret) -> {
-      let c = unify(c, aret, bret)
-      case list.strict_zip(aargs, bargs) {
-        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
-        Error(_) -> {
-          panic as error(c, "incorrect number of function arguments")
-        }
-      }
+      use c <- result.try(unify(c, aret, bret))
+      unify_arguments(c, aargs, bargs)
     }
     TupleType(aelements), TupleType(belements) -> {
-      case list.strict_zip(aelements, belements) {
-        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
-        Error(_) -> {
-          panic as error(c, "incorrect tuple size")
-        }
-      }
+      unify_arguments(c, aelements, belements)
     }
-    _, _ -> {
-      panic as error(
-          c,
-          "failed to unify types \n\n"
-            <> string.inspect(a)
-            <> "\n"
-            <> string.inspect(b),
-        )
-    }
+    _, _ -> Error(IncompatibleTypes(a, b))
   }
+}
+
+fn unify_arguments(
+  c: Context,
+  aargs: List(Type),
+  bargs: List(Type),
+) -> Result(Context, Error) {
+  use args <- result.try(
+    list.strict_zip(aargs, bargs)
+    |> result.map_error(fn(_) {
+      WrongArity(list.length(aargs), list.length(bargs))
+    }),
+  )
+  list.try_fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
 }
 
 fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
