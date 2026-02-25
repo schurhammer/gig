@@ -325,21 +325,21 @@ pub type Annotation {
 
 // TODO: errors should probably get a Span
 pub type Error {
-  UnresolvedModule(name: String)
-  UnresolvedGlobal(name: String)
-  UnresolvedType(name: String)
-  UnresolvedFunction(name: String)
-  EmptyBlock
-  InvalidTupleAccess
-  InvalidFieldAccess
-  FieldNotFound
-  UnresolvedTypeVariable(String)
-  NotAFunction(ResolvedGlobal)
-  WrongArity(expected_arg_count: Int, actual_arg_count: Int)
-  LabelNotFound(String)
-  TupleIndexOutOfBounds(tuple_size: Int, index: Int)
-  IncompatibleTypes(Type, Type)
-  RecursiveTypeError
+  UnresolvedModule(span: Span, name: String)
+  UnresolvedGlobal(span: Span, name: String)
+  UnresolvedType(span: Span, name: String)
+  UnresolvedFunction(span: Span, name: String)
+  EmptyBlock(span: Span)
+  InvalidTupleAccess(span: Span)
+  InvalidFieldAccess(span: Span)
+  FieldNotFound(span: Span)
+  UnresolvedTypeVariable(span: Span, name: String)
+  NotAFunction(span: Span, name: String)
+  WrongArity(span: Span, expected_arg_count: Int, actual_arg_count: Int)
+  LabelNotFound(span: Span, name: String)
+  TupleIndexOutOfBounds(span: Span, tuple_size: Int, index: Int)
+  IncompatibleTypes(span: Span, type_a: Type, type_b: Type)
+  RecursiveTypeError(span: Span)
 }
 
 pub type QualifiedName {
@@ -618,7 +618,7 @@ pub fn infer_module(
     use group <- result.try(
       list.try_map(group, fn(fun_name) {
         list.find(module.functions, fn(f) { f.definition.name == fun_name })
-        |> result.replace_error(UnresolvedFunction(fun_name))
+        |> result.replace_error(UnresolvedFunction(c.current_span, fun_name))
       }),
     )
 
@@ -1073,7 +1073,11 @@ fn do_infer_annotation(
       use mapping <- result.map(
         list.strict_zip(poly.vars, param_types)
         |> result.map_error(fn(_) {
-          WrongArity(list.length(poly.vars), list.length(param_types))
+          WrongArity(
+            c.current_span,
+            list.length(poly.vars),
+            list.length(param_types),
+          )
         })
         |> result.map(dict.from_list),
       )
@@ -1110,7 +1114,7 @@ fn do_infer_annotation(
     g.VariableType(_, name) -> {
       use typ <- result.map(
         dict.get(n, name)
-        |> result.replace_error(UnresolvedTypeVariable(name)),
+        |> result.replace_error(UnresolvedTypeVariable(c.current_span, name)),
       )
       #(c, VariableAnno(typ, name))
     }
@@ -1179,7 +1183,7 @@ pub fn resolve_global_name(
 ) -> Result(ResolvedGlobal, Error) {
   use module <- result.try(get_module(c, module_name))
   dict.get(module.value_env, name)
-  |> result.replace_error(UnresolvedGlobal(name))
+  |> result.replace_error(UnresolvedGlobal(c.current_span, name))
 }
 
 /// Resolve a type name from the global environment
@@ -1215,7 +1219,10 @@ pub fn resolve_global_type_name(
   use module <- result.try(get_module(c, module_name))
   use #(typ, variants) <- result.map(
     dict.get(module.type_env, name)
-    |> result.replace_error(UnresolvedType(module_name <> "." <> name)),
+    |> result.replace_error(UnresolvedType(
+      c.current_span,
+      module_name <> "." <> name,
+    )),
   )
   #(QualifiedName(module_name, name), typ, variants)
 }
@@ -1231,13 +1238,13 @@ fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
 /// Resolve a module alias to its fully qualified name
 fn resolve_module(c: Context, module_name: String) -> Result(String, Error) {
   dict.get(get_current_module(c).module_env, module_name)
-  |> result.replace_error(UnresolvedModule(module_name))
+  |> result.replace_error(UnresolvedModule(c.current_span, module_name))
 }
 
 /// Get a module by its fully qualified name
 fn get_module(c: Context, module_name: String) -> Result(Module, Error) {
   dict.get(c.modules, module_name)
-  |> result.replace_error(UnresolvedModule(module_name))
+  |> result.replace_error(UnresolvedModule(c.current_span, module_name))
 }
 
 fn new_temp_var(c: Context) -> #(Context, String) {
@@ -1512,7 +1519,11 @@ fn resolve_constructor(c: Context, module: Option(String), constructor: String) 
   case constructor {
     FunctionGlobal(module:, name:, typ:, labels:) ->
       Ok(#(module, name, typ, labels))
-    ConstantGlobal(..) -> Error(NotAFunction(constructor))
+    ConstantGlobal(..) ->
+      Error(NotAFunction(
+        c.current_span,
+        constructor.module <> "." <> constructor.name,
+      ))
   }
 }
 
@@ -1647,6 +1658,7 @@ fn infer_body(
   }
 }
 
+// TODO: move this function out
 fn error(c: Context, message: String) -> String {
   let start = c.current_span.start
   let end = c.current_span.end
@@ -1711,7 +1723,7 @@ fn match_labels(
       |> result.try_recover(fn(_) { listx.pop(args, fn(a) { a.label == None }) })
       |> result.map_error(fn(_) {
         case p {
-          Some(l) -> LabelNotFound(l)
+          Some(l) -> LabelNotFound(c.current_span, l)
           // TODO: return WrongArity
           None -> panic as error(c, "not enough arguments given")
         }
@@ -1783,7 +1795,7 @@ fn infer_expression(
       use #(c, statements) <- result.try(infer_body(c, n, statements))
       case list.last(statements) {
         Ok(last) -> Ok(#(c, Block(last.typ, statements)))
-        Error(_) -> Error(EmptyBlock)
+        Error(_) -> Error(EmptyBlock(c.current_span))
       }
     }
     g.Panic(_, e) -> {
@@ -1909,7 +1921,11 @@ fn infer_expression(
       use ordered_fields <- result.try(
         list.strict_zip(ordered_fields, constructor_args)
         |> result.map_error(fn(_) {
-          WrongArity(list.length(constructor_args), list.length(ordered_fields))
+          WrongArity(
+            c.current_span,
+            list.length(constructor_args),
+            list.length(ordered_fields),
+          )
         }),
       )
 
@@ -1954,7 +1970,7 @@ fn infer_expression(
         // field access must be on a named type
         let value_typ = case resolve_type(c, value.typ) {
           NamedType(type_name, module, _) -> Ok(#(type_name, module))
-          _ -> Error(InvalidFieldAccess)
+          _ -> Error(InvalidFieldAccess(c.current_span))
         }
         use #(type_name, module) <- result.try(value_typ)
 
@@ -1965,7 +1981,7 @@ fn infer_expression(
         let variant = case custom.definition.variants {
           // TODO proper implementation checking all variants
           [variant, ..] -> Ok(variant)
-          _ -> Error(InvalidFieldAccess)
+          _ -> Error(InvalidFieldAccess(c.current_span))
         }
         use variant <- result.try(variant)
 
@@ -1974,7 +1990,7 @@ fn infer_expression(
           variant.fields
           |> list.index_map(fn(x, i) { #(x, i) })
           |> list.find(fn(x) { { x.0 }.label == Some(label) })
-          |> result.replace_error(FieldNotFound)
+          |> result.replace_error(FieldNotFound(c.current_span))
         use #(field, index) <- result.try(field)
 
         // create a getter function type
@@ -2040,7 +2056,7 @@ fn infer_expression(
           use args <- result.map(
             list.strict_zip(params, args)
             |> result.map_error(fn(_) {
-              WrongArity(list.length(params), list.length(args))
+              WrongArity(c.current_span, list.length(params), list.length(args))
             }),
           )
           args
@@ -2086,7 +2102,7 @@ fn infer_expression(
           tuple_index_type(c, elements, index)
           |> result.map(fn(typ) { #(c, TupleIndex(typ, tuple, index)) })
         }
-        _ -> Error(InvalidTupleAccess)
+        _ -> Error(InvalidTupleAccess(c.current_span))
       }
     }
     g.FnCapture(span, label, function, arguments_before, arguments_after) -> {
@@ -2189,7 +2205,11 @@ fn infer_expression(
               use sub_pats <- result.try(
                 list.strict_zip(subjects, pat)
                 |> result.map_error(fn(_) {
-                  WrongArity(list.length(subjects), list.length(pat))
+                  WrongArity(
+                    c.current_span,
+                    list.length(subjects),
+                    list.length(pat),
+                  )
                 }),
               )
               use #(c, n, pat) <- result.map(
@@ -2336,17 +2356,17 @@ fn infer_expression(
 fn resolve_custom_type(c: Context, module: String, type_name: String) {
   use mod <- result.try(get_module(c, module))
   list.find(mod.custom_types, fn(x) { x.definition.name == type_name })
-  |> result.replace_error(UnresolvedType(type_name))
+  |> result.replace_error(UnresolvedType(c.current_span, type_name))
 }
 
 fn tuple_index_type(
-  _c: Context,
+  c: Context,
   elements: List(Type),
   index: Int,
 ) -> Result(Type, Error) {
   index_into_list(elements, index)
   |> result.map_error(fn(_) {
-    TupleIndexOutOfBounds(list.length(elements), index)
+    TupleIndexOutOfBounds(c.current_span, list.length(elements), index)
   })
 }
 
@@ -2486,7 +2506,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
           let assert Unbound(aid) = get_type_var(c, ref)
           let #(c, occurs) = occurs(c, aid, b)
           case occurs {
-            True -> Error(RecursiveTypeError)
+            True -> Error(RecursiveTypeError(c.current_span))
             False -> Ok(set_type_var(c, ref, Bound(b)))
           }
         }
@@ -2494,7 +2514,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
     a, VariableType(_) -> unify(c, b, a)
     NamedType(aname, amodule, _), NamedType(bname, bmodule, _)
       if aname != bname || amodule != bmodule
-    -> Error(IncompatibleTypes(a, b))
+    -> Error(IncompatibleTypes(c.current_span, a, b))
     NamedType(_, _, aargs), NamedType(_, _, bargs) ->
       unify_arguments(c, aargs, bargs)
     FunctionType(aargs, aret), FunctionType(bargs, bret) -> {
@@ -2504,7 +2524,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
     TupleType(aelements), TupleType(belements) -> {
       unify_arguments(c, aelements, belements)
     }
-    _, _ -> Error(IncompatibleTypes(a, b))
+    _, _ -> Error(IncompatibleTypes(c.current_span, a, b))
   }
 }
 
@@ -2516,7 +2536,7 @@ fn unify_arguments(
   use args <- result.try(
     list.strict_zip(aargs, bargs)
     |> result.map_error(fn(_) {
-      WrongArity(list.length(aargs), list.length(bargs))
+      WrongArity(c.current_span, list.length(aargs), list.length(bargs))
     }),
   )
   list.try_fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
