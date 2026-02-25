@@ -1927,6 +1927,7 @@ fn infer_expression(
           #(c, [result, ..fields])
         }),
       )
+      let ordered_fields = list.reverse(ordered_fields)
 
       // The result type is the same as the constructor type
       let typ = constructor_ret
