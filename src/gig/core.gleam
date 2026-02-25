@@ -14,14 +14,17 @@ import gleam/option.{None, Some}
 
 pub const builtin = t.builtin
 
+pub type TypeVarId =
+  t.TypeVarId
+
 pub type Type {
   NamedType(id: String, parameters: List(Type))
   FunctionType(parameters: List(Type), return: Type)
-  Unbound(id: Int)
+  Unbound(id: TypeVarId)
 }
 
 pub type Poly {
-  Poly(vars: List(Int), typ: Type)
+  Poly(vars: List(TypeVarId), typ: Type)
 }
 
 pub type Parameter {
@@ -1633,7 +1636,7 @@ fn map_poly(c: t.Context, typ: t.Poly) {
 
 fn register_tuple(c: Context, size: Int) {
   let id = gen_names.get_tuple_id(size)
-  let vars = listx.sane_range(size)
+  let vars = list.map(listx.sane_range(size), t.TypeVarId("", _))
   let element_types = list.map(vars, fn(i) { Unbound(i) })
   let custom_typ = Poly(vars, NamedType(id, element_types))
   let constructor_typ = Poly(vars, FunctionType(element_types, custom_typ.typ))
