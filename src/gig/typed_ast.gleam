@@ -1,7 +1,6 @@
 import gig/call_graph
 import gig/graph
 import glance.{Span} as g
-import gleam/bit_array
 import listx
 
 import gleam/dict.{type Dict}
@@ -332,7 +331,7 @@ pub type Error {
   EmptyBlock(span: Span)
   InvalidTupleAccess(span: Span)
   InvalidFieldAccess(span: Span)
-  FieldNotFound(span: Span)
+  FieldNotFound(span: Span, name: String)
   UnresolvedTypeVariable(span: Span, name: String)
   NotAFunction(span: Span, name: String)
   WrongArity(span: Span, expected_arg_count: Int, actual_arg_count: Int)
@@ -340,6 +339,7 @@ pub type Error {
   TupleIndexOutOfBounds(span: Span, tuple_size: Int, index: Int)
   IncompatibleTypes(span: Span, type_a: Type, type_b: Type)
   RecursiveTypeError(span: Span)
+  BitPatternSegmentTypeOverSpecified(span: Span)
 }
 
 pub type QualifiedName {
@@ -663,6 +663,51 @@ pub fn infer_module(
       })
     })
   })
+}
+
+/// Returns a human-readable string description of the error.
+/// Does not include the span (location) of the error.
+pub fn inspect_error(error: Error) {
+  case error {
+    UnresolvedModule(name:, ..) -> "Module with name '" <> name <> "' not found"
+    UnresolvedGlobal(name:, ..) -> "Global with name '" <> name <> "' not found"
+    UnresolvedType(name:, ..) -> "Type with name '" <> name <> "' not found"
+    UnresolvedFunction(name:, ..) ->
+      "Function with name '" <> name <> "' not found"
+    EmptyBlock(..) -> "Block is empty"
+    InvalidTupleAccess(..) -> "Attempted tuple access on a non-tuple type"
+    InvalidFieldAccess(..) -> "Attempted field access on a non-record type"
+    FieldNotFound(name:, ..) ->
+      "This record does not have a field named '" <> name <> "'"
+    UnresolvedTypeVariable(name:, ..) ->
+      "Type variable with name '" <> name <> "' not found"
+    NotAFunction(name:, ..) -> "The variable '" <> name <> "' is not a function"
+    WrongArity(expected_arg_count:, actual_arg_count:, ..) ->
+      "Function with arity "
+      <> int.to_string(expected_arg_count)
+      <> " called with "
+      <> int.to_string(actual_arg_count)
+      <> " arguments"
+    LabelNotFound(name:, ..) ->
+      "The called function does not have an argument with label '"
+      <> name
+      <> "'"
+    TupleIndexOutOfBounds(tuple_size:, index:, ..) ->
+      "Tuple index "
+      <> int.to_string(index)
+      <> " exceeds the size of the tuple ("
+      <> int.to_string(tuple_size)
+      <> ")"
+    IncompatibleTypes(type_a:, type_b:, ..) ->
+      "Incompatible types: a = "
+      <> string.inspect(type_a)
+      <> ", b = "
+      <> string.inspect(type_b)
+    RecursiveTypeError(..) ->
+      "Encountered a cyclical dependency between type variables"
+    BitPatternSegmentTypeOverSpecified(_) ->
+      "Bit pattern segment type set multiple times"
+  }
 }
 
 fn generalise(c: Context, typ: Type) {
@@ -1375,7 +1420,7 @@ fn infer_pattern(
           use #(c, n, options, typ) <- result.try(
             list.try_fold(options, #(c, n, [], None), fn(acc, option) {
               let #(c, n, options, typ) = acc
-              use #(c, n, option, option_type) <- result.map(case option {
+              use #(c, n, option, option_type) <- result.try(case option {
                 g.BigOption -> Ok(#(c, n, BigOption, None))
                 g.LittleOption -> Ok(#(c, n, LittleOption, None))
                 g.NativeOption -> Ok(#(c, n, NativeOption, None))
@@ -1402,12 +1447,12 @@ fn infer_pattern(
                 }
                 g.UnitOption(unit) -> Ok(#(c, n, UnitOption(unit), None))
               })
-              let typ = case typ, option_type {
+              use typ <- result.map(case typ, option_type {
                 Some(_), Some(_) ->
-                  panic as error(c, "segment type was set multiple times")
-                Some(_), None -> typ
-                _, _ -> option_type
-              }
+                  Error(BitPatternSegmentTypeOverSpecified(c.current_span))
+                Some(_), None -> Ok(typ)
+                _, _ -> Ok(option_type)
+              })
               #(c, n, [option, ..options], typ)
             }),
           )
@@ -1658,65 +1703,27 @@ fn infer_body(
   }
 }
 
-// TODO: move this function out
-fn error(c: Context, message: String) -> String {
-  let start = c.current_span.start
-  let end = c.current_span.end
-
-  let context_before = case start {
-    start if start < 100 -> string.slice(c.module_source, 0, start)
-    start -> string.slice(c.module_source, start - 100, 100)
-  }
-  let context_before = string.split(context_before, "\n")
-  let context_before =
-    context_before
-    |> list.drop(list.length(context_before) - 3)
-    |> list.drop_while(fn(x) { x == "" })
-    |> string.join("\n")
-
-  let context_after =
-    c.module_source
-    |> string.slice(end, 100)
-    |> string.split("\n")
-    |> list.take(3)
-    |> string.join("\n")
-
-  let error_part = string.slice(c.module_source, start, end - start)
-
-  // TODO this unicode escape sequence is not valid in c, needs compilation
-  // let escape = "\u{001b}["
-  let assert Ok(escape) = bit_array.to_string(<<27, 91>>)
-  let clear = escape <> "0m"
-  let red_underline = escape <> "4;31m"
-
-  "Error: "
-  <> message
-  <> "\n\nat: "
-  <> c.current_module
-  <> "."
-  <> c.current_definition
-  <> "\n\n"
-  <> context_before
-  <> red_underline
-  <> error_part
-  <> clear
-  <> context_after
-}
-
 fn match_labels(
   c: Context,
   args: List(Field(a)),
   params: List(Option(String)),
 ) -> Result(List(Field(a)), Error) {
+  do_match_labels(c, args, params, #(list.length(params), list.length(args)))
+}
+
+fn do_match_labels(
+  c: Context,
+  args: List(Field(a)),
+  params: List(Option(String)),
+  lens: #(Int, Int),
+) -> Result(List(Field(a)), Error) {
   // find the labels in the order specified by parameters
   // either we find the matching label or default to the first unlabelled arg
-  // TODO: keep track of original number of args/params for WrongArity error
   case params {
     [] ->
       case args {
         [] -> Ok([])
-        // TODO: return WrongArity
-        _ -> panic as error(c, "too many arguments given")
+        _ -> Error(WrongArity(c.current_span, lens.0, lens.1))
       }
     [p, ..p_rest] ->
       listx.pop(args, fn(a) { a.label == p })
@@ -1724,8 +1731,7 @@ fn match_labels(
       |> result.map_error(fn(_) {
         case p {
           Some(l) -> LabelNotFound(c.current_span, l)
-          // TODO: return WrongArity
-          None -> panic as error(c, "not enough arguments given")
+          None -> WrongArity(c.current_span, lens.0, lens.1)
         }
       })
       |> result.try(fn(r) {
@@ -1990,7 +1996,7 @@ fn infer_expression(
           variant.fields
           |> list.index_map(fn(x, i) { #(x, i) })
           |> list.find(fn(x) { { x.0 }.label == Some(label) })
-          |> result.replace_error(FieldNotFound(c.current_span))
+          |> result.replace_error(FieldNotFound(c.current_span, label))
         use #(field, index) <- result.try(field)
 
         // create a getter function type
@@ -2127,7 +2133,7 @@ fn infer_expression(
             list.try_fold(options, #(c, [], None), fn(acc, option) {
               let #(c, options, typ) = acc
               // TODO handle all options
-              use #(c, option, option_type) <- result.map(case option {
+              use #(c, option, option_type) <- result.try(case option {
                 g.BigOption -> Ok(#(c, BigOption, None))
                 g.BytesOption -> Ok(#(c, BytesOption, Some(bit_array_type)))
                 g.BitsOption -> Ok(#(c, BitsOption, Some(bit_array_type)))
@@ -2154,13 +2160,12 @@ fn infer_expression(
                   Ok(#(c, Utf8CodepointOption, Some(codepoint_type)))
                 g.Utf8Option -> Ok({ #(c, Utf8Option, Some(string_type)) })
               })
-              // TODO: wrap in a result?
-              let typ = case typ, option_type {
+              use typ <- result.map(case typ, option_type {
                 Some(_), Some(_) ->
-                  panic as error(c, "segment type was set multiple times")
-                Some(_), None -> typ
-                _, _ -> option_type
-              }
+                  Error(BitPatternSegmentTypeOverSpecified(c.current_span))
+                Some(_), None -> Ok(typ)
+                _, _ -> Ok(option_type)
+              })
               #(c, [option, ..options], typ)
             }),
           )
@@ -2306,7 +2311,7 @@ fn infer_expression(
         )
 
         // Functions
-        g.Pipe -> panic as error(c, "pipe should be handeled elsewhere")
+        g.Pipe -> panic as "pipe should be handeled elsewhere"
 
         // Maths
         g.AddInt | g.SubInt | g.MultInt | g.DivInt | g.RemainderInt -> #(
