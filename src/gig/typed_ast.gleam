@@ -326,7 +326,6 @@ pub type Annotation {
   HoleAnno(typ: Type, name: String)
 }
 
-// TODO: errors should probably get a Span
 pub type Error {
   UnresolvedModule(location: Location, name: String)
   UnresolvedGlobal(location: Location, name: String)
@@ -914,7 +913,7 @@ fn infer_alias_type(
       let #(c, n, args) = acc
       let #(c, typ) = new_type_var_ref(c)
       let n = dict.insert(n, name, typ)
-      // TODO: does this need wrapping in a result or is it guaranteed to succeed?
+      // assert: new_type_var_ref always returns a VariableType
       let assert VariableType(ref) = typ
       #(c, n, [ref.id, ..args])
     })
@@ -1905,9 +1904,12 @@ fn infer_expression(
 
       // Instantiate the constructor type
       let #(c, constructor_type) = instantiate(c, poly)
-      // TODO: wrap in a result, or is this guaranteed to succeed?
-      let assert FunctionType(constructor_args, constructor_ret) =
-        constructor_type
+      use #(constructor_args, constructor_ret) <- result.try(
+        case constructor_type {
+          FunctionType(parameters:, return:) -> Ok(#(parameters, return))
+          _ -> Error(NotAFunction(location(c), constructor))
+        },
+      )
 
       // Unify the base expression type with the constructor type
       use c <- result.try(unify(c, base_expr.typ, constructor_ret))
@@ -2446,7 +2448,7 @@ type PolyEnv =
   Dict(Int, Type)
 
 fn get_type_var(c: Context, var: Ref) {
-  // TODO: guaranteed to succeed?
+  // assert: this function is only called for previously created type variables
   let assert Ok(x) = dict.get(c.type_vars, var)
   x
 }
@@ -2511,7 +2513,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
       case a == b {
         True -> Ok(c)
         False -> {
-          // TODO: guaranteed to succeed?
+          // assert: since a resolves to VariableType(ref), ref is Unbound
           let assert Unbound(aid) = get_type_var(c, ref)
           let #(c, occurs) = occurs(c, aid, b)
           case occurs {
@@ -2587,9 +2589,7 @@ fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
 pub fn resolve_type(c: Context, typ: Type) -> Type {
   case typ {
     VariableType(x) -> {
-      // TODO: guaranteed to succeed?
-      let assert Ok(x) = dict.get(c.type_vars, x)
-      case x {
+      case get_type_var(c, x) {
         Bound(x) -> resolve_type(c, x)
         Unbound(..) -> typ
       }
@@ -2603,9 +2603,7 @@ pub fn resolve_type(c: Context, typ: Type) -> Type {
 pub fn resolve_type_deep(c: Context, typ: Type) {
   case typ {
     VariableType(x) -> {
-      // TODO: guaranteed to succeed?
-      let assert Ok(x) = dict.get(c.type_vars, x)
-      case x {
+      case get_type_var(c, x) {
         Bound(x) -> resolve_type_deep(c, x)
         Unbound(..) -> typ
       }
