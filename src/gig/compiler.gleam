@@ -314,7 +314,8 @@ fn infer_file(
   io.println("Check " <> source)
   case typed_ast.infer_module(c, module, module_id, source_text) {
     Ok(c) -> #(c, done)
-    Error(err) -> panic as error(source, err.span, typed_ast.inspect_error(err))
+    Error(err) ->
+      panic as error(source, err.location, typed_ast.inspect_error(err))
   }
 }
 
@@ -340,9 +341,13 @@ fn parse_module(file: String, input: String) {
   }
 }
 
-fn error(source: String, span: typed_ast.Span, message: String) -> String {
-  let start = span.start
-  let end = span.end
+fn error(
+  source: String,
+  location: typed_ast.Location,
+  message: String,
+) -> String {
+  let start = location.span.start
+  let end = location.span.end
 
   let context_before = case start {
     start if start < 100 -> string.slice(source, 0, start)
@@ -372,10 +377,10 @@ fn error(source: String, span: typed_ast.Span, message: String) -> String {
 
   "Error: "
   <> message
-  // <> "\n\nat: "
-  // <> c.current_module
-  // <> "."
-  // <> c.current_definition
+  <> "\n\nat: "
+  <> location.module
+  <> "."
+  <> location.definition
   <> "\n\n"
   <> context_before
   <> red_underline
