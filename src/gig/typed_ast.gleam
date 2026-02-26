@@ -375,7 +375,7 @@ pub fn new_context() -> Context {
     type_vars: dict.new(),
     modules: dict.new(),
     type_uid: 0,
-    temp_uid: 0,
+    temp_uid: 1,
     module_env: dict.new(),
     type_env: dict.new(),
     value_env: dict.new(),
