@@ -1,14 +1,13 @@
 import gig/call_graph
 import gig/graph
 import glance.{Span} as g
-import gleam/bit_array
 import listx
 
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result.{try}
+import gleam/result
 import gleam/string
 
 pub const builtin = "gleam"
@@ -78,6 +77,10 @@ pub type FunctionDefinition {
 
 pub type Span =
   g.Span
+
+pub type Location {
+  Location(module: String, definition: String, span: Span)
+}
 
 pub type Statement {
   Use(typ: Type, patterns: List(Pattern), function: Expression)
@@ -324,8 +327,22 @@ pub type Annotation {
 }
 
 pub type Error {
-  UnexpectedEndOfInput
-  UnexpectedToken
+  UnresolvedModule(location: Location, name: String)
+  UnresolvedGlobal(location: Location, name: String)
+  UnresolvedType(location: Location, name: String)
+  UnresolvedFunction(location: Location, name: String)
+  EmptyBlock(location: Location)
+  InvalidTupleAccess(location: Location)
+  InvalidFieldAccess(location: Location)
+  FieldNotFound(location: Location, name: String)
+  UnresolvedTypeVariable(location: Location, name: String)
+  NotAFunction(location: Location, name: String)
+  WrongArity(location: Location, expected_arg_count: Int, actual_arg_count: Int)
+  LabelNotFound(location: Location, name: String)
+  TupleIndexOutOfBounds(location: Location, tuple_size: Int, index: Int)
+  IncompatibleTypes(location: Location, type_a: Type, type_b: Type)
+  RecursiveTypeError(location: Location)
+  BitPatternSegmentTypeOverSpecified(location: Location)
 }
 
 pub type QualifiedName {
@@ -369,7 +386,7 @@ pub fn infer_module(
   module: g.Module,
   module_name: String,
   module_source: String,
-) -> Context {
+) -> Result(Context, Error) {
   let modules =
     dict.insert(
       c.modules,
@@ -390,9 +407,9 @@ pub fn infer_module(
   let c = Context(..c, modules:, current_module: module_name, module_source:)
 
   // handle module imports
-  let c =
-    list.fold(module.imports, c, fn(c, imp) {
-      update_module(c, fn(module) {
+  use c <- result.try(
+    list.try_fold(module.imports, c, fn(c, imp) {
+      try_update_module(c, fn(module) {
         let imp = imp.definition
         let module_id = imp.module
 
@@ -403,35 +420,42 @@ pub fn infer_module(
               g.Discarded(_) -> module.module_env
             }
           None -> {
+            // assert: imported name is a non-empty string
             let assert Ok(alias) = list.last(string.split(module_id, "/"))
             dict.insert(module.module_env, alias, module_id)
           }
         }
 
-        let type_env =
-          list.fold(imp.unqualified_types, module.type_env, fn(acc, imp) {
-            let assert Ok(#(_, poly, variants)) =
-              resolve_global_type_name(c, module_id, imp.name)
+        use type_env <- result.try(
+          list.try_fold(imp.unqualified_types, module.type_env, fn(acc, imp) {
+            use #(_, poly, variants) <- result.map(resolve_global_type_name(
+              c,
+              module_id,
+              imp.name,
+            ))
             let alias = case imp.alias {
               Some(alias) -> alias
               None -> imp.name
             }
             dict.insert(acc, alias, #(poly, variants))
-          })
+          }),
+        )
 
-        let value_env =
-          list.fold(imp.unqualified_values, module.value_env, fn(acc, imp) {
-            let assert Ok(value) = resolve_global_name(c, module_id, imp.name)
+        use value_env <- result.map(
+          list.try_fold(imp.unqualified_values, module.value_env, fn(acc, imp) {
+            use value <- result.map(resolve_global_name(c, module_id, imp.name))
             let alias = case imp.alias {
               Some(alias) -> alias
               None -> imp.name
             }
             dict.insert(acc, alias, value)
-          })
+          }),
+        )
 
         Module(..module, module_env:, type_env:, value_env:)
       })
-    })
+    }),
+  )
 
   // add types to env so they can reference eachother (but not yet constructors)
   let c =
@@ -462,27 +486,31 @@ pub fn infer_module(
     })
 
   // infer type aliases fr fr
-  let #(c, aliases) =
-    list.fold(module.type_aliases, #(c, []), fn(acc, def) {
+  use #(c, aliases) <- result.try(
+    list.try_fold(module.type_aliases, #(c, []), fn(acc, def) {
       let #(c, aliases) = acc
       let c = Context(..c, current_definition: def.definition.name)
       let c = Context(..c, current_span: def.definition.location)
 
       // infer the alias type
-      let #(c, alias) = infer_alias_type(c, def.definition)
+      use #(c, alias) <- result.try(infer_alias_type(c, def.definition))
 
       // update the placeholder type
-      let assert Ok(#(_, placeholder, _)) =
-        resolve_global_type_name(c, c.current_module, alias.name)
-      let c = unify(c, alias.aliased.typ, placeholder.typ)
+      use #(_, placeholder, _) <- result.try(resolve_global_type_name(
+        c,
+        c.current_module,
+        alias.name,
+      ))
+      use c <- result.map(unify(c, alias.aliased.typ, placeholder.typ))
 
       #(c, [#(def, alias), ..aliases])
-    })
+    }),
+  )
 
   // create alias entries
   // we have to do this in two stages to make sure we genralize correctly
-  let c =
-    list.fold(aliases, c, fn(c, alias) {
+  use c <- result.try(
+    list.try_fold(aliases, c, fn(c, alias) {
       let #(def, alias) = alias
       let c = Context(..c, current_definition: alias.name)
       let c = Context(..c, current_span: def.definition.location)
@@ -490,35 +518,44 @@ pub fn infer_module(
       // create alias entry
       let poly = generalise(c, alias.aliased.typ)
       let c = register_type(c, alias.name, poly, [])
-      let attrs = infer_attributes(c, def.attributes)
+      use attrs <- result.map(infer_attributes(c, def.attributes))
       let def = Definition(attrs, alias)
       update_module(c, fn(mod) {
         Module(..mod, type_aliases: [def, ..mod.type_aliases])
       })
-    })
+    }),
+  )
 
   // now infer custom types fr fr
-  let c =
-    list.fold(module.custom_types, c, fn(c, def) {
+  use c <- result.try(
+    list.try_fold(module.custom_types, c, fn(c, def) {
       let custom = def.definition
       let c = Context(..c, current_definition: custom.name)
       let c = Context(..c, current_span: def.definition.location)
 
       // reconstruct the type parameters
-      let assert Ok(#(_, poly, _)) =
-        resolve_global_type_name(c, c.current_module, custom.name)
+      use #(_, poly, _) <- result.try(resolve_global_type_name(
+        c,
+        c.current_module,
+        custom.name,
+      ))
       let param_types = list.map(poly.vars, fn(x) { VariableType(Ref(x)) })
       let parameters = list.zip(custom.parameters, param_types)
 
       // infer the custom type including variants
-      let #(c, custom) = infer_custom_type(c, def.definition, parameters)
+      use #(c, custom) <- result.try(infer_custom_type(
+        c,
+        def.definition,
+        parameters,
+      ))
       let c = register_type(c, custom.name, custom.typ, custom.variants)
-      let attrs = infer_attributes(c, def.attributes)
+      use attrs <- result.map(infer_attributes(c, def.attributes))
       let def = Definition(attrs, custom)
       update_module(c, fn(mod) {
         Module(..mod, custom_types: [def, ..mod.custom_types])
       })
-    })
+    }),
+  )
 
   let constants =
     call_graph.constant_graph(module)
@@ -530,15 +567,18 @@ pub fn infer_module(
     })
 
   // add functions to global env so they are available for recursion
-  let c =
-    list.fold(module.functions, c, fn(c, def) {
+  use c <- result.try(
+    list.try_fold(module.functions, c, fn(c, def) {
       let fun = def.definition
       let c = Context(..c, current_definition: fun.name)
       let c = Context(..c, current_span: def.definition.location)
 
       // create placeholder function type based on function signature
-      let #(c, parameters, return) =
-        infer_function_parameters(c, fun.parameters, fun.return)
+      use #(c, parameters, return) <- result.map(infer_function_parameters(
+        c,
+        fun.parameters,
+        fun.return,
+      ))
 
       let #(c, return_type) = case return {
         Some(x) -> #(c, x.typ)
@@ -550,23 +590,25 @@ pub fn infer_module(
       let typ = FunctionType(param_types, return_type)
 
       register_function(c, def.definition.name, Poly([], typ), param_labels)
-    })
+    }),
+  )
 
   // infer constant expressions
-  let c =
-    list.fold(constants, c, fn(c, def) {
-      let #(c, constant) = infer_constant(c, def.definition)
+  use c <- result.try(
+    list.try_fold(constants, c, fn(c, def) {
+      use #(c, constant) <- result.try(infer_constant(c, def.definition))
       let c = Context(..c, current_definition: constant.name)
       let c = Context(..c, current_span: def.definition.location)
 
       let poly = generalise(c, constant.value.typ)
       let c = register_constant(c, constant.name, poly, constant.value)
-      let attrs = infer_attributes(c, def.attributes)
+      use attrs <- result.map(infer_attributes(c, def.attributes))
       let def = Definition(attrs, constant)
       update_module(c, fn(mod) {
         Module(..mod, constants: [def, ..mod.constants])
       })
-    })
+    }),
+  )
 
   // create a function call graph to group mutually recursive functions
   // these will be type checked/inferred together as a group
@@ -574,36 +616,42 @@ pub fn infer_module(
     call_graph.function_graph(module)
     |> graph.strongly_connected_components()
 
-  list.fold(rec_groups, c, fn(c, group) {
+  list.try_fold(rec_groups, c, fn(c, group) {
     // find the function definitions by name
-    let assert Ok(group) =
+    use group <- result.try(
       list.try_map(group, fn(fun_name) {
         list.find(module.functions, fn(f) { f.definition.name == fun_name })
-      })
+        |> result.replace_error(UnresolvedFunction(location(c), fun_name))
+      }),
+    )
 
     // infer types for the group
-    let #(c, group) =
-      list.fold(group, #(c, []), fn(acc, def) {
+    use #(c, group) <- result.try(
+      list.try_fold(group, #(c, []), fn(acc, def) {
         let #(c, group) = acc
         let c = Context(..c, current_definition: def.definition.name)
         let c = Context(..c, current_span: def.definition.location)
 
         // infer function
-        let #(c, fun) = infer_function(c, def.definition)
-        let attrs = infer_attributes(c, def.attributes)
+        use #(c, fun) <- result.try(infer_function(c, def.definition))
+        use attrs <- result.map(infer_attributes(c, def.attributes))
         let def = Definition(attrs, fun)
 
         #(c, [def, ..group])
-      })
+      }),
+    )
 
     // generalise
-    list.fold(group, c, fn(c, def) {
+    list.try_fold(group, c, fn(c, def) {
       let fun = def.definition
 
       // unify placeholder type
-      let assert Ok(placeholder) =
-        resolve_global_name(c, c.current_module, fun.name)
-      let c = unify(c, placeholder.typ.typ, fun.typ.typ)
+      use placeholder <- result.try(resolve_global_name(
+        c,
+        c.current_module,
+        fun.name,
+      ))
+      use c <- result.map(unify(c, placeholder.typ.typ, fun.typ.typ))
 
       // generalise
       let typ = generalise(c, fun.typ.typ)
@@ -620,6 +668,51 @@ pub fn infer_module(
   })
 }
 
+/// Returns a human-readable string description of the error.
+/// Does not include the span (location) of the error.
+pub fn inspect_error(error: Error) {
+  case error {
+    UnresolvedModule(name:, ..) -> "Module with name '" <> name <> "' not found"
+    UnresolvedGlobal(name:, ..) -> "Global with name '" <> name <> "' not found"
+    UnresolvedType(name:, ..) -> "Type with name '" <> name <> "' not found"
+    UnresolvedFunction(name:, ..) ->
+      "Function with name '" <> name <> "' not found"
+    EmptyBlock(..) -> "Block is empty"
+    InvalidTupleAccess(..) -> "Attempted tuple access on a non-tuple type"
+    InvalidFieldAccess(..) -> "Attempted field access on a non-record type"
+    FieldNotFound(name:, ..) ->
+      "This record does not have a field named '" <> name <> "'"
+    UnresolvedTypeVariable(name:, ..) ->
+      "Type variable with name '" <> name <> "' not found"
+    NotAFunction(name:, ..) -> "The variable '" <> name <> "' is not a function"
+    WrongArity(expected_arg_count:, actual_arg_count:, ..) ->
+      "Function with arity "
+      <> int.to_string(expected_arg_count)
+      <> " called with "
+      <> int.to_string(actual_arg_count)
+      <> " arguments"
+    LabelNotFound(name:, ..) ->
+      "The called function does not have an argument with label '"
+      <> name
+      <> "'"
+    TupleIndexOutOfBounds(tuple_size:, index:, ..) ->
+      "Tuple index "
+      <> int.to_string(index)
+      <> " exceeds the size of the tuple ("
+      <> int.to_string(tuple_size)
+      <> ")"
+    IncompatibleTypes(type_a:, type_b:, ..) ->
+      "Incompatible types: a = "
+      <> string.inspect(type_a)
+      <> ", b = "
+      <> string.inspect(type_b)
+    RecursiveTypeError(..) ->
+      "Encountered a cyclical dependency between type variables"
+    BitPatternSegmentTypeOverSpecified(_) ->
+      "Bit pattern segment type set multiple times"
+  }
+}
+
 fn generalise(c: Context, typ: Type) {
   let tvs =
     list.unique(find_tvs(c, typ))
@@ -628,17 +721,21 @@ fn generalise(c: Context, typ: Type) {
 }
 
 fn get_current_module(c: Context) -> Module {
-  get_module(c, c.current_module)
-}
-
-fn get_module(c: Context, module: String) -> Module {
-  let assert Ok(module) = dict.get(c.modules, module)
+  // assert: the current module exists
+  let assert Ok(module) = dict.get(c.modules, c.current_module)
   module
 }
 
 fn update_module(c: Context, fun: fn(Module) -> Module) {
   let module = get_current_module(c)
   let module = fun(module)
+  let modules = dict.insert(c.modules, c.current_module, module)
+  Context(..c, modules:)
+}
+
+fn try_update_module(c: Context, fun: fn(Module) -> Result(Module, Error)) {
+  let module = get_current_module(c)
+  use module <- result.map(fun(module))
   let modules = dict.insert(c.modules, c.current_module, module)
   Context(..c, modules:)
 }
@@ -696,46 +793,57 @@ fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
     |> dict.insert("erlang", nil_type)
     |> dict.insert("javascript", nil_type)
 
-  let #(_, attrs) =
-    list.fold(attrs, #(c, []), fn(acc, attr) {
+  use #(_, attrs) <- result.map(
+    list.try_fold(attrs, #(c, []), fn(acc, attr) {
       let #(c, attrs) = acc
-      let #(c, exprs) =
-        list.fold(attr.arguments, #(c, []), fn(acc, attr) {
+      use #(c, exprs) <- result.map(
+        list.try_fold(attr.arguments, #(c, []), fn(acc, attr) {
           let #(c, exprs) = acc
-          let assert Ok(#(c, expr)) = infer_expression(c, attr_env, attr)
+          use #(c, expr) <- result.map(infer_expression(c, attr_env, attr))
           #(c, [expr, ..exprs])
-        })
+        }),
+      )
       let exprs = list.reverse(exprs)
       let attr = Attribute(attr.name, exprs)
       #(c, [attr, ..attrs])
-    })
+    }),
+  )
   list.reverse(attrs)
 }
 
-fn infer_constant(c: Context, con: g.Constant) -> #(Context, ConstantDefinition) {
-  let assert Ok(#(c, value)) = infer_expression(c, dict.new(), con.value)
+fn infer_constant(
+  c: Context,
+  con: g.Constant,
+) -> Result(#(Context, ConstantDefinition), Error) {
+  use #(c, value) <- result.try(infer_expression(c, dict.new(), con.value))
 
   let publicity = case con.publicity {
     g.Public -> Public
     g.Private -> Private
   }
 
-  let #(c, annotation) = case con.annotation {
+  use #(c, annotation) <- result.map(case con.annotation {
     Some(anno) -> {
-      let #(c, anno) = do_infer_annotation(c, dict.new(), anno)
+      use #(c, anno) <- result.map(do_infer_annotation(c, dict.new(), anno))
       #(c, Some(anno))
     }
-    None -> #(c, None)
-  }
+    None -> Ok(#(c, None))
+  })
 
   let constant = ConstantDefinition(con.name, publicity, annotation, value)
 
   #(c, constant)
 }
 
-fn infer_function(c: Context, fun: g.Function) -> #(Context, FunctionDefinition) {
-  let #(c, parameters, return) =
-    infer_function_parameters(c, fun.parameters, fun.return)
+fn infer_function(
+  c: Context,
+  fun: g.Function,
+) -> Result(#(Context, FunctionDefinition), Error) {
+  use #(c, parameters, return) <- result.try(infer_function_parameters(
+    c,
+    fun.parameters,
+    fun.return,
+  ))
 
   let #(c, return_type) = case return {
     Some(x) -> #(c, x.typ)
@@ -752,17 +860,17 @@ fn infer_function(c: Context, fun: g.Function) -> #(Context, FunctionDefinition)
     })
 
   // infer body
-  let #(c, body) = infer_body(c, n, fun.body)
+  use #(c, body) <- result.try(infer_body(c, n, fun.body))
 
   // compute function type
   let parameter_types = list.map(parameters, fn(x) { x.typ })
   let typ = FunctionType(parameter_types, return_type)
 
   // unify the return type with the last statement
-  let c = case list.last(body) {
+  use c <- result.map(case list.last(body) {
     Ok(statement) -> unify(c, return_type, statement.typ)
-    Error(_) -> c
-  }
+    Error(_) -> Ok(c)
+  })
 
   let name = fun.name
 
@@ -788,7 +896,10 @@ fn infer_function(c: Context, fun: g.Function) -> #(Context, FunctionDefinition)
   #(c, fun)
 }
 
-fn infer_alias_type(c: Context, alias: g.TypeAlias) -> #(Context, TypeAlias) {
+fn infer_alias_type(
+  c: Context,
+  alias: g.TypeAlias,
+) -> Result(#(Context, TypeAlias), Error) {
   let publicity = case alias.publicity {
     g.Public -> Public
     g.Private -> Private
@@ -802,13 +913,18 @@ fn infer_alias_type(c: Context, alias: g.TypeAlias) -> #(Context, TypeAlias) {
       let #(c, n, args) = acc
       let #(c, typ) = new_type_var_ref(c)
       let n = dict.insert(n, name, typ)
+      // assert: new_type_var_ref always returns a VariableType
       let assert VariableType(ref) = typ
       #(c, n, [ref.id, ..args])
     })
 
   let args = list.reverse(args)
 
-  let #(c, aliased) = do_infer_annotation(c, type_env, alias.aliased)
+  use #(c, aliased) <- result.map(do_infer_annotation(
+    c,
+    type_env,
+    alias.aliased,
+  ))
 
   let poly = Poly(args, aliased.typ)
 
@@ -834,12 +950,13 @@ fn infer_custom_type(
     list.fold(parameters, dict.new(), fn(n, p) { dict.insert(n, p.0, p.1) })
 
   // process each variant
-  let #(c, variants) =
-    list.fold(custom.variants, #(c, []), fn(acc, variant) {
+  use #(c, variants) <- result.map(
+    list.try_fold(custom.variants, #(c, []), fn(acc, variant) {
       let #(c, l) = acc
-      let #(c, v) = infer_variant(c, n, typ, variant)
+      use #(c, v) <- result.map(infer_variant(c, n, typ, variant))
       #(c, [v, ..l])
-    })
+    }),
+  )
   let variants = list.reverse(variants)
 
   let opaque_ = custom.opaque_
@@ -857,18 +974,24 @@ fn infer_custom_type(
   #(c, custom)
 }
 
-fn infer_variant(c, n, typ: Type, variant: g.Variant) -> #(Context, Variant) {
-  let #(c, fields) =
-    list.fold(variant.fields, #(c, []), fn(acc, field) {
+fn infer_variant(
+  c,
+  n,
+  typ: Type,
+  variant: g.Variant,
+) -> Result(#(Context, Variant), Error) {
+  use #(c, fields) <- result.map(
+    list.try_fold(variant.fields, #(c, []), fn(acc, field) {
       let #(c, fields) = acc
-      let #(c, annotation) = do_infer_annotation(c, n, field.item)
+      use #(c, annotation) <- result.map(do_infer_annotation(c, n, field.item))
       let label = case field {
         g.LabelledVariantField(_, label) -> Some(label)
         g.UnlabelledVariantField(_) -> None
       }
       let field = Field(label, annotation)
       #(c, [field, ..fields])
-    })
+    }),
+  )
   let fields = list.reverse(fields)
 
   let types = list.map(fields, fn(f) { f.item.typ })
@@ -903,7 +1026,7 @@ fn infer_function_parameters(
   c: Context,
   parameters: List(g.FunctionParameter),
   return: Option(g.Type),
-) -> #(Context, List(FunctionParameter), Option(Annotation)) {
+) -> Result(#(Context, List(FunctionParameter), Option(Annotation)), Error) {
   // find type variables used in the function's parameters
   let vars =
     list.flat_map(parameters, fn(param) {
@@ -931,8 +1054,8 @@ fn infer_function_parameters(
     })
 
   // create type vars for parameters
-  let #(c, params) =
-    list.fold(parameters, #(c, []), fn(acc, param) {
+  use #(c, params) <- result.try(
+    list.try_fold(parameters, #(c, []), fn(acc, param) {
       let #(c, param_types) = acc
 
       let label = param.label
@@ -942,13 +1065,13 @@ fn infer_function_parameters(
         g.Discarded(s) -> Discarded(s)
       }
 
-      let #(c, annotation) = case param.type_ {
+      use #(c, annotation) <- result.map(case param.type_ {
         Some(typ) -> {
-          let #(c, anno) = do_infer_annotation(c, type_env, typ)
+          use #(c, anno) <- result.map(do_infer_annotation(c, type_env, typ))
           #(c, Some(anno))
         }
-        None -> #(c, None)
-      }
+        None -> Ok(#(c, None))
+      })
 
       let #(c, typ) = case annotation {
         Some(a) -> #(c, a.typ)
@@ -956,17 +1079,18 @@ fn infer_function_parameters(
       }
 
       #(c, [FunctionParameter(typ, label, name, annotation), ..param_types])
-    })
+    }),
+  )
   let params = list.reverse(params)
 
   // handle function return type
-  let #(c, return) = case return {
+  use #(c, return) <- result.map(case return {
     Some(typ) -> {
-      let #(c, anno) = do_infer_annotation(c, type_env, typ)
+      use #(c, anno) <- result.map(do_infer_annotation(c, type_env, typ))
       #(c, Some(anno))
     }
-    None -> #(c, None)
-  }
+    None -> Ok(#(c, None))
+  })
 
   #(c, params, return)
 }
@@ -975,58 +1099,76 @@ fn do_infer_annotation(
   c: Context,
   n: TypeEnv,
   typ: g.Type,
-) -> #(Context, Annotation) {
+) -> Result(#(Context, Annotation), Error) {
   case typ {
     g.NamedType(_, name, anno_module, params) -> {
-      let #(c, params) =
-        list.fold(params, #(c, []), fn(acc, p) {
+      use #(c, params) <- result.try(
+        list.try_fold(params, #(c, []), fn(acc, p) {
           let #(c, l) = acc
-          let #(c, p) = do_infer_annotation(c, n, p)
+          use #(c, p) <- result.map(do_infer_annotation(c, n, p))
           #(c, [p, ..l])
-        })
+        }),
+      )
       let params = list.reverse(params)
 
       // instantiate the polymorphic type with the parameter types
-      let assert Ok(#(_, poly, _variants)) =
-        resolve_type_name(c, anno_module, name)
+      use #(_, poly, _variants) <- result.try(resolve_type_name(
+        c,
+        anno_module,
+        name,
+      ))
       let param_types = list.map(params, fn(param) { param.typ })
-      let assert Ok(mapping) = list.strict_zip(poly.vars, param_types)
-      let mapping = dict.from_list(mapping)
+      use mapping <- result.map(
+        list.strict_zip(poly.vars, param_types)
+        |> result.map_error(fn(_) {
+          WrongArity(
+            location(c),
+            list.length(poly.vars),
+            list.length(param_types),
+          )
+        })
+        |> result.map(dict.from_list),
+      )
       let typ = do_instantiate(c, mapping, poly.typ)
 
       // let typ = NamedType(name, module, list.map(params, fn(x) { x.typ }))
       #(c, NamedAnno(typ, name, anno_module, params))
     }
     g.TupleType(_, elements) -> {
-      let #(c, elements) =
-        list.fold(elements, #(c, []), fn(acc, p) {
+      use #(c, elements) <- result.map(
+        list.try_fold(elements, #(c, []), fn(acc, p) {
           let #(c, l) = acc
-          let #(c, p) = do_infer_annotation(c, n, p)
+          use #(c, p) <- result.map(do_infer_annotation(c, n, p))
           #(c, [p, ..l])
-        })
+        }),
+      )
       let elements = list.reverse(elements)
       let typ = TupleType(list.map(elements, fn(x) { x.typ }))
       #(c, TupleAnno(typ, elements))
     }
     g.FunctionType(_, parameters, return) -> {
-      let #(c, params) =
-        list.fold(parameters, #(c, []), fn(acc, p) {
+      use #(c, params) <- result.try(
+        list.try_fold(parameters, #(c, []), fn(acc, p) {
           let #(c, l) = acc
-          let #(c, p) = do_infer_annotation(c, n, p)
+          use #(c, p) <- result.map(do_infer_annotation(c, n, p))
           #(c, [p, ..l])
-        })
+        }),
+      )
       let params = list.reverse(params)
-      let #(c, ret) = do_infer_annotation(c, n, return)
+      use #(c, ret) <- result.map(do_infer_annotation(c, n, return))
       let typ = FunctionType(list.map(params, fn(x) { x.typ }), ret.typ)
       #(c, FunctionAnno(typ, params, ret))
     }
     g.VariableType(_, name) -> {
-      let assert Ok(typ) = dict.get(n, name)
+      use typ <- result.map(
+        dict.get(n, name)
+        |> result.replace_error(UnresolvedTypeVariable(location(c), name)),
+      )
       #(c, VariableAnno(typ, name))
     }
     g.HoleType(_, name) -> {
       let #(c, typ) = new_type_var_ref(c)
-      #(c, HoleAnno(typ, name))
+      Ok(#(c, HoleAnno(typ, name)))
     }
   }
 }
@@ -1046,120 +1188,111 @@ type ResolvedVariable {
   ResolvedGlobal(global: ResolvedGlobal)
 }
 
+/// Resolve an unqualified name against the local and then global environment.
 fn resolve_unqualified_name(
   c: Context,
   n: LocalEnv,
   name: String,
-) -> Result(ResolvedVariable, String) {
-  case dict.get(n, name) {
-    // try local env
-    Ok(typ) -> Ok(ResolvedLocal(name, typ))
-    Error(_) ->
-      case resolve_unqualified_global(c, name) {
-        Ok(value) -> Ok(ResolvedGlobal(value))
-        Error(e) -> Error(e)
-      }
-  }
+) -> Result(ResolvedVariable, Error) {
+  dict.get(n, name)
+  |> result.map(ResolvedLocal(name, _))
+  |> result.try_recover(fn(_) {
+    resolve_unqualified_global(c, name) |> result.map(ResolvedGlobal)
+  })
 }
 
+/// Resolve an unqualified name against the global environment.
 fn resolve_unqualified_global(
   c: Context,
   name: String,
-) -> Result(ResolvedGlobal, String) {
+) -> Result(ResolvedGlobal, Error) {
   // try global env
-  case resolve_global_name(c, c.current_module, name) {
-    Ok(value) -> Ok(value)
+  resolve_global_name(c, c.current_module, name)
+  |> result.try_recover(fn(_) {
     // try prelude
-    Error(_) -> {
-      case resolve_global_name(c, builtin, name) {
-        Ok(value) -> Ok(value)
-        Error(_) -> Error("Could not resolve name " <> name)
-      }
-    }
-  }
+    resolve_global_name(c, builtin, name)
+  })
 }
 
-fn resolve_aliased_name(
+/// Resolve a global from a possibly aliased module
+fn resolve_aliased_global(
   c: Context,
   name: QualifiedName,
-) -> Result(ResolvedGlobal, String) {
-  case dict.get(get_current_module(c).module_env, name.module) {
-    Ok(module) -> resolve_global_name(c, module, name.name)
-    Error(_) -> Error("Could not resolve module name " <> name.module)
-  }
+) -> Result(ResolvedGlobal, Error) {
+  resolve_module(c, name.module)
+  |> result.try(resolve_global_name(c, _, name.name))
 }
 
+/// Resolve a name from the global environment
 pub fn resolve_global_name(
   c: Context,
   module_name: String,
   name: String,
-) -> Result(ResolvedGlobal, String) {
-  case dict.get(c.modules, module_name) {
-    Ok(module) ->
-      case dict.get(module.value_env, name) {
-        Ok(value) -> Ok(value)
-        Error(_) -> Error("Could not resolve name " <> name)
-      }
-    Error(_) -> Error("Missing module " <> module_name)
-  }
+) -> Result(ResolvedGlobal, Error) {
+  use module <- result.try(get_module(c, module_name))
+  dict.get(module.value_env, name)
+  |> result.replace_error(UnresolvedGlobal(location(c), name))
 }
 
+/// Resolve a type name from the global environment
 fn resolve_type_name(
   c: Context,
   mod: Option(String),
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
+) -> Result(#(QualifiedName, Poly, List(Variant)), Error) {
   case mod {
     Some(mod) -> resolve_aliased_type_name(c, mod, name)
     None ->
-      case resolve_global_type_name(c, c.current_module, name) {
-        Ok(result) -> Ok(result)
-        Error(_) ->
-          case resolve_global_type_name(c, builtin, name) {
-            Ok(result) -> Ok(result)
-            Error(_) -> Error("Could not resolve type " <> name)
-          }
-      }
+      resolve_global_type_name(c, c.current_module, name)
+      |> result.try_recover(fn(_) { resolve_global_type_name(c, builtin, name) })
   }
 }
 
+/// Resolve a type name from a possibly aliased module 
 fn resolve_aliased_type_name(
   c: Context,
   module: String,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
-  case dict.get(get_current_module(c).module_env, module) {
-    Ok(module) -> resolve_global_type_name(c, module, name)
-    Error(_) -> Error("Could not resolve module name " <> module)
-  }
+) -> Result(#(QualifiedName, Poly, List(Variant)), Error) {
+  resolve_module(c, module)
+  |> result.try(resolve_global_type_name(c, _, name))
 }
 
+// Resolve a type name from a fully qualified module name
 pub fn resolve_global_type_name(
   c: Context,
-  module: String,
+  module_name: String,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Variant)), String) {
-  case dict.get(c.modules, module) {
-    Ok(mod) ->
-      case dict.get(mod.type_env, name) {
-        Ok(#(typ, variants)) ->
-          Ok(#(QualifiedName(module, name), typ, variants))
-        Error(_) -> Error("Could not resolve type " <> name)
-      }
-    Error(_) -> Error("Missing module " <> module)
+) -> Result(#(QualifiedName, Poly, List(Variant)), Error) {
+  use module <- result.try(get_module(c, module_name))
+  use #(typ, variants) <- result.map(
+    dict.get(module.type_env, name)
+    |> result.replace_error(UnresolvedType(
+      location(c),
+      module_name <> "." <> name,
+    )),
+  )
+  #(QualifiedName(module_name, name), typ, variants)
+}
+
+/// Resolve a qualified or unqualified contructor name
+fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
+  case mod {
+    Some(mod) -> resolve_aliased_global(c, QualifiedName(mod, name))
+    None -> resolve_unqualified_global(c, name)
   }
 }
 
-fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
-  case mod {
-    Some(mod) -> {
-      let q_name = QualifiedName(mod, name)
-      resolve_aliased_name(c, q_name)
-    }
-    None -> {
-      resolve_unqualified_global(c, name)
-    }
-  }
+/// Resolve a module alias to its fully qualified name
+fn resolve_module(c: Context, module_name: String) -> Result(String, Error) {
+  dict.get(get_current_module(c).module_env, module_name)
+  |> result.replace_error(UnresolvedModule(location(c), module_name))
+}
+
+/// Get a module by its fully qualified name
+fn get_module(c: Context, module_name: String) -> Result(Module, Error) {
+  dict.get(c.modules, module_name)
+  |> result.replace_error(UnresolvedModule(location(c), module_name))
 }
 
 fn new_temp_var(c: Context) -> #(Context, String) {
@@ -1178,29 +1311,30 @@ fn infer_pattern(
   c: Context,
   n: LocalEnv,
   pattern: g.Pattern,
-) -> #(Context, LocalEnv, Pattern) {
+) -> Result(#(Context, LocalEnv, Pattern), Error) {
   case pattern {
-    g.PatternInt(_, value) -> #(c, n, PatternInt(int_type, value))
-    g.PatternFloat(_, value) -> #(c, n, PatternFloat(float_type, value))
-    g.PatternString(_, value) -> #(c, n, PatternString(string_type, value))
+    g.PatternInt(_, value) -> Ok(#(c, n, PatternInt(int_type, value)))
+    g.PatternFloat(_, value) -> Ok(#(c, n, PatternFloat(float_type, value)))
+    g.PatternString(_, value) -> Ok(#(c, n, PatternString(string_type, value)))
     g.PatternDiscard(_, name) -> {
       let #(c, typ) = new_type_var_ref(c)
-      #(c, n, PatternDiscard(typ, name))
+      Ok(#(c, n, PatternDiscard(typ, name)))
     }
     g.PatternVariable(_, name) -> {
       let #(c, typ) = new_type_var_ref(c)
       let pattern = PatternVariable(typ, name)
       let n = dict.insert(n, name, typ)
-      #(c, n, pattern)
+      Ok(#(c, n, pattern))
     }
     g.PatternTuple(_, elements) -> {
       // Infer types for all elements in the tuple pattern
-      let #(c, n, elems) =
-        list.fold(elements, #(c, n, []), fn(acc, elem) {
+      use #(c, n, elems) <- result.map(
+        list.try_fold(elements, #(c, n, []), fn(acc, elem) {
           let #(c, n, patterns) = acc
-          let #(c, n, pattern) = infer_pattern(c, n, elem)
+          use #(c, n, pattern) <- result.map(infer_pattern(c, n, elem))
           #(c, n, [pattern, ..patterns])
-        })
+        }),
+      )
       let elems = list.reverse(elems)
 
       // Create the tuple type from the inferred element types
@@ -1210,40 +1344,42 @@ fn infer_pattern(
     }
     g.PatternList(_, elements, tail) -> {
       // Infer types for all elements in the list pattern
-      let #(c, n, elements) =
-        list.fold(elements, #(c, n, []), fn(acc, elem) {
+      use #(c, n, elements) <- result.try(
+        list.try_fold(elements, #(c, n, []), fn(acc, elem) {
           let #(c, n, patterns) = acc
-          let #(c, n, pattern) = infer_pattern(c, n, elem)
+          use #(c, n, pattern) <- result.map(infer_pattern(c, n, elem))
           #(c, n, [pattern, ..patterns])
-        })
+        }),
+      )
       let elements = list.reverse(elements)
 
       // Create a type variable for the element type
       let #(c, elem_type) = new_type_var_ref(c)
 
       // Unify all element types with the element type variable
-      let c =
-        list.fold(elements, c, fn(c, elem) { unify(c, elem.typ, elem_type) })
+      use c <- result.try(
+        list.try_fold(elements, c, fn(c, elem) { unify(c, elem.typ, elem_type) }),
+      )
 
       // Create the list type
       let typ = NamedType("List", builtin, [elem_type])
 
       // Handle the tail pattern if present
-      let #(c, n, tail) = case tail {
+      use #(c, n, tail) <- result.map(case tail {
         Some(tail_pattern) -> {
-          let #(c, n, tail) = infer_pattern(c, n, tail_pattern)
+          use #(c, n, tail) <- result.try(infer_pattern(c, n, tail_pattern))
           // The tail should be a list of the same type
-          let c = unify(c, tail.typ, typ)
+          use c <- result.map(unify(c, tail.typ, typ))
           #(c, n, Some(tail))
         }
-        None -> #(c, n, None)
-      }
+        None -> Ok(#(c, n, None))
+      })
 
       #(c, n, PatternList(typ, elements, tail))
     }
     g.PatternAssignment(_, pattern, name) -> {
       // First, infer the type of the inner pattern
-      let #(c, n, pattern) = infer_pattern(c, n, pattern)
+      use #(c, n, pattern) <- result.map(infer_pattern(c, n, pattern))
 
       // Create the PatternAssignment with the same type as the inner pattern
       let pattern = PatternAssignment(pattern.typ, pattern, name)
@@ -1276,64 +1412,53 @@ fn infer_pattern(
       let pattern =
         PatternConcatenate(string_type, prefix, prefix_name, rest_name_result)
 
-      #(c, n, pattern)
+      Ok(#(c, n, pattern))
     }
     g.PatternBitString(_, segments) -> {
-      let #(c, n, segs) =
-        list.fold(segments, #(c, n, []), fn(acc, seg) {
+      use #(c, n, segs) <- result.map(
+        list.try_fold(segments, #(c, n, []), fn(acc, seg) {
           let #(c, n, segs) = acc
           let #(pattern, options) = seg
 
-          let #(c, n, options, typ) =
-            list.fold(options, #(c, n, [], None), fn(acc, option) {
+          use #(c, n, options, typ) <- result.try(
+            list.try_fold(options, #(c, n, [], None), fn(acc, option) {
               let #(c, n, options, typ) = acc
-              let #(c, n, option, option_type) = case option {
-                g.BigOption -> #(c, n, BigOption, None)
-                g.LittleOption -> #(c, n, LittleOption, None)
-                g.NativeOption -> #(c, n, NativeOption, None)
-                g.SignedOption -> #(c, n, SignedOption, None)
-                g.UnsignedOption -> #(c, n, UnsignedOption, None)
-                g.BytesOption -> #(c, n, BytesOption, Some(bit_array_type))
-                g.BitsOption -> #(c, n, BitsOption, Some(bit_array_type))
-                g.IntOption -> #(c, n, IntOption, Some(int_type))
-                g.FloatOption -> #(c, n, FloatOption, Some(float_type))
-                g.Utf8Option -> #(c, n, Utf8Option, Some(string_type))
-                g.Utf16Option -> #(c, n, Utf16Option, Some(string_type))
-                g.Utf32Option -> #(c, n, Utf32Option, Some(string_type))
-                g.Utf8CodepointOption -> #(
-                  c,
-                  n,
-                  Utf8CodepointOption,
-                  Some(codepoint_type),
-                )
-                g.Utf16CodepointOption -> #(
-                  c,
-                  n,
-                  Utf16CodepointOption,
-                  Some(codepoint_type),
-                )
-                g.Utf32CodepointOption -> #(
-                  c,
-                  n,
-                  Utf32CodepointOption,
-                  Some(codepoint_type),
-                )
-                g.SizeOption(size) -> #(c, n, SizeOption(size), None)
+              use #(c, n, option, option_type) <- result.try(case option {
+                g.BigOption -> Ok(#(c, n, BigOption, None))
+                g.LittleOption -> Ok(#(c, n, LittleOption, None))
+                g.NativeOption -> Ok(#(c, n, NativeOption, None))
+                g.SignedOption -> Ok(#(c, n, SignedOption, None))
+                g.UnsignedOption -> Ok(#(c, n, UnsignedOption, None))
+                g.BytesOption -> Ok(#(c, n, BytesOption, Some(bit_array_type)))
+                g.BitsOption -> Ok(#(c, n, BitsOption, Some(bit_array_type)))
+                g.IntOption -> Ok(#(c, n, IntOption, Some(int_type)))
+                g.FloatOption -> Ok(#(c, n, FloatOption, Some(float_type)))
+                g.Utf8Option -> Ok(#(c, n, Utf8Option, Some(string_type)))
+                g.Utf16Option -> Ok(#(c, n, Utf16Option, Some(string_type)))
+                g.Utf32Option -> Ok(#(c, n, Utf32Option, Some(string_type)))
+                g.Utf8CodepointOption ->
+                  Ok(#(c, n, Utf8CodepointOption, Some(codepoint_type)))
+                g.Utf16CodepointOption ->
+                  Ok(#(c, n, Utf16CodepointOption, Some(codepoint_type)))
+                g.Utf32CodepointOption ->
+                  Ok(#(c, n, Utf32CodepointOption, Some(codepoint_type)))
+                g.SizeOption(size) -> Ok(#(c, n, SizeOption(size), None))
                 g.SizeValueOption(pattern) -> {
-                  let #(c, n, p) = infer_pattern(c, n, pattern)
-                  let c = unify(c, p.typ, int_type)
+                  use #(c, n, p) <- result.try(infer_pattern(c, n, pattern))
+                  use c <- result.map(unify(c, p.typ, int_type))
                   #(c, n, SizeValueOption(p), None)
                 }
-                g.UnitOption(unit) -> #(c, n, UnitOption(unit), None)
-              }
-              let typ = case typ, option_type {
+                g.UnitOption(unit) -> Ok(#(c, n, UnitOption(unit), None))
+              })
+              use typ <- result.map(case typ, option_type {
                 Some(_), Some(_) ->
-                  panic as error(c, "segment type was set multiple times")
-                Some(_), None -> typ
-                _, _ -> option_type
-              }
+                  Error(BitPatternSegmentTypeOverSpecified(location(c)))
+                Some(_), None -> Ok(typ)
+                _, _ -> Ok(option_type)
+              })
               #(c, n, [option, ..options], typ)
-            })
+            }),
+          )
           let options = list.reverse(options)
 
           // If no type option was specified, default to int_type
@@ -1342,10 +1467,11 @@ fn infer_pattern(
             None -> int_type
           }
 
-          let #(c, n, pattern) = infer_pattern(c, n, pattern)
-          let c = unify(c, pattern.typ, expected_type)
+          use #(c, n, pattern) <- result.try(infer_pattern(c, n, pattern))
+          use c <- result.map(unify(c, pattern.typ, expected_type))
           #(c, n, [#(pattern, options), ..segs])
-        })
+        }),
+      )
       let segs = list.reverse(segs)
 
       // The overall pattern type should be bit_array_type
@@ -1359,12 +1485,13 @@ fn infer_pattern(
       }
 
       // resolve the constructor function
-      let assert Ok(FunctionGlobal(module, constructor, poly, labels)) =
-        resolve_constructor_name(c, module, constructor)
+      use #(module, constructor, poly, labels) <- result.try(
+        resolve_constructor(c, module, constructor),
+      )
 
       // infer the type of all arguments
-      let #(c, n, arguments) =
-        list.fold(arguments, #(c, n, []), fn(acc, arg) {
+      use #(c, n, arguments) <- result.try(
+        list.try_fold(arguments, #(c, n, []), fn(acc, arg) {
           let #(c, n, arguments) = acc
 
           let #(item, label) = case arg {
@@ -1376,13 +1503,14 @@ fn infer_pattern(
             g.UnlabelledField(item) -> #(item, None)
           }
 
-          let #(c, n, arg2) = infer_pattern(c, n, item)
+          use #(c, n, arg2) <- result.map(infer_pattern(c, n, item))
           #(c, n, [Field(label, arg2), ..arguments])
-        })
+        }),
+      )
       let arguments = list.reverse(arguments)
 
       // handle labels
-      let #(c, ordered_arguments) = case with_spread {
+      use #(c, ordered_arguments) <- result.try(case with_spread {
         True -> {
           let #(c, args) =
             match_labels_optional(arguments, labels)
@@ -1397,26 +1525,26 @@ fn infer_pattern(
               }
               #(c, [opt, ..opts])
             })
-          #(c, list.reverse(args))
+          Ok(#(c, list.reverse(args)))
         }
         False -> {
-          let args = match_labels(c, arguments, labels)
+          use args <- result.map(match_labels(c, arguments, labels))
           #(c, args)
         }
-      }
+      })
       let arg_types = list.map(ordered_arguments, fn(x) { x.item.typ })
 
       // handle 0 parameter variants are not functions
-      let #(c, typ) = case arg_types {
-        [] -> instantiate(c, poly)
+      use #(c, typ) <- result.map(case arg_types {
+        [] -> Ok(instantiate(c, poly))
         _ -> {
           // unify the constructor function type with the types of args
           let #(c, fun_typ) = instantiate(c, poly)
           let #(c, typ) = new_type_var_ref(c)
-          let c = unify(c, fun_typ, FunctionType(arg_types, typ))
+          use c <- result.map(unify(c, fun_typ, FunctionType(arg_types, typ)))
           #(c, typ)
         }
-      }
+      })
 
       let pattern =
         PatternConstructor(
@@ -1434,7 +1562,23 @@ fn infer_pattern(
   }
 }
 
-fn infer_annotation(c: Context, typ: g.Type) -> #(Context, Annotation) {
+fn resolve_constructor(c: Context, module: Option(String), constructor: String) {
+  use constructor <- result.try(resolve_constructor_name(c, module, constructor))
+  case constructor {
+    FunctionGlobal(module:, name:, typ:, labels:) ->
+      Ok(#(module, name, typ, labels))
+    ConstantGlobal(..) ->
+      Error(NotAFunction(
+        location(c),
+        constructor.module <> "." <> constructor.name,
+      ))
+  }
+}
+
+fn infer_annotation(
+  c: Context,
+  typ: g.Type,
+) -> Result(#(Context, Annotation), Error) {
   let vars =
     find_vars_in_type(typ)
     |> list.unique()
@@ -1455,40 +1599,40 @@ fn infer_body(
   c: Context,
   n: LocalEnv,
   body: List(g.Statement),
-) -> #(Context, List(Statement)) {
+) -> Result(#(Context, List(Statement)), Error) {
   case body {
-    [] -> #(c, [])
+    [] -> Ok(#(c, []))
     [x, ..xs] ->
       case x {
         g.Expression(value) -> {
-          let assert Ok(#(c, value)) = infer_expression(c, n, value)
+          use #(c, value) <- result.try(infer_expression(c, n, value))
 
           let statement = Expression(value.typ, value)
 
           // infer the rest of the body
-          let #(c, rest) = infer_body(c, n, xs)
+          use #(c, rest) <- result.map(infer_body(c, n, xs))
           #(c, [statement, ..rest])
         }
         g.Assignment(_, kind, pattern, annotation, value) -> {
           // infer value before binding the new variable
-          let assert Ok(#(c, value)) = infer_expression(c, n, value)
+          use #(c, value) <- result.try(infer_expression(c, n, value))
 
           // infer pattern, annotation, and value
-          let #(c, n, pattern) = infer_pattern(c, n, pattern)
+          use #(c, n, pattern) <- result.try(infer_pattern(c, n, pattern))
 
           // if there is an annotation, the pattern must unify with the annotation
-          let #(c, annotation) = case annotation {
+          use #(c, annotation) <- result.try(case annotation {
             Some(typ) -> {
-              let #(c, annotation) = infer_annotation(c, typ)
-              let c = unify(c, pattern.typ, annotation.typ)
+              use #(c, annotation) <- result.try(infer_annotation(c, typ))
+              use c <- result.map(unify(c, pattern.typ, annotation.typ))
               #(c, Some(annotation))
             }
-            None -> #(c, None)
-          }
+            None -> Ok(#(c, None))
+          })
 
           // the pattern must unify with both the annotation
           // and the assigned value
-          let c = unify(c, pattern.typ, value.typ)
+          use c <- result.try(unify(c, pattern.typ, value.typ))
 
           // TODO check the right "kind" was used (needs exhaustive checking)
           let kind = case kind {
@@ -1506,137 +1650,98 @@ fn infer_body(
             )
 
           // infer the rest of the body
-          let #(c, rest) = infer_body(c, n, xs)
+          use #(c, rest) <- result.map(infer_body(c, n, xs))
           #(c, [statement, ..rest])
         }
         g.Assert(_, expression, message) -> {
-          let assert Ok(#(c, expression)) = infer_expression(c, n, expression)
+          use #(c, expression) <- result.try(infer_expression(c, n, expression))
 
-          let #(c, message) = case message {
+          use #(c, message) <- result.try(case message {
             Some(msg) -> {
-              let assert Ok(#(c, msg)) = infer_expression(c, n, msg)
+              use #(c, msg) <- result.map(infer_expression(c, n, msg))
               #(c, Some(msg))
             }
-            None -> #(c, None)
-          }
+            None -> Ok(#(c, None))
+          })
 
           let statement = Assert(expression.typ, expression, message)
 
           // infer the rest of the body
-          let #(c, rest) = infer_body(c, n, xs)
+          use #(c, rest) <- result.map(infer_body(c, n, xs))
           #(c, [statement, ..rest])
         }
         g.Use(span, patterns, function) -> {
           // TODO infer without desugaring
-          let fun = case function {
-            g.Call(..) -> function
-            _ -> g.Call(span, function, [])
+          let #(span, fun, args) = case function {
+            g.Call(span, fun, args) -> #(span, fun, args)
+            _ -> #(span, function, [])
           }
-          case fun {
-            g.Call(span, fun, args) -> {
-              let params =
-                list.index_map(patterns, fn(_pat, i) {
-                  g.FnParameter(g.Named("P" <> int.to_string(i)), None)
-                })
-              let body =
-                list.index_fold(patterns, xs, fn(body, pat, i) {
-                  let param = g.Variable(span, "P" <> int.to_string(i))
-                  let assignment =
-                    g.Assignment(span, g.Let, pat.pattern, None, param)
-                  [assignment, ..body]
-                })
-              let callback = g.Fn(span, params, None, body)
-              let assert Ok(#(_, ifun)) = infer_expression(c, n, fun)
-              let field = case ifun {
-                Function(labels:, ..) ->
-                  case list.last(labels) {
-                    Ok(Some(label)) -> g.LabelledField(label, callback)
-                    _ -> g.UnlabelledField(callback)
-                  }
+          let params =
+            list.index_map(patterns, fn(_pat, i) {
+              g.FnParameter(g.Named("P" <> int.to_string(i)), None)
+            })
+          let body =
+            list.index_fold(patterns, xs, fn(body, pat, i) {
+              let param = g.Variable(span, "P" <> int.to_string(i))
+              let assignment =
+                g.Assignment(span, g.Let, pat.pattern, None, param)
+              [assignment, ..body]
+            })
+          let callback = g.Fn(span, params, None, body)
+          use #(_, ifun) <- result.try(infer_expression(c, n, fun))
+          let field = case ifun {
+            Function(labels:, ..) ->
+              case list.last(labels) {
+                Ok(Some(label)) -> g.LabelledField(label, callback)
                 _ -> g.UnlabelledField(callback)
               }
-              let call = g.Call(span, fun, list.append(args, [field]))
-              let assert Ok(#(c, exp)) = infer_expression(c, n, call)
-              let statement = Expression(exp.typ, exp)
-              #(c, [statement])
-            }
-            _ -> panic as error(c, "expected a function call")
+            _ -> g.UnlabelledField(callback)
           }
+          let call = g.Call(span, fun, list.append(args, [field]))
+          use #(c, exp) <- result.map(infer_expression(c, n, call))
+          let statement = Expression(exp.typ, exp)
+          #(c, [statement])
         }
       }
   }
-}
-
-fn error(c: Context, message: String) -> String {
-  let start = c.current_span.start
-  let end = c.current_span.end
-
-  let context_before = case start {
-    start if start < 100 -> string.slice(c.module_source, 0, start)
-    start -> string.slice(c.module_source, start - 100, 100)
-  }
-  let context_before = string.split(context_before, "\n")
-  let context_before =
-    context_before
-    |> list.drop(list.length(context_before) - 3)
-    |> list.drop_while(fn(x) { x == "" })
-    |> string.join("\n")
-
-  let context_after =
-    c.module_source
-    |> string.slice(end, 100)
-    |> string.split("\n")
-    |> list.take(3)
-    |> string.join("\n")
-
-  let error_part = string.slice(c.module_source, start, end - start)
-
-  // TODO this unicode escape sequence is not valid in c, needs compilation
-  // let escape = "\u{001b}["
-  let assert Ok(escape) = bit_array.to_string(<<27, 91>>)
-  let clear = escape <> "0m"
-  let red_underline = escape <> "4;31m"
-
-  "Error: "
-  <> message
-  <> "\n\nat: "
-  <> c.current_module
-  <> "."
-  <> c.current_definition
-  <> "\n\n"
-  <> context_before
-  <> red_underline
-  <> error_part
-  <> clear
-  <> context_after
 }
 
 fn match_labels(
   c: Context,
   args: List(Field(a)),
   params: List(Option(String)),
-) -> List(Field(a)) {
+) -> Result(List(Field(a)), Error) {
+  do_match_labels(c, args, params, #(list.length(params), list.length(args)))
+}
+
+fn do_match_labels(
+  c: Context,
+  args: List(Field(a)),
+  params: List(Option(String)),
+  lens: #(Int, Int),
+) -> Result(List(Field(a)), Error) {
   // find the labels in the order specified by parameters
   // either we find the matching label or default to the first unlabelled arg
   case params {
     [] ->
       case args {
-        [] -> []
-        _ -> panic as error(c, "too many arguments given")
+        [] -> Ok([])
+        _ -> Error(WrongArity(location(c), lens.0, lens.1))
       }
     [p, ..p_rest] ->
-      case listx.pop(args, fn(a) { a.label == p }) {
-        Ok(#(a, a_rest)) -> [a, ..match_labels(c, a_rest, p_rest)]
-        Error(_) ->
-          case listx.pop(args, fn(a) { a.label == None }) {
-            Ok(#(a, a_rest)) -> [a, ..match_labels(c, a_rest, p_rest)]
-            Error(_) ->
-              case p {
-                Some(l) -> panic as error(c, "no matching label '" <> l <> "'")
-                None -> panic as error(c, "not enough arguments given")
-              }
-          }
-      }
+      listx.pop(args, fn(a) { a.label == p })
+      |> result.try_recover(fn(_) { listx.pop(args, fn(a) { a.label == None }) })
+      |> result.map_error(fn(_) {
+        case p {
+          Some(l) -> LabelNotFound(location(c), l)
+          None -> WrongArity(location(c), lens.0, lens.1)
+        }
+      })
+      |> result.try(fn(r) {
+        let #(a, a_rest) = r
+        use rest <- result.map(match_labels(c, a_rest, p_rest))
+        [a, ..rest]
+      })
   }
 }
 
@@ -1659,7 +1764,7 @@ fn infer_expression(
   c: Context,
   n: LocalEnv,
   exp: g.Expression,
-) -> Result(#(Context, Expression), String) {
+) -> Result(#(Context, Expression), Error) {
   let c = Context(..c, current_span: exp.location)
   case exp {
     g.Int(_, s) -> Ok(#(c, Int(int_type, s)))
@@ -1686,31 +1791,30 @@ fn infer_expression(
       }
     }
     g.NegateInt(_, value) -> {
-      use #(c, e) <- try(infer_expression(c, n, value))
-      let c = unify(c, e.typ, int_type)
-      Ok(#(c, NegateInt(int_type, e)))
+      use #(c, e) <- result.try(infer_expression(c, n, value))
+      use c <- result.map(unify(c, e.typ, int_type))
+      #(c, NegateInt(int_type, e))
     }
     g.NegateBool(_, value) -> {
-      use #(c, e) <- try(infer_expression(c, n, value))
-      let c = unify(c, e.typ, bool_type)
-      Ok(#(c, NegateBool(bool_type, e)))
+      use #(c, e) <- result.try(infer_expression(c, n, value))
+      use c <- result.map(unify(c, e.typ, bool_type))
+      #(c, NegateBool(bool_type, e))
     }
     g.Block(_, statements) -> {
-      let #(c, statements) = infer_body(c, n, statements)
-
+      use #(c, statements) <- result.try(infer_body(c, n, statements))
       case list.last(statements) {
         Ok(last) -> Ok(#(c, Block(last.typ, statements)))
-        Error(_) -> Error("empty block")
+        Error(_) -> Error(EmptyBlock(location(c)))
       }
     }
     g.Panic(_, e) -> {
       case e {
         Some(e) -> {
           // the expression should be a string
-          use #(c, e) <- try(infer_expression(c, n, e))
-          unify(c, e.typ, string_type)
+          use #(c, e) <- result.try(infer_expression(c, n, e))
+          use c <- result.map(unify(c, e.typ, string_type))
           let #(c, typ) = new_type_var_ref(c)
-          Ok(#(c, Panic(typ, Some(e))))
+          #(c, Panic(typ, Some(e)))
         }
         None -> {
           let #(c, typ) = new_type_var_ref(c)
@@ -1722,10 +1826,10 @@ fn infer_expression(
       case e {
         Some(e) -> {
           // the expression should be a string
-          use #(c, e) <- try(infer_expression(c, n, e))
-          unify(c, e.typ, string_type)
+          use #(c, e) <- result.try(infer_expression(c, n, e))
+          use c <- result.map(unify(c, e.typ, string_type))
           let #(c, typ) = new_type_var_ref(c)
-          Ok(#(c, Todo(typ, Some(e))))
+          #(c, Todo(typ, Some(e)))
         }
         None -> {
           let #(c, typ) = new_type_var_ref(c)
@@ -1735,10 +1839,10 @@ fn infer_expression(
     }
     g.Tuple(_, elements) -> {
       // Infer type of all elements
-      use #(c, elements) <- try(
+      use #(c, elements) <- result.try(
         list.try_fold(elements, #(c, []), fn(acc, e) {
           let #(c, elements) = acc
-          use #(c, e) <- try(infer_expression(c, n, e))
+          use #(c, e) <- result.try(infer_expression(c, n, e))
           Ok(#(c, [e, ..elements]))
         }),
       )
@@ -1751,19 +1855,19 @@ fn infer_expression(
     }
     g.List(_, elements, rest) -> {
       // Infer types for all elements
-      use #(c, elements) <- try(
+      use #(c, elements) <- result.try(
         list.try_fold(elements, #(c, []), fn(acc, e) {
           let #(c, elements) = acc
-          use #(c, e) <- try(infer_expression(c, n, e))
+          use #(c, e) <- result.try(infer_expression(c, n, e))
           Ok(#(c, [e, ..elements]))
         }),
       )
       let elements = list.reverse(elements)
 
       // Infer type for rest (if present)
-      use #(c, rest) <- try(case rest {
+      use #(c, rest) <- result.try(case rest {
         Some(t) -> {
-          use #(c, t) <- try(infer_expression(c, n, t))
+          use #(c, t) <- result.try(infer_expression(c, n, t))
           Ok(#(c, Some(t)))
         }
         None -> Ok(#(c, None))
@@ -1774,67 +1878,84 @@ fn infer_expression(
       let typ = NamedType("List", builtin, [elem_type])
 
       // Unify all element types
-      let c = list.fold(elements, c, fn(c, e) { unify(c, e.typ, elem_type) })
+      use c <- result.try(
+        list.try_fold(elements, c, fn(c, e) { unify(c, e.typ, elem_type) }),
+      )
 
       // Unify rest type with list type (if rest is present)
-      let c = case rest {
+      use c <- result.map(case rest {
         Some(t) -> unify(c, t.typ, typ)
-        None -> c
-      }
+        None -> Ok(c)
+      })
 
-      Ok(#(c, List(typ, elements, rest)))
+      #(c, List(typ, elements, rest))
     }
     g.Fn(_, parameters, return_annotation, body) -> {
       infer_fn(c, n, parameters, return_annotation, body, None)
     }
     g.RecordUpdate(span, module, constructor, record, fields) -> {
       // Infer the type of the base record expression
-      use #(c, base_expr) <- try(infer_expression(c, n, record))
+      use #(c, base_expr) <- result.try(infer_expression(c, n, record))
 
       // Resolve the constructor type
-      let assert Ok(FunctionGlobal(res_module, constructor, poly, labels)) =
-        resolve_constructor_name(c, module, constructor)
+      use #(res_module, constructor, poly, labels) <- result.try(
+        resolve_constructor(c, module, constructor),
+      )
 
       // Instantiate the constructor type
       let #(c, constructor_type) = instantiate(c, poly)
-      let assert FunctionType(constructor_args, constructor_ret) =
-        constructor_type
+      use #(constructor_args, constructor_ret) <- result.try(
+        case constructor_type {
+          FunctionType(parameters:, return:) -> Ok(#(parameters, return))
+          _ -> Error(NotAFunction(location(c), constructor))
+        },
+      )
 
       // Unify the base expression type with the constructor type
-      let c = unify(c, base_expr.typ, constructor_ret)
+      use c <- result.try(unify(c, base_expr.typ, constructor_ret))
 
       // Infer types for all updated fields
-      use #(c, updated_fields) <- try(
+      use #(c, updated_fields) <- result.try(
         list.try_fold(fields, #(c, []), fn(acc, field) {
           let #(c, updated_fields) = acc
           let item = case field.item {
             Some(item) -> item
             None -> g.Variable(span, field.label)
           }
-          use #(c, value) <- try(infer_expression(c, n, item))
-          Ok(#(c, [#(field.label, value), ..updated_fields]))
+          use #(c, value) <- result.map(infer_expression(c, n, item))
+          #(c, [#(field.label, value), ..updated_fields])
         }),
       )
       let updated_fields = list.reverse(updated_fields)
 
       let fields = list.map(updated_fields, fn(x) { Field(Some(x.0), x.1) })
       let ordered_fields = match_labels_optional(fields, labels)
-      let assert Ok(ordered_fields) =
+      use ordered_fields <- result.try(
         list.strict_zip(ordered_fields, constructor_args)
-      let #(c, ordered_fields) =
-        ordered_fields
-        |> list.fold_right(#(c, []), fn(acc, x) {
+        |> result.map_error(fn(_) {
+          WrongArity(
+            location(c),
+            list.length(constructor_args),
+            list.length(ordered_fields),
+          )
+        }),
+      )
+
+      use #(c, ordered_fields) <- result.map(
+        list.try_fold(ordered_fields, #(c, []), fn(acc, x) {
           let #(c, fields) = acc
           let #(given, expected) = x
-          let #(c, result) = case given {
+          use #(c, result) <- result.map(case given {
             Some(e) -> {
-              let c = unify(c, e.item.typ, expected)
+              use c <- result.map(unify(c, e.item.typ, expected))
               #(c, Ok(e))
             }
-            None -> #(c, Error(expected))
-          }
+            None -> Ok(#(c, Error(expected)))
+          })
           #(c, [result, ..fields])
-        })
+        }),
+      )
+      let ordered_fields = list.reverse(ordered_fields)
 
       // The result type is the same as the constructor type
       let typ = constructor_ret
@@ -1851,40 +1972,38 @@ fn infer_expression(
           ordered_fields: ordered_fields,
         )
 
-      Ok(#(c, record_update))
+      #(c, record_update)
     }
     g.FieldAccess(_, container, label) -> {
       let field_access = {
         // try to infer the value, otherwise it might be a module access
-        use #(c, value) <- try(infer_expression(c, n, container))
+        use #(c, value) <- result.try(infer_expression(c, n, container))
 
         // field access must be on a named type
         let value_typ = case resolve_type(c, value.typ) {
           NamedType(type_name, module, _) -> Ok(#(type_name, module))
-          _ -> Error("Field access attempted on invalid type. ")
+          _ -> Error(InvalidFieldAccess(location(c)))
         }
-        use #(type_name, module) <- try(value_typ)
+        use #(type_name, module) <- result.try(value_typ)
 
         // find the custom type definition
-        let assert Ok(mod) = dict.get(c.modules, module)
-        let assert Ok(custom) =
-          list.find(mod.custom_types, fn(x) { x.definition.name == type_name })
+        use custom <- result.try(resolve_custom_type(c, module, type_name))
 
         // access only works with one variant
         let variant = case custom.definition.variants {
           // TODO proper implementation checking all variants
           [variant, ..] -> Ok(variant)
-          _ -> Error("Field access attempted on type with multiple variants.")
+          _ -> Error(InvalidFieldAccess(location(c)))
         }
-        use variant <- try(variant)
+        use variant <- result.try(variant)
 
         // find the matching field and index
         let field =
           variant.fields
           |> list.index_map(fn(x, i) { #(x, i) })
           |> list.find(fn(x) { { x.0 }.label == Some(label) })
-          |> result.replace_error("Variant does not have a matching field.")
-        use #(field, index) <- try(field)
+          |> result.replace_error(FieldNotFound(location(c), label))
+        use #(field, index) <- result.try(field)
 
         // create a getter function type
         let getter = FunctionType([custom.definition.typ.typ], field.item.typ)
@@ -1893,9 +2012,9 @@ fn infer_expression(
 
         // unify the getter as if we're calling it on the value
         let #(c, typ) = new_type_var_ref(c)
-        let c = unify(c, getter, FunctionType([value.typ], typ))
+        use c <- result.map(unify(c, getter, FunctionType([value.typ], typ)))
 
-        Ok(#(c, FieldAccess(typ, value, module, variant.name, label, index)))
+        #(c, FieldAccess(typ, value, module, variant.name, label, index))
       }
       case field_access {
         Ok(access) -> Ok(access)
@@ -1903,7 +2022,7 @@ fn infer_expression(
           // try a module access instead
           case container {
             g.Variable(_, module) -> {
-              case resolve_aliased_name(c, QualifiedName(module, label)) {
+              case resolve_aliased_global(c, QualifiedName(module, label)) {
                 Ok(FunctionGlobal(module, name, poly, labels)) -> {
                   let #(c, typ) = instantiate(c, poly)
                   Ok(#(c, Function(typ, module, name, labels)))
@@ -1922,7 +2041,7 @@ fn infer_expression(
     }
     g.Call(span, function, arguments) -> {
       // infer the type of the function
-      use #(c, fun) <- try(infer_expression(c, n, function))
+      use #(c, fun) <- result.try(infer_expression(c, n, function))
 
       // handle labels
       let labels = case fun {
@@ -1940,19 +2059,24 @@ fn infer_expression(
           Field(label, arg)
         })
 
-      let args = match_labels(c, args, labels)
+      use args <- result.try(match_labels(c, args, labels))
 
       // use fun parameter type as type hints for inferring arguments
-      let args = case resolve_type(c, fun.typ) {
+      use args <- result.try(case resolve_type(c, fun.typ) {
         FunctionType(params, _ret) -> {
           let params = list.map(params, Some)
-          let assert Ok(args) = list.strict_zip(params, args)
+          use args <- result.map(
+            list.strict_zip(params, args)
+            |> result.map_error(fn(_) {
+              WrongArity(location(c), list.length(params), list.length(args))
+            }),
+          )
           args
         }
-        _ -> list.map(args, fn(arg) { #(None, arg) })
-      }
+        _ -> Ok(list.map(args, fn(arg) { #(None, arg) }))
+      })
       // infer the type of all args
-      use #(c, args) <- try(
+      use #(c, args) <- result.try(
         list.try_fold(args, #(c, []), fn(acc, type_hint_and_field) {
           let #(c, args) = acc
           let #(type_hint, field_arg) = type_hint_and_field
@@ -1963,16 +2087,16 @@ fn infer_expression(
               infer_fn(c, n, parameters, return_annotation, body, type_hint)
             _ -> infer_expression(c, n, field_arg.item)
           }
-          use #(c, inferred_arg) <- try(result)
+          use #(c, inferred_arg) <- result.try(result)
 
-          let c = case type_hint {
+          use c <- result.map(case type_hint {
             Some(hint) -> unify(c, hint, inferred_arg.typ)
-            None -> c
-          }
+            None -> Ok(c)
+          })
 
           let field_with_inferred = Field(field_arg.label, inferred_arg)
 
-          Ok(#(c, [field_with_inferred, ..args]))
+          #(c, [field_with_inferred, ..args])
         }),
       )
       let args = list.reverse(args)
@@ -1980,17 +2104,17 @@ fn infer_expression(
       let ordered_arguments = list.map(args, fn(field) { field.item })
       // unify the function type with the types of args
       let #(c, typ) = new_type_var_ref(c)
-      let c = unify(c, fun.typ, FunctionType(arg_types, typ))
-      Ok(#(c, Call(typ, fun, ordered_arguments)))
+      use c <- result.map(unify(c, fun.typ, FunctionType(arg_types, typ)))
+      #(c, Call(typ, fun, ordered_arguments))
     }
     g.TupleIndex(_, tuple, index) -> {
-      use #(c, tuple) <- try(infer_expression(c, n, tuple))
+      use #(c, tuple) <- result.try(infer_expression(c, n, tuple))
       case resolve_type(c, tuple.typ) {
         TupleType(elements) -> {
-          let typ = tuple_index_type(c, elements, index)
-          Ok(#(c, TupleIndex(typ, tuple, index)))
+          tuple_index_type(c, elements, index)
+          |> result.map(fn(typ) { #(c, TupleIndex(typ, tuple, index)) })
         }
-        _ -> Error("tuple index on non-tuple")
+        _ -> Error(InvalidTupleAccess(location(c)))
       }
     }
     g.FnCapture(span, label, function, arguments_before, arguments_after) -> {
@@ -2007,78 +2131,68 @@ fn infer_expression(
       infer_expression(c, n, lambda)
     }
     g.BitString(_, segments) -> {
-      use #(c, segs) <- try(
+      use #(c, segs) <- result.try(
         list.try_fold(segments, #(c, []), fn(acc, seg) {
           let #(c, segs) = acc
           let #(expression, options) = seg
-          let #(c, options, typ) =
-            list.fold(options, #(c, [], None), fn(acc, option) {
+          use #(c, options, typ) <- result.try(
+            list.try_fold(options, #(c, [], None), fn(acc, option) {
               let #(c, options, typ) = acc
               // TODO handle all options
-              let #(c, option, option_type) = case option {
-                g.BigOption -> #(c, BigOption, None)
-                g.BytesOption -> #(c, BytesOption, Some(bit_array_type))
-                g.BitsOption -> #(c, BitsOption, Some(bit_array_type))
-                g.FloatOption -> #(c, FloatOption, Some(float_type))
-                g.IntOption -> #(c, IntOption, Some(int_type))
-                g.LittleOption -> #(c, LittleOption, None)
-                g.NativeOption -> #(c, NativeOption, None)
-                g.SignedOption -> #(c, SignedOption, None)
-                g.SizeOption(size) -> #(c, SizeOption(size), None)
+              use #(c, option, option_type) <- result.try(case option {
+                g.BigOption -> Ok(#(c, BigOption, None))
+                g.BytesOption -> Ok(#(c, BytesOption, Some(bit_array_type)))
+                g.BitsOption -> Ok(#(c, BitsOption, Some(bit_array_type)))
+                g.FloatOption -> Ok(#(c, FloatOption, Some(float_type)))
+                g.IntOption -> Ok(#(c, IntOption, Some(int_type)))
+                g.LittleOption -> Ok(#(c, LittleOption, None))
+                g.NativeOption -> Ok(#(c, NativeOption, None))
+                g.SignedOption -> Ok(#(c, SignedOption, None))
+                g.SizeOption(size) -> Ok(#(c, SizeOption(size), None))
                 g.SizeValueOption(e) -> {
-                  let assert Ok(#(c, e)) = infer_expression(c, n, e)
-                  let c = unify(c, e.typ, int_type)
+                  use #(c, e) <- result.try(infer_expression(c, n, e))
+                  use c <- result.map(unify(c, e.typ, int_type))
                   #(c, SizeValueOption(e), None)
                 }
-                g.UnitOption(unit) -> #(c, UnitOption(unit), None)
-                g.UnsignedOption -> #(c, UnsignedOption, None)
-                g.Utf16CodepointOption -> #(
-                  c,
-                  Utf16CodepointOption,
-                  Some(codepoint_type),
-                )
-                g.Utf16Option -> #(c, Utf16Option, Some(string_type))
-                g.Utf32CodepointOption -> #(
-                  c,
-                  Utf32CodepointOption,
-                  Some(codepoint_type),
-                )
-                g.Utf32Option -> #(c, Utf32Option, Some(string_type))
-                g.Utf8CodepointOption -> #(
-                  c,
-                  Utf8CodepointOption,
-                  Some(codepoint_type),
-                )
-                g.Utf8Option -> {
-                  #(c, Utf8Option, Some(string_type))
-                }
-              }
-              let typ = case typ, option_type {
+                g.UnitOption(unit) -> Ok(#(c, UnitOption(unit), None))
+                g.UnsignedOption -> Ok(#(c, UnsignedOption, None))
+                g.Utf16CodepointOption ->
+                  Ok(#(c, Utf16CodepointOption, Some(codepoint_type)))
+                g.Utf16Option -> Ok(#(c, Utf16Option, Some(string_type)))
+                g.Utf32CodepointOption ->
+                  Ok(#(c, Utf32CodepointOption, Some(codepoint_type)))
+                g.Utf32Option -> Ok(#(c, Utf32Option, Some(string_type)))
+                g.Utf8CodepointOption ->
+                  Ok(#(c, Utf8CodepointOption, Some(codepoint_type)))
+                g.Utf8Option -> Ok({ #(c, Utf8Option, Some(string_type)) })
+              })
+              use typ <- result.map(case typ, option_type {
                 Some(_), Some(_) ->
-                  panic as error(c, "segment type was set multiple times")
-                Some(_), None -> typ
-                _, _ -> option_type
-              }
+                  Error(BitPatternSegmentTypeOverSpecified(location(c)))
+                Some(_), None -> Ok(typ)
+                _, _ -> Ok(option_type)
+              })
               #(c, [option, ..options], typ)
-            })
+            }),
+          )
           let options = list.reverse(options)
           let typ = case typ {
             Some(typ) -> typ
             None -> int_type
           }
-          use #(c, expression) <- try(infer_expression(c, n, expression))
-          let c = unify(c, expression.typ, typ)
-          Ok(#(c, [#(expression, options), ..segs]))
+          use #(c, expression) <- result.try(infer_expression(c, n, expression))
+          use c <- result.map(unify(c, expression.typ, typ))
+          #(c, [#(expression, options), ..segs])
         }),
       )
       let segs = list.reverse(segs)
       Ok(#(c, BitString(bit_array_type, segs)))
     }
     g.Case(_, subjects, clauses) -> {
-      use #(c, subjects) <- try(
+      use #(c, subjects) <- result.try(
         list.try_fold(subjects, #(c, []), fn(acc, sub) {
           let #(c, subjects) = acc
-          use #(c, sub) <- try(infer_expression(c, n, sub))
+          use #(c, sub) <- result.try(infer_expression(c, n, sub))
           Ok(#(c, [sub, ..subjects]))
         }),
       )
@@ -2087,28 +2201,39 @@ fn infer_expression(
       // all of the branches should unify with the case type
       let #(c, typ) = new_type_var_ref(c)
 
-      use #(c, clauses) <- try(
+      use #(c, clauses) <- result.try(
         list.try_fold(clauses, #(c, []), fn(acc, clause) {
           let #(c, clauses) = acc
 
           // patterns is a List(List(Pattern))
           // the inner list has a pattern to match each subject
           // the outer list has alternatives that have the same body
-          let #(c, n, patterns) =
-            list.fold_right(clause.patterns, #(c, n, []), fn(acc, pat) {
+          use #(c, n, patterns) <- result.try(
+            list.try_fold(clause.patterns, #(c, n, []), fn(acc, pat) {
               let #(c, n, pats) = acc
 
               // each pattern has a corresponding subject
-              let assert Ok(sub_pats) = list.strict_zip(subjects, pat)
-              let #(c, n, pat) =
-                list.fold_right(sub_pats, #(c, n, []), fn(acc, sub_pat) {
+              use sub_pats <- result.try(
+                list.strict_zip(subjects, pat)
+                |> result.map_error(fn(_) {
+                  WrongArity(
+                    location(c),
+                    list.length(subjects),
+                    list.length(pat),
+                  )
+                }),
+              )
+              use #(c, n, pat) <- result.map(
+                list.try_fold(sub_pats, #(c, n, []), fn(acc, sub_pat) {
                   let #(c, n, pats) = acc
                   let #(sub, pat) = sub_pat
-                  let #(c, n, pat) = infer_pattern(c, n, pat)
+                  use #(c, n, pat) <- result.try(infer_pattern(c, n, pat))
                   // the pattern type should match the corresponding subject
-                  let c = unify(c, pat.typ, sub.typ)
+                  use c <- result.map(unify(c, pat.typ, sub.typ))
                   #(c, n, [pat, ..pats])
-                })
+                }),
+              )
+              let pat = list.reverse(pat)
 
               // all alternatives must bind the same names
               // TODO check the alternative patterns bind the same names
@@ -2117,25 +2242,27 @@ fn infer_expression(
               // instead of a new env
 
               #(c, n, [pat, ..pats])
-            })
+            }),
+          )
+          let patterns = list.reverse(patterns)
 
           // if the guard exists ensure it has a boolean result
-          use #(c, guard) <- try(case clause.guard {
+          use #(c, guard) <- result.try(case clause.guard {
             Some(guard) -> {
-              use #(c, guard) <- try(infer_expression(c, n, guard))
-              let c = unify(c, guard.typ, bool_type)
-              Ok(#(c, Some(guard)))
+              use #(c, guard) <- result.try(infer_expression(c, n, guard))
+              use c <- result.map(unify(c, guard.typ, bool_type))
+              #(c, Some(guard))
             }
             None -> Ok(#(c, None))
           })
 
-          use #(c, body) <- try(infer_expression(c, n, clause.body))
+          use #(c, body) <- result.try(infer_expression(c, n, clause.body))
 
           // the body should unify with the case type
-          let c = unify(c, typ, body.typ)
+          use c <- result.map(unify(c, typ, body.typ))
 
           let santa = Clause(patterns:, guard:, body:)
-          Ok(#(c, [santa, ..clauses]))
+          #(c, [santa, ..clauses])
         }),
       )
       let clauses = list.reverse(clauses)
@@ -2190,7 +2317,7 @@ fn infer_expression(
         )
 
         // Functions
-        g.Pipe -> panic as error(c, "pipe should be handeled elsewhere")
+        g.Pipe -> panic as "pipe should be handeled elsewhere"
 
         // Maths
         g.AddInt | g.SubInt | g.MultInt | g.DivInt | g.RemainderInt -> #(
@@ -2210,19 +2337,23 @@ fn infer_expression(
         )
       }
 
-      use #(c, left) <- try(infer_expression(c, n, left))
-      use #(c, right) <- try(infer_expression(c, n, right))
+      use #(c, left) <- result.try(infer_expression(c, n, left))
+      use #(c, right) <- result.try(infer_expression(c, n, right))
 
       // unify the function type with the types of args
       let #(c, typ) = new_type_var_ref(c)
-      let c = unify(c, fun_typ, FunctionType([left.typ, right.typ], typ))
+      use c <- result.map(unify(
+        c,
+        fun_typ,
+        FunctionType([left.typ, right.typ], typ),
+      ))
 
-      Ok(#(c, BinaryOperator(typ, name, left, right)))
+      #(c, BinaryOperator(typ, name, left, right))
     }
     g.Echo(_, expression) -> {
       case expression {
         Some(expr) -> {
-          use #(c, expr) <- try(infer_expression(c, n, expr))
+          use #(c, expr) <- result.try(infer_expression(c, n, expr))
           Ok(#(c, Echo(expr.typ, Some(expr))))
         }
         None -> {
@@ -2233,13 +2364,28 @@ fn infer_expression(
   }
 }
 
-fn tuple_index_type(c: Context, elements: List(Type), index: Int) {
-  // if the index is 0, return the first element
-  // otherwise skip the first element and decrement the index
-  case index, elements {
-    0, [x, ..] -> x
-    _, [_, ..xs] -> tuple_index_type(c, xs, index - 1)
-    _, _ -> panic as error(c, "tuple index out of bounds")
+fn resolve_custom_type(c: Context, module: String, type_name: String) {
+  use mod <- result.try(get_module(c, module))
+  list.find(mod.custom_types, fn(x) { x.definition.name == type_name })
+  |> result.replace_error(UnresolvedType(location(c), type_name))
+}
+
+fn tuple_index_type(
+  c: Context,
+  elements: List(Type),
+  index: Int,
+) -> Result(Type, Error) {
+  index_into_list(elements, index)
+  |> result.map_error(fn(_) {
+    TupleIndexOutOfBounds(location(c), list.length(elements), index)
+  })
+}
+
+fn index_into_list(list: List(a), index: Int) -> Result(a, Nil) {
+  case index, list {
+    0, [item, ..] -> Ok(item)
+    _, [_, ..rest] -> index_into_list(rest, index - 1)
+    _, _ -> Error(Nil)
   }
 }
 
@@ -2250,13 +2396,16 @@ fn infer_fn(
   return: Option(g.Type),
   body: List(g.Statement),
   hint: Option(Type),
-) -> Result(#(Context, Expression), String) {
+) -> Result(#(Context, Expression), Error) {
   // map parameters to FunctionParameter for code reuse
   let parameters =
     list.map(parameters, fn(p) { g.FunctionParameter(None, p.name, p.type_) })
 
-  let #(c, parameters, return) =
-    infer_function_parameters(c, parameters, return)
+  use #(c, parameters, return) <- result.try(infer_function_parameters(
+    c,
+    parameters,
+    return,
+  ))
 
   let #(c, return_type) = case return {
     Some(x) -> #(c, x.typ)
@@ -2268,10 +2417,10 @@ fn infer_fn(
   let typ = FunctionType(parameter_types, return_type)
 
   // unify parameters with type hint
-  let c = case hint {
+  use c <- result.try(case hint {
     Some(hint) -> unify(c, typ, hint)
-    None -> c
-  }
+    None -> Ok(c)
+  })
 
   // put params into local env
   let n =
@@ -2283,22 +2432,23 @@ fn infer_fn(
     })
 
   // infer body
-  let #(c, body) = infer_body(c, n, body)
+  use #(c, body) <- result.try(infer_body(c, n, body))
 
   // unify the return type with the last statement
-  let c = case list.last(body) {
+  use c <- result.map(case list.last(body) {
     Ok(statement) -> unify(c, return_type, statement.typ)
-    Error(_) -> c
-  }
+    Error(_) -> Ok(c)
+  })
 
   let fun = Fn(typ:, parameters:, return:, body:)
-  Ok(#(c, fun))
+  #(c, fun)
 }
 
 type PolyEnv =
   Dict(Int, Type)
 
 fn get_type_var(c: Context, var: Ref) {
+  // assert: this function is only called for previously created type variables
   let assert Ok(x) = dict.get(c.type_vars, var)
   x
 }
@@ -2355,73 +2505,52 @@ fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
   }
 }
 
-fn unify(c: Context, a: Type, b: Type) -> Context {
+fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
   let a = resolve_type(c, a)
   let b = resolve_type(c, b)
   case a, b {
     VariableType(ref), b ->
       case a == b {
-        True -> c
+        True -> Ok(c)
         False -> {
+          // assert: since a resolves to VariableType(ref), ref is Unbound
           let assert Unbound(aid) = get_type_var(c, ref)
           let #(c, occurs) = occurs(c, aid, b)
           case occurs {
-            True -> {
-              panic as error(c, "recursive type")
-            }
-            False -> {
-              set_type_var(c, ref, Bound(b))
-            }
+            True -> Error(RecursiveTypeError(location(c)))
+            False -> Ok(set_type_var(c, ref, Bound(b)))
           }
         }
       }
     a, VariableType(_) -> unify(c, b, a)
     NamedType(aname, amodule, _), NamedType(bname, bmodule, _)
       if aname != bname || amodule != bmodule
-    -> {
-      panic as error(
-        c,
-        "failed to unify types \n\n"
-          <> string.inspect(a)
-          <> "\n"
-          <> string.inspect(b),
-      )
-    }
-    NamedType(_, _, aargs), NamedType(_, _, bargs) -> {
-      case list.strict_zip(aargs, bargs) {
-        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
-        Error(_) -> {
-          panic as error(c, "incorrect number of type arguments")
-        }
-      }
-    }
+    -> Error(IncompatibleTypes(location(c), a, b))
+    NamedType(_, _, aargs), NamedType(_, _, bargs) ->
+      unify_arguments(c, aargs, bargs)
     FunctionType(aargs, aret), FunctionType(bargs, bret) -> {
-      let c = unify(c, aret, bret)
-      case list.strict_zip(aargs, bargs) {
-        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
-        Error(_) -> {
-          panic as error(c, "incorrect number of function arguments")
-        }
-      }
+      use c <- result.try(unify(c, aret, bret))
+      unify_arguments(c, aargs, bargs)
     }
     TupleType(aelements), TupleType(belements) -> {
-      case list.strict_zip(aelements, belements) {
-        Ok(args) -> list.fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
-        Error(_) -> {
-          panic as error(c, "incorrect tuple size")
-        }
-      }
+      unify_arguments(c, aelements, belements)
     }
-    _, _ -> {
-      panic as error(
-        c,
-        "failed to unify types \n\n"
-          <> string.inspect(a)
-          <> "\n"
-          <> string.inspect(b),
-      )
-    }
+    _, _ -> Error(IncompatibleTypes(location(c), a, b))
   }
+}
+
+fn unify_arguments(
+  c: Context,
+  aargs: List(Type),
+  bargs: List(Type),
+) -> Result(Context, Error) {
+  use args <- result.try(
+    list.strict_zip(aargs, bargs)
+    |> result.map_error(fn(_) {
+      WrongArity(location(c), list.length(aargs), list.length(bargs))
+    }),
+  )
+  list.try_fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
 }
 
 fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
@@ -2457,11 +2586,10 @@ fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
 }
 
 /// follow any references to get the real type
-pub fn resolve_type(c: Context, typ: Type) {
+pub fn resolve_type(c: Context, typ: Type) -> Type {
   case typ {
     VariableType(x) -> {
-      let assert Ok(x) = dict.get(c.type_vars, x)
-      case x {
+      case get_type_var(c, x) {
         Bound(x) -> resolve_type(c, x)
         Unbound(..) -> typ
       }
@@ -2475,8 +2603,7 @@ pub fn resolve_type(c: Context, typ: Type) {
 pub fn resolve_type_deep(c: Context, typ: Type) {
   case typ {
     VariableType(x) -> {
-      let assert Ok(x) = dict.get(c.type_vars, x)
-      case x {
+      case get_type_var(c, x) {
         Bound(x) -> resolve_type_deep(c, x)
         Unbound(..) -> typ
       }
@@ -2491,4 +2618,8 @@ pub fn resolve_type_deep(c: Context, typ: Type) {
     TupleType(elements) ->
       TupleType(list.map(elements, resolve_type_deep(c, _)))
   }
+}
+
+fn location(c: Context) {
+  Location(c.current_module, c.current_definition, c.current_span)
 }

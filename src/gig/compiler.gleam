@@ -5,6 +5,7 @@ import gig/headers
 import gig/mono
 import gig/patch
 import gig/typed_ast
+import gleam/bit_array
 import gleam/dict
 import gleam/set
 import listx
@@ -107,7 +108,8 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
   let assert Ok(source_text) = read_source(sources, "gleam")
   let assert Ok(prelude) = glance.module(source_text)
   let typed = typed_ast.new_context()
-  let typed = typed_ast.infer_module(typed, prelude, "gleam", source_text)
+  let assert Ok(typed) =
+    typed_ast.infer_module(typed, prelude, "gleam", source_text)
 
   // parse and typecheck input (recursively)
   let #(typed, _done) = infer_file(sources, typed, ["gleam"], module_id)
@@ -310,9 +312,11 @@ fn infer_file(
 
   // infer this file
   io.println("Check " <> source)
-  let c = typed_ast.infer_module(c, module, module_id, source_text)
-
-  #(c, done)
+  case typed_ast.infer_module(c, module, module_id, source_text) {
+    Ok(c) -> #(c, done)
+    Error(err) ->
+      panic as error(source_text, err.location, typed_ast.inspect_error(err))
+  }
 }
 
 fn parse_module(file: String, input: String) {
@@ -335,4 +339,52 @@ fn parse_module(file: String, input: String) {
           )
       }
   }
+}
+
+fn error(
+  source: String,
+  location: typed_ast.Location,
+  message: String,
+) -> String {
+  let start = location.span.start
+  let end = location.span.end
+
+  let context_before = case start {
+    start if start < 100 -> string.slice(source, 0, start)
+    start -> string.slice(source, start - 100, 100)
+  }
+  let context_before = string.split(context_before, "\n")
+  let context_before =
+    context_before
+    |> list.drop(list.length(context_before) - 3)
+    |> list.drop_while(fn(x) { x == "" })
+    |> string.join("\n")
+
+  let context_after =
+    source
+    |> string.slice(end, 100)
+    |> string.split("\n")
+    |> list.take(3)
+    |> string.join("\n")
+
+  let error_part = string.slice(source, start, end - start)
+
+  // TODO this unicode escape sequence is not valid in c, needs compilation
+  // let escape = "\u{001b}["
+  let assert Ok(escape) = bit_array.to_string(<<27, 91>>)
+  let clear = escape <> "0m"
+  let red_underline = escape <> "4;31m"
+
+  "Error: "
+  <> message
+  <> "\n\nat: "
+  <> location.module
+  <> "."
+  <> location.definition
+  <> "\n\n"
+  <> context_before
+  <> red_underline
+  <> error_part
+  <> clear
+  <> context_after
 }
