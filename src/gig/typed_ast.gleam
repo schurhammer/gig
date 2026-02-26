@@ -367,26 +367,13 @@ pub type LocalEnv =
 pub type TypeEnv =
   Dict(String, Type)
 
-pub fn new_context() -> Context {
-  Context(
-    current_module: "",
-    current_definition: "",
-    current_span: Span(0, 0),
-    type_vars: dict.new(),
-    modules: dict.new(),
-    type_uid: 0,
-    temp_uid: 1,
-    module_env: dict.new(),
-    type_env: dict.new(),
-    value_env: dict.new(),
-  )
-}
-
+/// Run type inference on a `glance.Module`.
+/// Interfaces of all modules this module imports must be provided.
 pub fn infer_module(
   modules: Dict(String, Module),
   module: g.Module,
   module_name: String,
-) -> Result(Context, Error) {
+) -> Result(Module, Error) {
   let modules =
     dict.insert(
       modules,
@@ -700,28 +687,45 @@ pub fn infer_module(
   )
 
   // Fully resolve all type references
-  update_module(c, fn(mod) {
-    let type_aliases =
-      map_definitions(mod.type_aliases, fn(type_alias) {
+  let mod = get_current_module(c)
+  let type_aliases =
+    list.map(
+      mod.type_aliases,
+      map_definition(_, fn(type_alias) {
         TypeAlias(..type_alias, typ: substitute_poly(c, type_alias.typ))
-      })
-    let custom_types =
-      map_definitions(mod.custom_types, substitute_custom_type(c, _))
-    let constants =
-      map_definitions(mod.constants, fn(constant) {
+      }),
+    )
+  let custom_types =
+    list.map(mod.custom_types, map_definition(_, substitute_custom_type(c, _)))
+  let constants =
+    list.map(
+      mod.constants,
+      map_definition(_, fn(constant) {
         ConstantDefinition(
           ..constant,
           typ: substitute_poly(c, constant.typ),
           value: substitute_expression(c, constant.value),
         )
-      })
-    let functions = map_definitions(mod.functions, substitute_function(c, _))
-    Module(..mod, type_aliases:, custom_types:, constants:, functions:)
-  })
+      }),
+    )
+  let functions =
+    list.map(mod.functions, map_definition(_, substitute_function(c, _)))
+  Module(..mod, type_aliases:, custom_types:, constants:, functions:)
 }
 
-fn map_definitions(l: List(Definition(a)), f: fn(a) -> b) -> List(Definition(b)) {
-  list.map(l, fn(def) { Definition(..def, definition: f(def.definition)) })
+fn new_context() -> Context {
+  Context(
+    current_module: "",
+    current_definition: "",
+    current_span: Span(0, 0),
+    type_vars: dict.new(),
+    modules: dict.new(),
+    type_uid: 0,
+    temp_uid: 1,
+    module_env: dict.new(),
+    type_env: dict.new(),
+    value_env: dict.new(),
+  )
 }
 
 /// Returns a human-readable string description of the error.
@@ -3088,6 +3092,10 @@ fn substitute_type(c: Context, typ: Type) {
 
 fn map_field(field: Field(a), func: fn(a) -> b) -> Field(b) {
   Field(..field, item: func(field.item))
+}
+
+fn map_definition(def: Definition(a), func: fn(a) -> b) -> Definition(b) {
+  Definition(..def, definition: func(def.definition))
 }
 
 fn location(c: Context) {

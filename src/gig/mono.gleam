@@ -87,7 +87,7 @@ pub type Exp {
   Panic(typ: Type, value: Exp)
 }
 
-pub fn init_context(in: t.Context) -> Context {
+pub fn init_context(in: t.Module) -> Context {
   let in_types =
     list.fold(in.types, dict.new(), fn(d, i) { dict.insert(d, i.id, i) })
   let in_functions =
@@ -111,7 +111,7 @@ pub fn init_context(in: t.Context) -> Context {
   )
 }
 
-pub fn run(in: t.Context, main_name: String) {
+pub fn run(in: t.Module, main_name: String) {
   let c = init_context(in)
 
   let main = case dict.get(c.in_functions, main_name) {

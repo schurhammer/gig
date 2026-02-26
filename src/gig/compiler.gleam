@@ -111,9 +111,11 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
   let assert Ok(typed) = typed_ast.infer_module(modules, prelude, "gleam")
 
   // parse and typecheck input (recursively)
-  let #(typed, _done) = infer_file(sources, typed, ["gleam"], module_id)
+  let typed =
+    infer_file(sources, dict.from_list([#("gleam", typed)]), module_id)
 
-  let core = core.lower_context(typed)
+  // TODO
+  let core = core.lower_modules(typed)
 
   case options.headers {
     True -> generate_headers_only(core, sources)
@@ -122,7 +124,7 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
 }
 
 fn generate_headers_only(
-  core: core.Context,
+  core: core.Module,
   sources: dict.Dict(String, String),
 ) -> String {
   headers.module_headers(core)
@@ -149,7 +151,7 @@ fn generate_headers_only(
 }
 
 fn compile_to_binary(
-  core: core.Context,
+  core: core.Module,
   sources: dict.Dict(String, String),
   module_id: String,
   target_path: String,
@@ -276,12 +278,9 @@ fn offset_to_line_col(text: String, offset: Int) {
 
 fn infer_file(
   sources: dict.Dict(String, String),
-  c: typed_ast.Context,
-  done: List(String),
+  modules: dict.Dict(String, typed_ast.Module),
   module_id: String,
-) -> #(typed_ast.Context, List(String)) {
-  // add module to "done" list
-  let done = [module_id, ..done]
+) -> dict.Dict(String, typed_ast.Module) {
   let assert Ok(source) = dict.get(sources, module_id)
 
   io.println("Parse " <> source)
@@ -299,20 +298,19 @@ fn infer_file(
   }
 
   // infer imports
-  let #(c, done) =
-    list.fold(module.imports, #(c, done), fn(acc, i) {
-      let #(c, done) = acc
+  let modules =
+    list.fold(module.imports, modules, fn(modules, i) {
       let module_id = i.definition.module
-      case list.contains(done, module_id) {
-        True -> #(c, done)
-        False -> infer_file(sources, c, done, module_id)
+      case dict.has_key(modules, module_id) {
+        True -> modules
+        False -> infer_file(sources, modules, module_id)
       }
     })
 
   // infer this file
   io.println("Check " <> source)
-  case typed_ast.infer_module(c.modules, module, module_id) {
-    Ok(c) -> #(c, done)
+  case typed_ast.infer_module(modules, module, module_id) {
+    Ok(module) -> dict.insert(modules, module_id, module)
     Error(err) ->
       panic as error(source_text, err.location, typed_ast.inspect_error(err))
   }

@@ -88,23 +88,32 @@ pub type External {
   )
 }
 
-pub type Context {
-  Context(
+pub type Module {
+  Module(
     types: List(CustomType),
     functions: List(Function),
     externals: List(External),
   )
 }
 
-pub fn lower_context(c: t.Context) {
-  let acc = Context(types: [], functions: [], externals: [])
-  dict.values(c.modules)
-  |> list.sort(fn(a, b) { string.compare(a.name, b.name) })
-  |> list.fold(acc, fn(acc, module) { lower_module(c, acc, module) })
+type Context {
+  Context(
+    module: String,
+    definition: String,
+    // TODO: should only need module interfaces.
+    modules: dict.Dict(String, t.Module),
+  )
 }
 
-fn lower_module(c: t.Context, acc: Context, module: t.Module) {
-  let c = t.Context(..c, current_module: module.name)
+pub fn lower_modules(modules: dict.Dict(String, t.Module)) {
+  let acc = Module(types: [], functions: [], externals: [])
+  dict.values(modules)
+  |> list.sort(fn(a, b) { string.compare(a.name, b.name) })
+  |> list.fold(acc, fn(acc, module) { lower_module(acc, modules, module) })
+}
+
+fn lower_module(acc: Module, modules, module: t.Module) {
+  let c = Context(module: module.name, definition: "", modules:)
 
   // TODO detect what tuples are actually used
   let acc =
@@ -118,7 +127,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
         [] -> acc
         _ -> {
           let custom = lower_custom_type(c, custom.definition)
-          Context(..acc, types: [custom, ..acc.types])
+          Module(..acc, types: [custom, ..acc.types])
         }
       }
     })
@@ -154,7 +163,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
           ) = external
           let fun = fun.definition
           let typ = map_poly(fun.typ)
-          let module = c.current_module
+          let module = c.module
           let name = fun.name
           let internal_name = get_id(module, name)
           let builtin = list.any(attrs, fn(x) { x.name == "builtin" })
@@ -168,20 +177,20 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
               module:,
               builtin:,
             )
-          Context(..acc, externals: [fun, ..acc.externals])
+          Module(..acc, externals: [fun, ..acc.externals])
         }
         Error(_) -> {
           let fun = lower_function(c, fun)
-          Context(..acc, functions: [fun, ..acc.functions])
+          Module(..acc, functions: [fun, ..acc.functions])
         }
       }
     })
   acc
 }
 
-fn lower_custom_type(c: t.Context, custom: t.CustomType) {
+fn lower_custom_type(c: Context, custom: t.CustomType) {
   let typ = map_poly(custom.typ)
-  let module = c.current_module
+  let module = c.module
   let name = custom.name
   let id = get_id(module, name)
   let variants =
@@ -201,11 +210,11 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
   CustomType(typ, id, name, variants)
 }
 
-fn lower_function(c: t.Context, def: t.Definition(t.FunctionDefinition)) {
-  let c = t.Context(..c, current_definition: def.definition.name)
+fn lower_function(c: Context, def: t.Definition(t.FunctionDefinition)) {
+  let c = Context(..c, definition: def.definition.name)
   let function = def.definition
   let typ = map_poly(function.typ)
-  let module = c.current_module
+  let module = c.module
   let name = function.name
   let id = get_id(module, name)
   let parameters = list.map(function.parameters, lower_parameter)
@@ -226,7 +235,7 @@ fn lower_parameter(parameter: t.FunctionParameter) {
 }
 
 pub fn register_variant_functions(
-  c: Context,
+  c: Module,
   module_name: String,
   variant: Variant,
 ) {
@@ -242,10 +251,10 @@ pub fn register_variant_functions(
       module: module_name,
       builtin: True,
     )
-  Context(..c, externals: [fun, ..c.externals])
+  Module(..c, externals: [fun, ..c.externals])
 }
 
-fn lower_body(c: t.Context, body: List(t.Statement)) {
+fn lower_body(c: Context, body: List(t.Statement)) {
   case body {
     [] -> lower_expression(c, t.Todo(t.nil_type, None))
     [statement] ->
@@ -318,7 +327,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
 }
 
 fn check_assertions(
-  c: t.Context,
+  c: Context,
   pattern: t.Pattern,
   subject: t.Expression,
   value: Exp,
@@ -1005,7 +1014,7 @@ fn add_exp(first: Exp, second: Exp) {
 }
 
 fn lower_pattern_match(
-  c: t.Context,
+  c: Context,
   pattern: t.Pattern,
   subject: t.Expression,
 ) -> Exp {
@@ -1159,8 +1168,8 @@ fn lower_pattern_match(
           let assert NamedType(custom, _) = subject.typ
           let assert Ok(mod) = dict.get(c.modules, module)
           let assert Ok(t.Definition(_, custom)) =
-            list.find(mod.custom_types, fn(c) {
-              get_id(module, c.definition.name) == custom
+            list.find(mod.custom_types, fn(custom_type) {
+              get_id(module, custom_type.definition.name) == custom
             })
           let variant = get_id(module, constructor)
 
@@ -1176,7 +1185,7 @@ fn lower_pattern_match(
   }
 }
 
-fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
+fn lower_expression(c: Context, exp: t.Expression) -> Exp {
   case exp {
     t.Int(typ, value) -> Literal(map_type(typ), Int(value))
     t.Float(typ, value) -> Literal(map_type(typ), Float(value))
@@ -1564,8 +1573,8 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
   }
 }
 
-fn current_location(c: t.Context) {
-  c.current_module <> "." <> c.current_definition
+fn current_location(c: Context) {
+  c.module <> "." <> c.definition
 }
 
 fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
@@ -1625,7 +1634,7 @@ fn map_poly(typ: t.Poly) {
   Poly(typ.vars, map_type(typ.typ))
 }
 
-fn register_tuple(c: Context, size: Int) {
+fn register_tuple(c: Module, size: Int) {
   let id = gen_names.get_tuple_id(size)
   let vars = list.map(listx.sane_range(size), t.TypeVarId("", _))
   let element_types = list.map(vars, fn(i) { Unbound(i) })
@@ -1640,7 +1649,7 @@ fn register_tuple(c: Context, size: Int) {
   let variant = Variant(constructor_typ, id, "#", element_fields)
   let custom = CustomType(custom_typ, id, "#", [variant])
 
-  let c = Context(..c, types: [custom, ..c.types])
+  let c = Module(..c, types: [custom, ..c.types])
   register_variant_functions(c, t.builtin, variant)
 }
 
