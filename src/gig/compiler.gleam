@@ -315,7 +315,7 @@ fn infer_file(
   case typed_ast.infer_module(c, module, module_id, source_text) {
     Ok(c) -> #(c, done)
     Error(err) ->
-      panic as error(source, err.location, typed_ast.inspect_error(err))
+      panic as error(source_text, err.location, typed_ast.inspect_error(err))
   }
 }
 
