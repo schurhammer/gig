@@ -351,7 +351,6 @@ pub type QualifiedName {
 
 pub type Context {
   Context(
-    module_source: String,
     current_module: String,
     current_definition: String,
     current_span: Span,
@@ -370,7 +369,6 @@ pub type TypeEnv =
 
 pub fn new_context() -> Context {
   Context(
-    module_source: "",
     current_module: "",
     current_definition: "",
     current_span: Span(0, 0),
@@ -385,7 +383,6 @@ pub fn infer_module(
   c: Context,
   module: g.Module,
   module_name: String,
-  module_source: String,
 ) -> Result(Context, Error) {
   let modules =
     dict.insert(
@@ -404,7 +401,7 @@ pub fn infer_module(
       ),
     )
 
-  let c = Context(..c, modules:, current_module: module_name, module_source:)
+  let c = Context(..c, modules:, current_module: module_name)
 
   // handle module imports
   use c <- result.try(
