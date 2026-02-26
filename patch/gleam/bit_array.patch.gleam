@@ -7,7 +7,7 @@ fn unsafe_to_string(a: BitArray) -> String {
 }
 
 @external(c, "", "gleam_bit_array_from_string")
-fn from_string(x: String) -> BitArray
+pub fn from_string(x: String) -> BitArray
 
 fn is_utf8_loop(bits: BitArray) -> Bool {
   case bits {
