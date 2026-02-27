@@ -2704,26 +2704,6 @@ pub fn resolve_type(c: Context, typ: Type) -> Type {
   }
 }
 
-pub fn resolve_type_deep(c: Context, typ: Type) {
-  case typ {
-    VariableType(x) -> {
-      case get_type_var(c, x) {
-        Bound(x) -> resolve_type_deep(c, x)
-        Unbound(..) -> typ
-      }
-    }
-    NamedType(name, mod, args) ->
-      NamedType(name, mod, list.map(args, resolve_type_deep(c, _)))
-    FunctionType(args, ret) ->
-      FunctionType(
-        list.map(args, resolve_type_deep(c, _)),
-        resolve_type_deep(c, ret),
-      )
-    TupleType(elements) ->
-      TupleType(list.map(elements, resolve_type_deep(c, _)))
-  }
-}
-
 fn substitute_custom_type(c: Context, custom_type: CustomType) {
   // TODO: do we need to substitute type annotations?
   CustomType(
@@ -3049,9 +3029,7 @@ fn substitute_type(c: Context, typ: Type) {
       TupleType(elements:)
     }
     VariableType(ref) -> {
-      let assert Ok(x) = dict.get(c.type_vars, ref)
-        as { "Not found " <> string.inspect(ref) }
-      case x {
+      case get_type_var(c, ref) {
         Bound(x) -> substitute_type(c, x)
         Unbound -> VariableType(ref)
       }
