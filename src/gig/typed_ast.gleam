@@ -29,13 +29,12 @@ pub const string_type = NamedType("String", builtin, [])
 pub const bit_array_type = NamedType("BitArray", builtin, [])
 
 pub type TypeVarId {
-  TypeVarId(module_name: String, id: Int)
+  TypeVarId(id: Int)
 }
 
-// TODO do we need unbound? what if unbound is just a missing key in the map
 pub type TypeVar {
   Bound(Type)
-  Unbound(TypeVarId)
+  Unbound
 }
 
 pub type Definition(definition) {
@@ -388,42 +387,7 @@ pub fn infer_module(
       ),
     )
 
-  // Register type variables for unbound types in other modules
-  let type_vars =
-    list.flat_map(dict.values(modules), fn(module) {
-      let from_constants =
-        list.flat_map(module.constants, fn(constant) {
-          constant.definition.typ.vars
-        })
-      let from_functions =
-        list.flat_map(module.functions, fn(function) {
-          function.definition.typ.vars
-        })
-      let from_type_aliases =
-        list.flat_map(module.type_aliases, fn(type_alias) {
-          type_alias.definition.typ.vars
-        })
-      let from_custom_types =
-        list.flat_map(module.custom_types, fn(custom_type) {
-          custom_type.definition.typ.vars
-          |> list.append(
-            list.flat_map(custom_type.definition.variants, fn(variant) {
-              variant.typ.vars
-            }),
-          )
-        })
-      list.flatten([
-        from_constants,
-        from_functions,
-        from_type_aliases,
-        from_custom_types,
-      ])
-    })
-    |> list.map(fn(var_id) { #(var_id, Unbound(var_id)) })
-    |> dict.from_list
-
-  let c =
-    Context(..new_context(), modules:, current_module: module_name, type_vars:)
+  let c = Context(..new_context(), modules:, current_module: module_name)
 
   // handle module imports
   use c <- result.try(
@@ -781,8 +745,7 @@ fn generalise(c: Context, typ: Type) {
 }
 
 fn type_var_id_compare(a: TypeVarId, b: TypeVarId) -> order.Order {
-  string.compare(a.module_name, b.module_name)
-  |> order.break_tie(int.compare(a.id, b.id))
+  int.compare(a.id, b.id)
 }
 
 fn get_current_module(c: Context) -> Module {
@@ -1356,7 +1319,7 @@ fn resolve_type_name(
   }
 }
 
-/// Resolve a type name from a possibly aliased module 
+/// Resolve a type name from a possibly aliased module
 fn resolve_aliased_type_name(
   c: Context,
   module: String,
@@ -1431,8 +1394,8 @@ fn new_temp_var(c: Context) -> #(Context, String) {
 }
 
 fn new_type_var_ref(c: Context) {
-  let ref = TypeVarId(c.current_module, c.type_uid)
-  let type_vars = dict.insert(c.type_vars, ref, Unbound(ref))
+  let ref = TypeVarId(c.type_uid)
+  let type_vars = dict.insert(c.type_vars, ref, Unbound)
   let typ = VariableType(ref)
   #(Context(..c, type_vars: type_vars, type_uid: c.type_uid + 1), typ)
 }
@@ -2604,7 +2567,7 @@ fn find_tvs(c: Context, t: Type) -> List(TypeVarId) {
     VariableType(ref) ->
       case get_type_var(c, ref) {
         Bound(x) -> find_tvs(c, x)
-        Unbound(x) -> [x]
+        Unbound -> [ref]
       }
     NamedType(_, _, args) -> list.flat_map(args, find_tvs(c, _))
     FunctionType(args, ret) -> list.flat_map([ret, ..args], find_tvs(c, _))
@@ -2615,12 +2578,12 @@ fn find_tvs(c: Context, t: Type) -> List(TypeVarId) {
 fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
   case typ {
     VariableType(ref) ->
-      case get_type_var(c, ref) {
-        Bound(x) -> do_instantiate(c, n, x)
-        Unbound(x) ->
-          case dict.get(n, x) {
-            Ok(r) -> r
-            Error(_) -> typ
+      case dict.get(n, ref) {
+        Ok(r) -> r
+        Error(_) ->
+          case get_type_var(c, ref) {
+            Bound(x) -> do_instantiate(c, n, x)
+            Unbound -> typ
           }
       }
     NamedType(name, module, args) ->
@@ -2643,9 +2606,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
       case a == b {
         True -> Ok(c)
         False -> {
-          // assert: since a resolves to VariableType(ref), ref is Unbound
-          let assert Unbound(aid) = get_type_var(c, ref)
-          let #(c, occurs) = occurs(c, aid, b)
+          let #(c, occurs) = occurs(c, ref, b)
           case occurs {
             True -> Error(RecursiveTypeError(location(c)))
             False -> Ok(set_type_var(c, ref, Bound(b)))
@@ -2688,10 +2649,10 @@ fn occurs(c: Context, id: TypeVarId, in: Type) -> #(Context, Bool) {
     VariableType(ref) ->
       case get_type_var(c, ref) {
         Bound(t) -> occurs(c, id, t)
-        Unbound(i) -> {
+        Unbound -> {
           // TODO not sure if this "set" is needed
-          let c = set_type_var(c, ref, Unbound(i))
-          #(c, id == i)
+          let c = set_type_var(c, ref, Unbound)
+          #(c, id == ref)
         }
       }
     NamedType(_, _, args) ->
@@ -3084,7 +3045,7 @@ fn substitute_type(c: Context, typ: Type) {
         as { "Not found " <> string.inspect(ref) }
       case x {
         Bound(x) -> substitute_type(c, x)
-        Unbound(x) -> VariableType(x)
+        Unbound -> VariableType(ref)
       }
     }
   }

@@ -1636,7 +1636,7 @@ fn map_poly(typ: t.Poly) {
 
 fn register_tuple(c: Module, size: Int) {
   let id = gen_names.get_tuple_id(size)
-  let vars = list.map(listx.sane_range(size), t.TypeVarId("", _))
+  let vars = list.map(listx.sane_range(size), t.TypeVarId)
   let element_types = list.map(vars, fn(i) { Unbound(i) })
   let custom_typ = Poly(vars, NamedType(id, element_types))
   let constructor_typ = Poly(vars, FunctionType(element_types, custom_typ.typ))
