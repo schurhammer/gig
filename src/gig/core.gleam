@@ -1204,9 +1204,16 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
         }
       }
     }
-    t.Constant(value:, ..) -> {
+    t.Constant(module:, name:, ..) -> {
+      // TODO: in order for lowering to not require implementation details of
+      // other modules, inlining must happen later
+      let assert Ok(mod) = dict.get(c.modules, module)
+      let assert Ok(constant) =
+        list.find(mod.constants, fn(constant) {
+          constant.definition.name == name
+        })
       // inline the constant
-      lower_expression(c, value)
+      lower_expression(c, constant.definition.value)
     }
     t.NegateInt(typ, value) -> {
       let typ = map_type(typ)

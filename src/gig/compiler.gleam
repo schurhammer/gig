@@ -7,6 +7,7 @@ import gig/patch
 import gig/typed_ast
 import gleam/bit_array
 import gleam/dict
+import gleam/pair
 import gleam/set
 import listx
 
@@ -107,15 +108,17 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
   // process the prelude
   let assert Ok(source_text) = read_source(sources, "gleam")
   let assert Ok(prelude) = glance.module(source_text)
-  let modules = dict.new()
-  let assert Ok(typed) = typed_ast.infer_module(modules, prelude, "gleam")
+  let assert Ok(typed) = typed_ast.infer_module(dict.new(), prelude, "gleam")
 
   // parse and typecheck input (recursively)
   let typed =
-    infer_file(sources, dict.from_list([#("gleam", typed)]), module_id)
+    infer_file(
+      sources,
+      dict.from_list([#("gleam", #(typed, typed_ast.interface(typed)))]),
+      module_id,
+    )
 
-  // TODO
-  let core = core.lower_modules(typed)
+  let core = core.lower_modules(dict.map_values(typed, fn(_, p) { p.0 }))
 
   case options.headers {
     True -> generate_headers_only(core, sources)
@@ -278,9 +281,9 @@ fn offset_to_line_col(text: String, offset: Int) {
 
 fn infer_file(
   sources: dict.Dict(String, String),
-  modules: dict.Dict(String, typed_ast.Module),
+  modules: dict.Dict(String, #(typed_ast.Module, typed_ast.ModuleInterface)),
   module_id: String,
-) -> dict.Dict(String, typed_ast.Module) {
+) -> dict.Dict(String, #(typed_ast.Module, typed_ast.ModuleInterface)) {
   let assert Ok(source) = dict.get(sources, module_id)
 
   io.println("Parse " <> source)
@@ -309,8 +312,15 @@ fn infer_file(
 
   // infer this file
   io.println("Check " <> source)
-  case typed_ast.infer_module(modules, module, module_id) {
-    Ok(module) -> dict.insert(modules, module_id, module)
+  case
+    typed_ast.infer_module(
+      dict.map_values(modules, fn(_, p) { p.1 }),
+      module,
+      module_id,
+    )
+  {
+    Ok(module) ->
+      dict.insert(modules, module_id, #(module, typed_ast.interface(module)))
     Error(err) ->
       panic as error(source_text, err.location, typed_ast.inspect_error(err))
   }
