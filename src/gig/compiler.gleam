@@ -7,7 +7,6 @@ import gig/patch
 import gig/typed_ast
 import gleam/bit_array
 import gleam/dict
-import gleam/pair
 import gleam/set
 import listx
 
