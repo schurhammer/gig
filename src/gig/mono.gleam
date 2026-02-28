@@ -87,7 +87,7 @@ pub type Exp {
   Panic(typ: Type, value: Exp)
 }
 
-pub fn init_context(in: t.Context) -> Context {
+pub fn init_context(in: t.Module) -> Context {
   let in_types =
     list.fold(in.types, dict.new(), fn(d, i) { dict.insert(d, i.id, i) })
   let in_functions =
@@ -111,7 +111,7 @@ pub fn init_context(in: t.Context) -> Context {
   )
 }
 
-pub fn run(in: t.Context, main_name: String) {
+pub fn run(in: t.Module, main_name: String) {
   let c = init_context(in)
 
   let main = case dict.get(c.in_functions, main_name) {
@@ -137,7 +137,7 @@ pub fn run(in: t.Context, main_name: String) {
   #(c, main_name)
 }
 
-pub fn sub_type(sub: List(#(Int, Type)), typ: t.Type) -> Type {
+pub fn sub_type(sub: List(#(t.TypeVarId, Type)), typ: t.Type) -> Type {
   case typ {
     t.Unbound(id) ->
       case list.find(sub, fn(sub) { sub.0 == id }) {
@@ -150,7 +150,11 @@ pub fn sub_type(sub: List(#(Int, Type)), typ: t.Type) -> Type {
   }
 }
 
-fn unify_poly(c: Context, poly: t.Poly, mono: Type) -> List(#(Int, Type)) {
+fn unify_poly(
+  c: Context,
+  poly: t.Poly,
+  mono: Type,
+) -> List(#(t.TypeVarId, Type)) {
   let sub = unify_type(c, poly.typ, mono)
   list.map(poly.vars, fn(x) {
     case list.find(sub, fn(s) { s.0 == x }) {
@@ -162,7 +166,11 @@ fn unify_poly(c: Context, poly: t.Poly, mono: Type) -> List(#(Int, Type)) {
   })
 }
 
-fn unify_type(c: Context, poly: t.Type, mono: Type) -> List(#(Int, Type)) {
+fn unify_type(
+  c: Context,
+  poly: t.Type,
+  mono: Type,
+) -> List(#(t.TypeVarId, Type)) {
   case poly, mono {
     t.Unbound(id), _ -> [#(id, mono)]
     t.NamedType(a, aa), NamedType(b, ba) ->
@@ -194,7 +202,7 @@ pub fn type_name(typ: Type) -> String {
   }
 }
 
-fn get_type_string(sub: List(#(Int, Type))) {
+fn get_type_string(sub: List(#(t.TypeVarId, Type))) {
   // TODO only include typed that are actually used
   // e.g. variant that only uses part of the params
   // e.g. phantom type
@@ -410,7 +418,7 @@ fn instantiate_builtin(c: Context, fun_name: String, mono: Type) -> Context {
 
 fn typed_to_mono_exp(
   c: Context,
-  sub: List(#(Int, Type)),
+  sub: List(#(t.TypeVarId, Type)),
   e: t.Exp,
 ) -> #(Context, Exp) {
   let c = instantiate_type(c, sub_type(sub, e.typ))

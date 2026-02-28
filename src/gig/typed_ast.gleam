@@ -1,6 +1,7 @@
 import gig/call_graph
 import gig/graph
 import glance.{Span} as g
+import gleam/order
 import listx
 
 import gleam/dict.{type Dict}
@@ -12,28 +13,27 @@ import gleam/string
 
 pub const builtin = "gleam"
 
-pub const nil_type = NamedType("Nil", builtin, [])
+pub const nil_type = NamedType(builtin, "Nil", [])
 
-pub const bool_type = NamedType("Bool", builtin, [])
+pub const bool_type = NamedType(builtin, "Bool", [])
 
-pub const int_type = NamedType("Int", builtin, [])
+pub const int_type = NamedType(builtin, "Int", [])
 
-pub const codepoint_type = NamedType("UtfCodepoint", builtin, [])
+pub const codepoint_type = NamedType(builtin, "UtfCodepoint", [])
 
-pub const float_type = NamedType("Float", builtin, [])
+pub const float_type = NamedType(builtin, "Float", [])
 
-pub const string_type = NamedType("String", builtin, [])
+pub const string_type = NamedType(builtin, "String", [])
 
-pub const bit_array_type = NamedType("BitArray", builtin, [])
+pub const bit_array_type = NamedType(builtin, "BitArray", [])
 
-pub type Ref {
-  Ref(id: Int)
+pub type TypeVarId {
+  TypeVarId(id: Int)
 }
 
-// TODO do we need unbound? what if unbound is just a missing key in the map
 pub type TypeVar {
   Bound(Type)
-  Unbound(id: Int)
+  Unbound
 }
 
 pub type Definition(definition) {
@@ -41,7 +41,12 @@ pub type Definition(definition) {
 }
 
 pub type Attribute {
-  Attribute(name: String, arguments: List(Expression))
+  Attribute(name: String, arguments: List(AttributeArgument))
+}
+
+pub type AttributeArgument {
+  NameAttributeArgument(name: String)
+  StringAttributeArgument(value: String)
 }
 
 // TODO it would probably be good to parameterise the Type
@@ -50,16 +55,23 @@ pub type Attribute {
 pub type Module {
   Module(
     name: String,
-    // TODO move these into context instead of module?
-    // TODO put more info into the envs
-    module_env: Dict(String, String),
-    type_env: Dict(String, #(Poly, List(Variant))),
-    value_env: Dict(String, ResolvedGlobal),
     imports: List(Definition(Import)),
     custom_types: List(Definition(CustomType)),
     type_aliases: List(Definition(TypeAlias)),
     constants: List(Definition(ConstantDefinition)),
     functions: List(Definition(FunctionDefinition)),
+  )
+}
+
+/// The interface to a module without its implementation
+pub type ModuleInterface {
+  ModuleInterface(
+    name: String,
+    imports: List(String),
+    custom_types: List(CustomType),
+    type_aliases: List(TypeAlias),
+    constants: List(ConstantDeclaration),
+    functions: List(FunctionDeclaration),
   )
 }
 
@@ -72,6 +84,16 @@ pub type FunctionDefinition {
     return: Option(Annotation),
     body: List(Statement),
     location: Span,
+  )
+}
+
+/// Declaration of a function for the ModuleInterface
+pub type FunctionDeclaration {
+  FunctionDeclaration(
+    typ: Poly,
+    name: String,
+    parameters: List(FunctionParameter),
+    return: Option(Annotation),
   )
 }
 
@@ -141,7 +163,7 @@ pub type Expression {
     name: String,
     labels: List(Option(String)),
   )
-  Constant(typ: Type, module: String, name: String, value: Expression)
+  Constant(typ: Type, module: String, name: String)
   NegateInt(typ: Type, value: Expression)
   NegateBool(typ: Type, value: Expression)
   Block(typ: Type, statements: List(Statement))
@@ -255,11 +277,17 @@ pub type Import {
 
 pub type ConstantDefinition {
   ConstantDefinition(
+    typ: Poly,
     name: String,
     publicity: Publicity,
     annotation: Option(Annotation),
     value: Expression,
   )
+}
+
+/// Declaration of a constant for the ModuleInterface
+pub type ConstantDeclaration {
+  ConstantDeclaration(typ: Poly, name: String, annotation: Option(Annotation))
 }
 
 pub type UnqualifiedImport {
@@ -301,23 +329,21 @@ pub type Field(t) {
 }
 
 pub type Type {
-  // TODO change to module, name
-  NamedType(name: String, module: String, parameters: List(Type))
+  NamedType(module: String, name: String, parameters: List(Type))
   TupleType(elements: List(Type))
   FunctionType(parameters: List(Type), return: Type)
-  VariableType(ref: Ref)
+  VariableType(ref: TypeVarId)
 }
 
 pub type Poly {
-  // TODO should vars be List(TypeVarRef) ??
-  Poly(vars: List(Int), typ: Type)
+  Poly(vars: List(TypeVarId), typ: Type)
 }
 
 pub type Annotation {
   NamedAnno(
     typ: Type,
-    name: String,
     module: Option(String),
+    name: String,
     parameters: List(Annotation),
   )
   TupleAnno(typ: Type, elements: List(Annotation))
@@ -343,22 +369,24 @@ pub type Error {
   IncompatibleTypes(location: Location, type_a: Type, type_b: Type)
   RecursiveTypeError(location: Location)
   BitPatternSegmentTypeOverSpecified(location: Location)
+  InvalidAttributeArgument(location: Location)
 }
 
-pub type QualifiedName {
-  QualifiedName(module: String, name: String)
+pub type QName {
+  QName(module: String, name: String)
 }
 
 pub type Context {
   Context(
-    module_source: String,
-    current_module: String,
     current_definition: String,
     current_span: Span,
-    type_vars: Dict(Ref, TypeVar),
-    modules: Dict(String, Module),
+    type_vars: Dict(TypeVarId, TypeVar),
+    module: Module,
     type_uid: Int,
     temp_uid: Int,
+    module_aliases: Dict(String, String),
+    type_env: Dict(QName, #(Poly, List(Variant))),
+    value_env: Dict(QName, ResolvedGlobal),
   )
 }
 
@@ -368,92 +396,66 @@ pub type LocalEnv =
 pub type TypeEnv =
   Dict(String, Type)
 
-pub fn new_context() -> Context {
-  Context(
-    module_source: "",
-    current_module: "",
-    current_definition: "",
-    current_span: Span(0, 0),
-    type_vars: dict.new(),
-    modules: dict.new(),
-    type_uid: 0,
-    temp_uid: 0,
-  )
-}
-
+/// Run type inference on a `glance.Module`.
+/// Interfaces of all modules this module imports must be provided.
 pub fn infer_module(
-  c: Context,
+  modules: Dict(String, ModuleInterface),
   module: g.Module,
   module_name: String,
-  module_source: String,
-) -> Result(Context, Error) {
-  let modules =
-    dict.insert(
-      c.modules,
-      module_name,
-      Module(
-        name: module_name,
-        module_env: dict.new(),
-        type_env: dict.new(),
-        value_env: dict.new(),
-        imports: [],
-        custom_types: [],
-        type_aliases: [],
-        constants: [],
-        functions: [],
-      ),
+) -> Result(Module, Error) {
+  let c =
+    list.fold(
+      dict.values(modules),
+      new_context(module_name),
+      add_module_interface,
     )
-
-  let c = Context(..c, modules:, current_module: module_name, module_source:)
 
   // handle module imports
   use c <- result.try(
     list.try_fold(module.imports, c, fn(c, imp) {
-      try_update_module(c, fn(module) {
-        let imp = imp.definition
-        let module_id = imp.module
+      let imp = imp.definition
+      let module_id = imp.module
 
-        let module_env = case imp.alias {
-          Some(alias) ->
-            case alias {
-              g.Named(alias) -> dict.insert(module.module_env, alias, module_id)
-              g.Discarded(_) -> module.module_env
-            }
-          None -> {
-            // assert: imported name is a non-empty string
-            let assert Ok(alias) = list.last(string.split(module_id, "/"))
-            dict.insert(module.module_env, alias, module_id)
+      let module_aliases = case imp.alias {
+        Some(alias) ->
+          case alias {
+            g.Named(alias) -> dict.insert(c.module_aliases, alias, module_id)
+            g.Discarded(_) -> c.module_aliases
           }
+        None -> {
+          // assert: imported name is a non-empty string
+          let assert Ok(alias) = list.last(string.split(module_id, "/"))
+          dict.insert(c.module_aliases, alias, module_id)
         }
+      }
 
-        use type_env <- result.try(
-          list.try_fold(imp.unqualified_types, module.type_env, fn(acc, imp) {
-            use #(_, poly, variants) <- result.map(resolve_global_type_name(
-              c,
-              module_id,
-              imp.name,
-            ))
-            let alias = case imp.alias {
-              Some(alias) -> alias
-              None -> imp.name
-            }
-            dict.insert(acc, alias, #(poly, variants))
-          }),
-        )
+      use type_env <- result.try(
+        list.try_fold(imp.unqualified_types, c.type_env, fn(acc, imp) {
+          use #(_, poly, variants) <- result.map(resolve_global_type_name(
+            c,
+            module_id,
+            imp.name,
+          ))
+          let alias = case imp.alias {
+            Some(alias) -> alias
+            None -> imp.name
+          }
+          dict.insert(acc, QName(c.module.name, alias), #(poly, variants))
+        }),
+      )
 
-        use value_env <- result.map(
-          list.try_fold(imp.unqualified_values, module.value_env, fn(acc, imp) {
-            use value <- result.map(resolve_global_name(c, module_id, imp.name))
-            let alias = case imp.alias {
-              Some(alias) -> alias
-              None -> imp.name
-            }
-            dict.insert(acc, alias, value)
-          }),
-        )
+      use value_env <- result.map(
+        list.try_fold(imp.unqualified_values, c.value_env, fn(acc, imp) {
+          use value <- result.map(resolve_global_name(c, module_id, imp.name))
+          let alias = case imp.alias {
+            Some(alias) -> alias
+            None -> imp.name
+          }
+          dict.insert(acc, QName(c.module.name, alias), value)
+        }),
+      )
 
-        Module(..module, module_env:, type_env:, value_env:)
-      })
+      Context(..c, module_aliases:, type_env:, value_env:)
     }),
   )
 
@@ -472,7 +474,7 @@ pub fn infer_module(
         })
       let parameters = list.reverse(parameters)
       let param_types = list.map(parameters, fn(x) { x.1 })
-      let typ = NamedType(custom.name, c.current_module, param_types)
+      let typ = NamedType(c.module.name, custom.name, param_types)
       let typ = generalise(c, typ)
 
       register_type(c, def.definition.name, typ, [])
@@ -498,7 +500,7 @@ pub fn infer_module(
       // update the placeholder type
       use #(_, placeholder, _) <- result.try(resolve_global_type_name(
         c,
-        c.current_module,
+        c.module.name,
         alias.name,
       ))
       use c <- result.map(unify(c, alias.aliased.typ, placeholder.typ))
@@ -536,10 +538,10 @@ pub fn infer_module(
       // reconstruct the type parameters
       use #(_, poly, _) <- result.try(resolve_global_type_name(
         c,
-        c.current_module,
+        c.module.name,
         custom.name,
       ))
-      let param_types = list.map(poly.vars, fn(x) { VariableType(Ref(x)) })
+      let param_types = list.map(poly.vars, fn(x) { VariableType(x) })
       let parameters = list.zip(custom.parameters, param_types)
 
       // infer the custom type including variants
@@ -601,7 +603,7 @@ pub fn infer_module(
       let c = Context(..c, current_span: def.definition.location)
 
       let poly = generalise(c, constant.value.typ)
-      let c = register_constant(c, constant.name, poly, constant.value)
+      let c = register_constant(c, constant.name, poly)
       use attrs <- result.map(infer_attributes(c, def.attributes))
       let def = Definition(attrs, constant)
       update_module(c, fn(mod) {
@@ -616,56 +618,135 @@ pub fn infer_module(
     call_graph.function_graph(module)
     |> graph.strongly_connected_components()
 
-  list.try_fold(rec_groups, c, fn(c, group) {
-    // find the function definitions by name
-    use group <- result.try(
-      list.try_map(group, fn(fun_name) {
-        list.find(module.functions, fn(f) { f.definition.name == fun_name })
-        |> result.replace_error(UnresolvedFunction(location(c), fun_name))
-      }),
-    )
+  use c <- result.map(
+    list.try_fold(rec_groups, c, fn(c, group) {
+      // find the function definitions by name
+      use group <- result.try(
+        list.try_map(group, fn(fun_name) {
+          list.find(module.functions, fn(f) { f.definition.name == fun_name })
+          |> result.replace_error(UnresolvedFunction(location(c), fun_name))
+        }),
+      )
 
-    // infer types for the group
-    use #(c, group) <- result.try(
-      list.try_fold(group, #(c, []), fn(acc, def) {
-        let #(c, group) = acc
-        let c = Context(..c, current_definition: def.definition.name)
-        let c = Context(..c, current_span: def.definition.location)
+      // infer types for the group
+      use #(c, group) <- result.try(
+        list.try_fold(group, #(c, []), fn(acc, def) {
+          let #(c, group) = acc
+          let c = Context(..c, current_definition: def.definition.name)
+          let c = Context(..c, current_span: def.definition.location)
 
-        // infer function
-        use #(c, fun) <- result.try(infer_function(c, def.definition))
-        use attrs <- result.map(infer_attributes(c, def.attributes))
-        let def = Definition(attrs, fun)
+          // infer function
+          use #(c, fun) <- result.try(infer_function(c, def.definition))
+          use attrs <- result.map(infer_attributes(c, def.attributes))
+          let def = Definition(attrs, fun)
 
-        #(c, [def, ..group])
-      }),
-    )
-
-    // generalise
-    list.try_fold(group, c, fn(c, def) {
-      let fun = def.definition
-
-      // unify placeholder type
-      use placeholder <- result.try(resolve_global_name(
-        c,
-        c.current_module,
-        fun.name,
-      ))
-      use c <- result.map(unify(c, placeholder.typ.typ, fun.typ.typ))
+          #(c, [def, ..group])
+        }),
+      )
 
       // generalise
-      let typ = generalise(c, fun.typ.typ)
-      let fun = FunctionDefinition(..fun, typ:)
-      let def = Definition(..def, definition: fun)
+      list.try_fold(group, c, fn(c, def) {
+        let fun = def.definition
 
-      // update context
-      let labels = list.map(fun.parameters, fn(f) { f.label })
-      let c = register_function(c, fun.name, fun.typ, labels)
-      update_module(c, fn(mod) {
-        Module(..mod, functions: [def, ..mod.functions])
+        // unify placeholder type
+        use placeholder <- result.try(resolve_global_name(
+          c,
+          c.module.name,
+          fun.name,
+        ))
+        use c <- result.map(unify(c, placeholder.typ.typ, fun.typ.typ))
+
+        // generalise
+        let typ = generalise(c, fun.typ.typ)
+        let fun = FunctionDefinition(..fun, typ:)
+        let def = Definition(..def, definition: fun)
+
+        // update context
+        let labels = list.map(fun.parameters, fn(f) { f.label })
+        let c = register_function(c, fun.name, fun.typ, labels)
+        update_module(c, fn(mod) {
+          Module(..mod, functions: [def, ..mod.functions])
+        })
       })
+    }),
+  )
+
+  // Fully resolve all type references
+  let mod = c.module
+  let type_aliases =
+    list.map(
+      mod.type_aliases,
+      map_definition(_, fn(type_alias) {
+        TypeAlias(..type_alias, typ: substitute_poly(c, type_alias.typ))
+      }),
+    )
+  let custom_types =
+    list.map(mod.custom_types, map_definition(_, substitute_custom_type(c, _)))
+  let constants =
+    list.map(
+      mod.constants,
+      map_definition(_, fn(constant) {
+        ConstantDefinition(
+          ..constant,
+          typ: substitute_poly(c, constant.typ),
+          value: substitute_expression(c, constant.value),
+        )
+      }),
+    )
+  let functions =
+    list.map(mod.functions, map_definition(_, substitute_function(c, _)))
+  Module(..mod, type_aliases:, custom_types:, constants:, functions:)
+}
+
+pub fn interface(module: Module) -> ModuleInterface {
+  ModuleInterface(
+    name: module.name,
+    imports: list.map(module.imports, fn(i) { i.definition.module }),
+    custom_types: list.map(module.custom_types, fn(t) { t.definition }),
+    type_aliases: list.map(module.type_aliases, fn(t) { t.definition }),
+    constants: list.filter(module.constants, fn(c) {
+      c.definition.publicity == Public
     })
-  })
+      |> list.map(fn(c) {
+        ConstantDeclaration(
+          typ: c.definition.typ,
+          name: c.definition.name,
+          annotation: c.definition.annotation,
+        )
+      }),
+    functions: list.filter(module.functions, fn(f) {
+      f.definition.publicity == Public
+    })
+      |> list.map(fn(f) {
+        FunctionDeclaration(
+          typ: f.definition.typ,
+          name: f.definition.name,
+          parameters: f.definition.parameters,
+          return: f.definition.return,
+        )
+      }),
+  )
+}
+
+fn new_context(module_name: String) -> Context {
+  Context(
+    current_definition: "",
+    current_span: Span(0, 0),
+    type_vars: dict.new(),
+    module: Module(
+      name: module_name,
+      imports: [],
+      custom_types: [],
+      type_aliases: [],
+      constants: [],
+      functions: [],
+    ),
+    type_uid: 0,
+    temp_uid: 1,
+    module_aliases: dict.new(),
+    type_env: dict.new(),
+    value_env: dict.new(),
+  )
 }
 
 /// Returns a human-readable string description of the error.
@@ -708,36 +789,26 @@ pub fn inspect_error(error: Error) {
       <> string.inspect(type_b)
     RecursiveTypeError(..) ->
       "Encountered a cyclical dependency between type variables"
-    BitPatternSegmentTypeOverSpecified(_) ->
+    BitPatternSegmentTypeOverSpecified(..) ->
       "Bit pattern segment type set multiple times"
+    InvalidAttributeArgument(..) ->
+      "Unexpected expression for attribute argument (only variable or string are allowed)"
   }
 }
 
 fn generalise(c: Context, typ: Type) {
   let tvs =
     list.unique(find_tvs(c, typ))
-    |> list.sort(int.compare)
+    |> list.sort(type_var_id_compare)
   Poly(tvs, typ)
 }
 
-fn get_current_module(c: Context) -> Module {
-  // assert: the current module exists
-  let assert Ok(module) = dict.get(c.modules, c.current_module)
-  module
+fn type_var_id_compare(a: TypeVarId, b: TypeVarId) -> order.Order {
+  int.compare(a.id, b.id)
 }
 
 fn update_module(c: Context, fun: fn(Module) -> Module) {
-  let module = get_current_module(c)
-  let module = fun(module)
-  let modules = dict.insert(c.modules, c.current_module, module)
-  Context(..c, modules:)
-}
-
-fn try_update_module(c: Context, fun: fn(Module) -> Result(Module, Error)) {
-  let module = get_current_module(c)
-  use module <- result.map(fun(module))
-  let modules = dict.insert(c.modules, c.current_module, module)
-  Context(..c, modules:)
+  Context(..c, module: fun(c.module))
 }
 
 fn register_function(
@@ -746,32 +817,23 @@ fn register_function(
   typ: Poly,
   labels: List(Option(String)),
 ) -> Context {
-  update_module(c, fn(module) {
-    let value_env =
-      dict.insert(
-        module.value_env,
-        name,
-        FunctionGlobal(c.current_module, name, typ, labels),
-      )
-    Module(..module, value_env:)
-  })
+  let value_env =
+    dict.insert(
+      c.value_env,
+      QName(c.module.name, name),
+      FunctionGlobal(c.module.name, name, typ, labels),
+    )
+  Context(..c, value_env:)
 }
 
-fn register_constant(
-  c: Context,
-  name: String,
-  typ: Poly,
-  value: Expression,
-) -> Context {
-  update_module(c, fn(module) {
-    let value_env =
-      dict.insert(
-        module.value_env,
-        name,
-        ConstantGlobal(c.current_module, name, typ, value),
-      )
-    Module(..module, value_env:)
-  })
+fn register_constant(c: Context, name: String, typ: Poly) -> Context {
+  let value_env =
+    dict.insert(
+      c.value_env,
+      QName(c.module.name, name),
+      ConstantGlobal(c.module.name, name, typ),
+    )
+  Context(..c, value_env:)
 }
 
 fn register_type(
@@ -780,35 +842,30 @@ fn register_type(
   typ: Poly,
   variants: List(Variant),
 ) -> Context {
-  update_module(c, fn(module) {
-    let type_env = dict.insert(module.type_env, name, #(typ, variants))
-    Module(..module, type_env:)
-  })
+  let type_env =
+    dict.insert(c.type_env, QName(c.module.name, name), #(typ, variants))
+  Context(..c, type_env:)
 }
 
 fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
-  let attr_env =
-    dict.new()
-    |> dict.insert("c", nil_type)
-    |> dict.insert("erlang", nil_type)
-    |> dict.insert("javascript", nil_type)
+  list.try_map(attrs, fn(attr) {
+    use args <- result.map(
+      list.try_map(attr.arguments, map_attribute_argument(c, _)),
+    )
+    Attribute(attr.name, args)
+  })
+}
 
-  use #(_, attrs) <- result.map(
-    list.try_fold(attrs, #(c, []), fn(acc, attr) {
-      let #(c, attrs) = acc
-      use #(c, exprs) <- result.map(
-        list.try_fold(attr.arguments, #(c, []), fn(acc, attr) {
-          let #(c, exprs) = acc
-          use #(c, expr) <- result.map(infer_expression(c, attr_env, attr))
-          #(c, [expr, ..exprs])
-        }),
-      )
-      let exprs = list.reverse(exprs)
-      let attr = Attribute(attr.name, exprs)
-      #(c, [attr, ..attrs])
-    }),
-  )
-  list.reverse(attrs)
+fn map_attribute_argument(
+  c: Context,
+  expr: g.Expression,
+) -> Result(AttributeArgument, Error) {
+  let c = Context(..c, current_span: expr.location)
+  case expr {
+    g.String(value:, ..) -> Ok(StringAttributeArgument(value))
+    g.Variable(name:, ..) -> Ok(NameAttributeArgument(name))
+    _ -> Error(InvalidAttributeArgument(location(c)))
+  }
 }
 
 fn infer_constant(
@@ -830,7 +887,10 @@ fn infer_constant(
     None -> Ok(#(c, None))
   })
 
-  let constant = ConstantDefinition(con.name, publicity, annotation, value)
+  let poly = generalise(c, value.typ)
+
+  let constant =
+    ConstantDefinition(poly, con.name, publicity, annotation, value)
 
   #(c, constant)
 }
@@ -915,9 +975,8 @@ fn infer_alias_type(
       let n = dict.insert(n, name, typ)
       // assert: new_type_var_ref always returns a VariableType
       let assert VariableType(ref) = typ
-      #(c, n, [ref.id, ..args])
+      #(c, n, [ref, ..args])
     })
-
   let args = list.reverse(args)
 
   use #(c, aliased) <- result.map(do_infer_annotation(
@@ -941,7 +1000,7 @@ fn infer_custom_type(
   // create a type variable for each parameter
   // these will be used when a field references a type parameter
   let param_types = list.map(parameters, fn(x) { x.1 })
-  let module = c.current_module
+  let module = c.module.name
   let name = custom.name
   let typ = NamedType(module:, name:, parameters: param_types)
 
@@ -1130,9 +1189,7 @@ fn do_infer_annotation(
         |> result.map(dict.from_list),
       )
       let typ = do_instantiate(c, mapping, poly.typ)
-
-      // let typ = NamedType(name, module, list.map(params, fn(x) { x.typ }))
-      #(c, NamedAnno(typ, name, anno_module, params))
+      #(c, NamedAnno(typ, anno_module, name, params))
     }
     g.TupleType(_, elements) -> {
       use #(c, elements) <- result.map(
@@ -1173,6 +1230,63 @@ fn do_infer_annotation(
   }
 }
 
+fn add_module_interface(c: Context, m: ModuleInterface) -> Context {
+  let value_env =
+    list.fold(m.constants, c.value_env, fn(value_env, constant) {
+      dict.insert(
+        value_env,
+        QName(m.name, constant.name),
+        ConstantGlobal(m.name, constant.name, constant.typ),
+      )
+    })
+  let value_env =
+    list.fold(m.functions, value_env, fn(value_env, function) {
+      dict.insert(
+        value_env,
+        QName(m.name, function.name),
+        FunctionGlobal(
+          m.name,
+          function.name,
+          function.typ,
+          list.map(function.parameters, fn(f) { f.label }),
+        ),
+      )
+    })
+  let value_env =
+    list.flat_map(m.custom_types, fn(custom_type) { custom_type.variants })
+    |> list.fold(value_env, fn(value_env, variant) {
+      dict.insert(
+        value_env,
+        QName(m.name, variant.name),
+        FunctionGlobal(
+          m.name,
+          variant.name,
+          variant.typ,
+          list.map(variant.fields, fn(f) { f.label }),
+        ),
+      )
+    })
+
+  let type_env =
+    list.fold(m.custom_types, c.type_env, fn(type_env, custom_type) {
+      dict.insert(type_env, QName(m.name, custom_type.name), #(
+        custom_type.typ,
+        custom_type.variants,
+      ))
+    })
+
+  let type_env =
+    list.fold(m.type_aliases, type_env, fn(type_env, type_alias) {
+      dict.insert(
+        type_env,
+        QName(m.name, type_alias.name),
+        #(type_alias.typ, []),
+      )
+    })
+
+  Context(..c, value_env:, type_env:)
+}
+
 pub type ResolvedGlobal {
   FunctionGlobal(
     module: String,
@@ -1180,7 +1294,7 @@ pub type ResolvedGlobal {
     typ: Poly,
     labels: List(Option(String)),
   )
-  ConstantGlobal(module: String, name: String, typ: Poly, value: Expression)
+  ConstantGlobal(module: String, name: String, typ: Poly)
 }
 
 type ResolvedVariable {
@@ -1207,7 +1321,7 @@ fn resolve_unqualified_global(
   name: String,
 ) -> Result(ResolvedGlobal, Error) {
   // try global env
-  resolve_global_name(c, c.current_module, name)
+  resolve_global_name(c, c.module.name, name)
   |> result.try_recover(fn(_) {
     // try prelude
     resolve_global_name(c, builtin, name)
@@ -1217,7 +1331,7 @@ fn resolve_unqualified_global(
 /// Resolve a global from a possibly aliased module
 fn resolve_aliased_global(
   c: Context,
-  name: QualifiedName,
+  name: QName,
 ) -> Result(ResolvedGlobal, Error) {
   resolve_module(c, name.module)
   |> result.try(resolve_global_name(c, _, name.name))
@@ -1229,8 +1343,7 @@ pub fn resolve_global_name(
   module_name: String,
   name: String,
 ) -> Result(ResolvedGlobal, Error) {
-  use module <- result.try(get_module(c, module_name))
-  dict.get(module.value_env, name)
+  dict.get(c.value_env, QName(module_name, name))
   |> result.replace_error(UnresolvedGlobal(location(c), name))
 }
 
@@ -1239,21 +1352,21 @@ fn resolve_type_name(
   c: Context,
   mod: Option(String),
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Variant)), Error) {
+) -> Result(#(QName, Poly, List(Variant)), Error) {
   case mod {
     Some(mod) -> resolve_aliased_type_name(c, mod, name)
     None ->
-      resolve_global_type_name(c, c.current_module, name)
+      resolve_global_type_name(c, c.module.name, name)
       |> result.try_recover(fn(_) { resolve_global_type_name(c, builtin, name) })
   }
 }
 
-/// Resolve a type name from a possibly aliased module 
+/// Resolve a type name from a possibly aliased module
 fn resolve_aliased_type_name(
   c: Context,
   module: String,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Variant)), Error) {
+) -> Result(#(QName, Poly, List(Variant)), Error) {
   resolve_module(c, module)
   |> result.try(resolve_global_type_name(c, _, name))
 }
@@ -1263,35 +1376,26 @@ pub fn resolve_global_type_name(
   c: Context,
   module_name: String,
   name: String,
-) -> Result(#(QualifiedName, Poly, List(Variant)), Error) {
-  use module <- result.try(get_module(c, module_name))
-  use #(typ, variants) <- result.map(
-    dict.get(module.type_env, name)
-    |> result.replace_error(UnresolvedType(
-      location(c),
-      module_name <> "." <> name,
-    )),
-  )
-  #(QualifiedName(module_name, name), typ, variants)
+) -> Result(#(QName, Poly, List(Variant)), Error) {
+  dict.get(c.type_env, QName(module_name, name))
+  |> result.replace_error(UnresolvedType(
+    location(c),
+    module_name <> "." <> name,
+  ))
+  |> result.map(fn(t) { #(QName(module_name, name), t.0, t.1) })
 }
 
 /// Resolve a qualified or unqualified contructor name
 fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
   case mod {
-    Some(mod) -> resolve_aliased_global(c, QualifiedName(mod, name))
+    Some(mod) -> resolve_aliased_global(c, QName(mod, name))
     None -> resolve_unqualified_global(c, name)
   }
 }
 
 /// Resolve a module alias to its fully qualified name
 fn resolve_module(c: Context, module_name: String) -> Result(String, Error) {
-  dict.get(get_current_module(c).module_env, module_name)
-  |> result.replace_error(UnresolvedModule(location(c), module_name))
-}
-
-/// Get a module by its fully qualified name
-fn get_module(c: Context, module_name: String) -> Result(Module, Error) {
-  dict.get(c.modules, module_name)
+  dict.get(c.module_aliases, module_name)
   |> result.replace_error(UnresolvedModule(location(c), module_name))
 }
 
@@ -1301,8 +1405,8 @@ fn new_temp_var(c: Context) -> #(Context, String) {
 }
 
 fn new_type_var_ref(c: Context) {
-  let ref = Ref(c.type_uid)
-  let type_vars = dict.insert(c.type_vars, ref, Unbound(c.type_uid))
+  let ref = TypeVarId(c.type_uid)
+  let type_vars = dict.insert(c.type_vars, ref, Unbound)
   let typ = VariableType(ref)
   #(Context(..c, type_vars: type_vars, type_uid: c.type_uid + 1), typ)
 }
@@ -1362,7 +1466,7 @@ fn infer_pattern(
       )
 
       // Create the list type
-      let typ = NamedType("List", builtin, [elem_type])
+      let typ = NamedType(builtin, "List", [elem_type])
 
       // Handle the tail pattern if present
       use #(c, n, tail) <- result.map(case tail {
@@ -1779,9 +1883,9 @@ fn infer_expression(
               let #(c, typ) = instantiate(c, typ)
               Ok(#(c, Function(typ, module, name, labels)))
             }
-            ConstantGlobal(module, name, typ, value) -> {
+            ConstantGlobal(module, name, typ) -> {
               let #(c, typ) = instantiate(c, typ)
-              Ok(#(c, Constant(typ, module, name, value)))
+              Ok(#(c, Constant(typ, module, name)))
             }
           }
         Ok(ResolvedLocal(name, typ)) -> {
@@ -1875,7 +1979,7 @@ fn infer_expression(
 
       // Create a type variable for the element type
       let #(c, elem_type) = new_type_var_ref(c)
-      let typ = NamedType("List", builtin, [elem_type])
+      let typ = NamedType(builtin, "List", [elem_type])
 
       // Unify all element types
       use c <- result.try(
@@ -1981,16 +2085,20 @@ fn infer_expression(
 
         // field access must be on a named type
         let value_typ = case resolve_type(c, value.typ) {
-          NamedType(type_name, module, _) -> Ok(#(type_name, module))
+          NamedType(module, type_name, _) -> Ok(#(type_name, module))
           _ -> Error(InvalidFieldAccess(location(c)))
         }
         use #(type_name, module) <- result.try(value_typ)
 
         // find the custom type definition
-        use custom <- result.try(resolve_custom_type(c, module, type_name))
+        use #(typ, variants) <- result.try(resolve_custom_type(
+          c,
+          module,
+          type_name,
+        ))
 
         // access only works with one variant
-        let variant = case custom.definition.variants {
+        let variant = case variants {
           // TODO proper implementation checking all variants
           [variant, ..] -> Ok(variant)
           _ -> Error(InvalidFieldAccess(location(c)))
@@ -2006,8 +2114,8 @@ fn infer_expression(
         use #(field, index) <- result.try(field)
 
         // create a getter function type
-        let getter = FunctionType([custom.definition.typ.typ], field.item.typ)
-        let getter = Poly(custom.definition.typ.vars, getter)
+        let getter = FunctionType([typ.typ], field.item.typ)
+        let getter = Poly(typ.vars, getter)
         let #(c, getter) = instantiate(c, getter)
 
         // unify the getter as if we're calling it on the value
@@ -2022,16 +2130,16 @@ fn infer_expression(
           // try a module access instead
           case container {
             g.Variable(_, module) -> {
-              case resolve_aliased_global(c, QualifiedName(module, label)) {
+              case resolve_aliased_global(c, QName(module, label)) {
                 Ok(FunctionGlobal(module, name, poly, labels)) -> {
                   let #(c, typ) = instantiate(c, poly)
                   Ok(#(c, Function(typ, module, name, labels)))
                 }
-                Ok(ConstantGlobal(module, name, poly, value)) -> {
+                Ok(ConstantGlobal(module, name, poly)) -> {
                   let #(c, typ) = instantiate(c, poly)
-                  Ok(#(c, Constant(typ, module, name, value)))
+                  Ok(#(c, Constant(typ, module, name)))
                 }
-                Error(_) -> Error(e)
+                Error(e) -> Error(e)
               }
             }
             _ -> Error(e)
@@ -2365,8 +2473,7 @@ fn infer_expression(
 }
 
 fn resolve_custom_type(c: Context, module: String, type_name: String) {
-  use mod <- result.try(get_module(c, module))
-  list.find(mod.custom_types, fn(x) { x.definition.name == type_name })
+  dict.get(c.type_env, QName(module, type_name))
   |> result.replace_error(UnresolvedType(location(c), type_name))
 }
 
@@ -2445,15 +2552,15 @@ fn infer_fn(
 }
 
 type PolyEnv =
-  Dict(Int, Type)
+  Dict(TypeVarId, Type)
 
-fn get_type_var(c: Context, var: Ref) {
+fn get_type_var(c: Context, var: TypeVarId) {
   // assert: this function is only called for previously created type variables
-  let assert Ok(x) = dict.get(c.type_vars, var)
+  let assert Ok(x) = dict.get(c.type_vars, var) as string.inspect(var)
   x
 }
 
-fn set_type_var(c: Context, var: Ref, bind: TypeVar) {
+fn set_type_var(c: Context, var: TypeVarId, bind: TypeVar) {
   Context(..c, type_vars: dict.insert(c.type_vars, var, bind))
 }
 
@@ -2469,12 +2576,12 @@ fn instantiate(c: Context, poly: Poly) -> #(Context, Type) {
   #(c, typ)
 }
 
-fn find_tvs(c: Context, t: Type) -> List(Int) {
+fn find_tvs(c: Context, t: Type) -> List(TypeVarId) {
   case t {
     VariableType(ref) ->
       case get_type_var(c, ref) {
         Bound(x) -> find_tvs(c, x)
-        Unbound(x) -> [x]
+        Unbound -> [ref]
       }
     NamedType(_, _, args) -> list.flat_map(args, find_tvs(c, _))
     FunctionType(args, ret) -> list.flat_map([ret, ..args], find_tvs(c, _))
@@ -2485,16 +2592,20 @@ fn find_tvs(c: Context, t: Type) -> List(Int) {
 fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
   case typ {
     VariableType(ref) ->
-      case get_type_var(c, ref) {
-        Bound(x) -> do_instantiate(c, n, x)
-        Unbound(x) ->
-          case dict.get(n, x) {
-            Ok(r) -> r
-            Error(_) -> typ
+      case dict.get(n, ref) {
+        Ok(r) -> r
+        Error(_) ->
+          case get_type_var(c, ref) {
+            Bound(x) -> do_instantiate(c, n, x)
+            Unbound -> typ
           }
       }
-    NamedType(name, module, args) ->
-      NamedType(name, module, list.map(args, do_instantiate(c, n, _)))
+    NamedType(module:, name:, parameters:) ->
+      NamedType(
+        module:,
+        name:,
+        parameters: list.map(parameters, do_instantiate(c, n, _)),
+      )
     FunctionType(args, ret) ->
       FunctionType(
         list.map(args, do_instantiate(c, n, _)),
@@ -2513,9 +2624,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
       case a == b {
         True -> Ok(c)
         False -> {
-          // assert: since a resolves to VariableType(ref), ref is Unbound
-          let assert Unbound(aid) = get_type_var(c, ref)
-          let #(c, occurs) = occurs(c, aid, b)
+          let #(c, occurs) = occurs(c, ref, b)
           case occurs {
             True -> Error(RecursiveTypeError(location(c)))
             False -> Ok(set_type_var(c, ref, Bound(b)))
@@ -2523,7 +2632,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
         }
       }
     a, VariableType(_) -> unify(c, b, a)
-    NamedType(aname, amodule, _), NamedType(bname, bmodule, _)
+    NamedType(amodule, aname, _), NamedType(bmodule, bname, _)
       if aname != bname || amodule != bmodule
     -> Error(IncompatibleTypes(location(c), a, b))
     NamedType(_, _, aargs), NamedType(_, _, bargs) ->
@@ -2553,15 +2662,15 @@ fn unify_arguments(
   list.try_fold(args, c, fn(c, x) { unify(c, x.0, x.1) })
 }
 
-fn occurs(c: Context, id: Int, in: Type) -> #(Context, Bool) {
+fn occurs(c: Context, id: TypeVarId, in: Type) -> #(Context, Bool) {
   case in {
     VariableType(ref) ->
       case get_type_var(c, ref) {
         Bound(t) -> occurs(c, id, t)
-        Unbound(i) -> {
+        Unbound -> {
           // TODO not sure if this "set" is needed
-          let c = set_type_var(c, ref, Unbound(i))
-          #(c, id == i)
+          let c = set_type_var(c, ref, Unbound)
+          #(c, id == ref)
         }
       }
     NamedType(_, _, args) ->
@@ -2600,26 +2709,347 @@ pub fn resolve_type(c: Context, typ: Type) -> Type {
   }
 }
 
-pub fn resolve_type_deep(c: Context, typ: Type) {
-  case typ {
-    VariableType(x) -> {
-      case get_type_var(c, x) {
-        Bound(x) -> resolve_type_deep(c, x)
-        Unbound(..) -> typ
-      }
-    }
-    NamedType(name, mod, args) ->
-      NamedType(name, mod, list.map(args, resolve_type_deep(c, _)))
-    FunctionType(args, ret) ->
-      FunctionType(
-        list.map(args, resolve_type_deep(c, _)),
-        resolve_type_deep(c, ret),
+fn substitute_custom_type(c: Context, custom_type: CustomType) {
+  // TODO: do we need to substitute type annotations?
+  CustomType(
+    ..custom_type,
+    typ: substitute_poly(c, custom_type.typ),
+    variants: list.map(custom_type.variants, fn(variant) {
+      Variant(..variant, typ: substitute_poly(c, variant.typ))
+    }),
+  )
+}
+
+fn substitute_function(c: Context, function: FunctionDefinition) {
+  // TODO: do we need to substitute type annotations?
+  FunctionDefinition(
+    ..function,
+    typ: substitute_poly(c, function.typ),
+    parameters: list.map(function.parameters, substitute_function_parameter(
+      c,
+      _,
+    )),
+    body: list.map(function.body, substitute_statement(c, _)),
+  )
+}
+
+fn substitute_function_parameter(
+  c: Context,
+  param: FunctionParameter,
+) -> FunctionParameter {
+  FunctionParameter(..param, typ: substitute_type(c, param.typ))
+}
+
+fn substitute_statement(c: Context, statement: Statement) -> Statement {
+  // TODO: do we need to substitute type annotations?
+  case statement {
+    Use(typ:, patterns:, function:) ->
+      Use(
+        typ: substitute_type(c, typ),
+        patterns: list.map(patterns, substitute_pattern(c, _)),
+        function: substitute_expression(c, function),
       )
-    TupleType(elements) ->
-      TupleType(list.map(elements, resolve_type_deep(c, _)))
+    Assignment(typ:, kind:, pattern:, annotation:, value:) ->
+      Assignment(
+        typ: substitute_type(c, typ),
+        kind:,
+        pattern: substitute_pattern(c, pattern),
+        annotation:,
+        value: substitute_expression(c, value),
+      )
+    Assert(typ:, expression:, message:) ->
+      Assert(
+        typ: substitute_type(c, typ),
+        expression: substitute_expression(c, expression),
+        message: option.map(message, substitute_expression(c, _)),
+      )
+    Expression(typ:, expression:) ->
+      Expression(
+        typ: substitute_type(c, typ),
+        expression: substitute_expression(c, expression),
+      )
   }
 }
 
+fn substitute_expression(c: Context, expr: Expression) -> Expression {
+  // TODO: do we need to substitute type annotations?
+  case expr {
+    Int(..) -> expr
+    Float(..) -> expr
+    String(..) -> expr
+    LocalVariable(typ:, name:) ->
+      LocalVariable(typ: substitute_type(c, typ), name:)
+    Function(typ:, module:, name:, labels:) ->
+      Function(typ: substitute_type(c, typ), module:, name:, labels:)
+    Constant(typ:, module:, name:) ->
+      Constant(typ: substitute_type(c, typ), module:, name:)
+    NegateInt(typ:, value:) ->
+      NegateInt(
+        typ: substitute_type(c, typ),
+        value: substitute_expression(c, value),
+      )
+    NegateBool(typ:, value:) ->
+      NegateBool(
+        typ: substitute_type(c, typ),
+        value: substitute_expression(c, value),
+      )
+    Block(typ:, statements:) ->
+      Block(
+        typ: substitute_type(c, typ),
+        statements: list.map(statements, substitute_statement(c, _)),
+      )
+    Panic(typ:, value:) ->
+      Panic(
+        typ: substitute_type(c, typ),
+        value: option.map(value, substitute_expression(c, _)),
+      )
+    Todo(typ:, value:) ->
+      Todo(
+        typ: substitute_type(c, typ),
+        value: option.map(value, substitute_expression(c, _)),
+      )
+    Echo(typ:, value:) ->
+      Echo(
+        typ: substitute_type(c, typ),
+        value: option.map(value, substitute_expression(c, _)),
+      )
+    Tuple(typ:, elements:) ->
+      Tuple(
+        typ: substitute_type(c, typ),
+        elements: list.map(elements, substitute_expression(c, _)),
+      )
+    List(typ:, elements:, rest:) ->
+      List(
+        typ: substitute_type(c, typ),
+        elements: list.map(elements, substitute_expression(c, _)),
+        rest: option.map(rest, substitute_expression(c, _)),
+      )
+    Fn(typ:, parameters:, return:, body:) ->
+      Fn(
+        typ: substitute_type(c, typ),
+        parameters: list.map(parameters, substitute_function_parameter(c, _)),
+        return:,
+        body: list.map(body, substitute_statement(c, _)),
+      )
+    RecordUpdate(
+      typ:,
+      module:,
+      resolved_module:,
+      constructor:,
+      record:,
+      fields:,
+      ordered_fields:,
+    ) ->
+      RecordUpdate(
+        typ: substitute_type(c, typ),
+        module:,
+        resolved_module:,
+        constructor:,
+        record: substitute_expression(c, record),
+        fields: list.map(fields, fn(field) {
+          let #(name, expr) = field
+          #(name, substitute_expression(c, expr))
+        }),
+        ordered_fields: list.map(ordered_fields, fn(field) {
+          result.map(field, map_field(_, substitute_expression(c, _)))
+          |> result.map_error(substitute_type(c, _))
+        }),
+      )
+    FieldAccess(typ:, container:, module:, variant:, label:, index:) ->
+      FieldAccess(
+        typ: substitute_type(c, typ),
+        container: substitute_expression(c, container),
+        module:,
+        variant:,
+        label:,
+        index:,
+      )
+    Call(typ:, function:, ordered_arguments:) ->
+      Call(
+        typ: substitute_type(c, typ),
+        function: substitute_expression(c, function),
+        ordered_arguments: list.map(ordered_arguments, substitute_expression(
+          c,
+          _,
+        )),
+      )
+    TupleIndex(typ:, tuple:, index:) ->
+      TupleIndex(
+        typ: substitute_type(c, typ),
+        tuple: substitute_expression(c, tuple),
+        index:,
+      )
+    FnCapture(typ:, label:, function:, arguments_before:, arguments_after:) ->
+      FnCapture(
+        typ: substitute_type(c, typ),
+        label:,
+        function: substitute_expression(c, function),
+        arguments_before: list.map(
+          arguments_before,
+          map_field(_, substitute_expression(c, _)),
+        ),
+        arguments_after: list.map(
+          arguments_after,
+          map_field(_, substitute_expression(c, _)),
+        ),
+      )
+    BitString(typ:, segments:) ->
+      BitString(
+        typ: substitute_type(c, typ),
+        segments: list.map(segments, fn(segment) {
+          let #(expr, options) = segment
+          #(
+            substitute_expression(c, expr),
+            list.map(
+              options,
+              map_bit_string_segment_option(_, substitute_expression(c, _)),
+            ),
+          )
+        }),
+      )
+    Case(typ:, subjects:, clauses:) ->
+      Case(
+        typ: substitute_type(c, typ),
+        subjects: list.map(subjects, substitute_expression(c, _)),
+        clauses: list.map(clauses, substitute_clause(c, _)),
+      )
+    BinaryOperator(typ:, name:, left:, right:) ->
+      BinaryOperator(
+        typ: substitute_type(c, typ),
+        name:,
+        left: substitute_expression(c, left),
+        right: substitute_expression(c, right),
+      )
+  }
+}
+
+fn substitute_clause(c: Context, clause: Clause) -> Clause {
+  Clause(
+    patterns: list.map(clause.patterns, fn(alternative) {
+      list.map(alternative, substitute_pattern(c, _))
+    }),
+    guard: option.map(clause.guard, substitute_expression(c, _)),
+    body: substitute_expression(c, clause.body),
+  )
+}
+
+fn substitute_pattern(c: Context, pattern: Pattern) -> Pattern {
+  case pattern {
+    PatternInt(..) -> pattern
+    PatternFloat(..) -> pattern
+    PatternString(..) -> pattern
+    PatternDiscard(typ:, name:) ->
+      PatternDiscard(typ: substitute_type(c, typ), name:)
+    PatternVariable(typ:, name:) ->
+      PatternVariable(typ: substitute_type(c, typ), name:)
+    PatternTuple(typ:, elems:) ->
+      PatternTuple(
+        typ: substitute_type(c, typ),
+        elems: list.map(elems, substitute_pattern(c, _)),
+      )
+    PatternList(typ:, elements:, tail:) ->
+      PatternList(
+        typ: substitute_type(c, typ),
+        elements: list.map(elements, substitute_pattern(c, _)),
+        tail: option.map(tail, substitute_pattern(c, _)),
+      )
+    PatternAssignment(typ:, pattern:, name:) ->
+      PatternAssignment(
+        typ: substitute_type(c, typ),
+        pattern: substitute_pattern(c, pattern),
+        name:,
+      )
+    PatternConcatenate(typ:, prefix:, prefix_name:, suffix_name:) ->
+      PatternConcatenate(
+        typ: substitute_type(c, typ),
+        prefix:,
+        prefix_name:,
+        suffix_name:,
+      )
+    PatternBitString(typ:, segments:) ->
+      PatternBitString(
+        typ: substitute_type(c, typ),
+        segments: list.map(segments, fn(segment) {
+          let #(pattern, options) = segment
+          #(
+            substitute_pattern(c, pattern),
+            list.map(
+              options,
+              map_bit_string_segment_option(_, substitute_pattern(c, _)),
+            ),
+          )
+        }),
+      )
+    PatternConstructor(
+      typ:,
+      module:,
+      constructor:,
+      arguments:,
+      ordered_arguments:,
+      with_module:,
+      with_spread:,
+    ) ->
+      PatternConstructor(
+        typ: substitute_type(c, typ),
+        module:,
+        constructor:,
+        arguments: list.map(arguments, map_field(_, substitute_pattern(c, _))),
+        ordered_arguments: list.map(
+          ordered_arguments,
+          map_field(_, substitute_pattern(c, _)),
+        ),
+        with_module:,
+        with_spread:,
+      )
+  }
+}
+
+fn map_bit_string_segment_option(
+  option: BitStringSegmentOption(a),
+  func: fn(a) -> a,
+) -> BitStringSegmentOption(a) {
+  case option {
+    SizeValueOption(expr) -> SizeValueOption(func(expr))
+    _ -> option
+  }
+}
+
+fn substitute_poly(c: Context, poly: Poly) {
+  Poly(poly.vars, substitute_type(c, poly.typ))
+}
+
+fn substitute_type(c: Context, typ: Type) {
+  case typ {
+    NamedType(module:, name:, parameters:) -> {
+      let parameters = list.map(parameters, substitute_type(c, _))
+      NamedType(module:, name:, parameters:)
+    }
+    FunctionType(parameters, return) -> {
+      let parameters = list.map(parameters, substitute_type(c, _))
+      let return = substitute_type(c, return)
+      FunctionType(parameters:, return:)
+    }
+    TupleType(elements) -> {
+      let elements = list.map(elements, substitute_type(c, _))
+      TupleType(elements:)
+    }
+    VariableType(ref) -> {
+      case get_type_var(c, ref) {
+        Bound(x) -> substitute_type(c, x)
+        Unbound -> VariableType(ref)
+      }
+    }
+  }
+}
+
+fn map_field(field: Field(a), func: fn(a) -> b) -> Field(b) {
+  Field(..field, item: func(field.item))
+}
+
+fn map_definition(def: Definition(a), func: fn(a) -> b) -> Definition(b) {
+  Definition(..def, definition: func(def.definition))
+}
+
 fn location(c: Context) {
-  Location(c.current_module, c.current_definition, c.current_span)
+  Location(c.module.name, c.current_definition, c.current_span)
 }

@@ -14,14 +14,17 @@ import gleam/option.{None, Some}
 
 pub const builtin = t.builtin
 
+pub type TypeVarId =
+  t.TypeVarId
+
 pub type Type {
   NamedType(id: String, parameters: List(Type))
   FunctionType(parameters: List(Type), return: Type)
-  Unbound(id: Int)
+  Unbound(id: TypeVarId)
 }
 
 pub type Poly {
-  Poly(vars: List(Int), typ: Type)
+  Poly(vars: List(TypeVarId), typ: Type)
 }
 
 pub type Parameter {
@@ -85,23 +88,32 @@ pub type External {
   )
 }
 
-pub type Context {
-  Context(
+pub type Module {
+  Module(
     types: List(CustomType),
     functions: List(Function),
     externals: List(External),
   )
 }
 
-pub fn lower_context(c: t.Context) {
-  let acc = Context(types: [], functions: [], externals: [])
-  dict.values(c.modules)
-  |> list.sort(fn(a, b) { string.compare(a.name, b.name) })
-  |> list.fold(acc, fn(acc, module) { lower_module(c, acc, module) })
+type Context {
+  Context(
+    module: String,
+    definition: String,
+    // TODO: should only need module interfaces.
+    modules: dict.Dict(String, t.Module),
+  )
 }
 
-fn lower_module(c: t.Context, acc: Context, module: t.Module) {
-  let c = t.Context(..c, current_module: module.name)
+pub fn lower_modules(modules: dict.Dict(String, t.Module)) {
+  let acc = Module(types: [], functions: [], externals: [])
+  dict.values(modules)
+  |> list.sort(fn(a, b) { string.compare(a.name, b.name) })
+  |> list.fold(acc, fn(acc, module) { lower_module(acc, modules, module) })
+}
+
+fn lower_module(acc: Module, modules, module: t.Module) {
+  let c = Context(module: module.name, definition: "", modules:)
 
   // TODO detect what tuples are actually used
   let acc =
@@ -115,7 +127,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
         [] -> acc
         _ -> {
           let custom = lower_custom_type(c, custom.definition)
-          Context(..acc, types: [custom, ..acc.types])
+          Module(..acc, types: [custom, ..acc.types])
         }
       }
     })
@@ -134,7 +146,7 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
       let external =
         list.find(attrs, fn(x) {
           case x {
-            t.Attribute("external", [t.LocalVariable(_, "c"), ..]) -> True
+            t.Attribute("external", [t.NameAttributeArgument("c"), ..]) -> True
             _ -> False
           }
         })
@@ -144,18 +156,18 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
           let assert t.Attribute(
             _,
             [
-              t.LocalVariable(_, "c"),
-              t.String(_, _src),
-              t.String(_, external_name),
+              t.NameAttributeArgument("c"),
+              t.StringAttributeArgument(_src),
+              t.StringAttributeArgument(external_name),
             ],
           ) = external
           let fun = fun.definition
-          let typ = map_poly(c, fun.typ)
-          let module = c.current_module
+          let typ = map_poly(fun.typ)
+          let module = c.module
           let name = fun.name
           let internal_name = get_id(module, name)
           let builtin = list.any(attrs, fn(x) { x.name == "builtin" })
-          let parameters = list.map(fun.parameters, lower_parameter(c, _))
+          let parameters = list.map(fun.parameters, lower_parameter)
           let fun =
             External(
               typ:,
@@ -165,32 +177,32 @@ fn lower_module(c: t.Context, acc: Context, module: t.Module) {
               module:,
               builtin:,
             )
-          Context(..acc, externals: [fun, ..acc.externals])
+          Module(..acc, externals: [fun, ..acc.externals])
         }
         Error(_) -> {
           let fun = lower_function(c, fun)
-          Context(..acc, functions: [fun, ..acc.functions])
+          Module(..acc, functions: [fun, ..acc.functions])
         }
       }
     })
   acc
 }
 
-fn lower_custom_type(c: t.Context, custom: t.CustomType) {
-  let typ = map_poly(c, custom.typ)
-  let module = c.current_module
+fn lower_custom_type(c: Context, custom: t.CustomType) {
+  let typ = map_poly(custom.typ)
+  let module = c.module
   let name = custom.name
   let id = get_id(module, name)
   let variants =
     list.map(custom.variants, fn(variant) {
-      let typ = map_poly(c, variant.typ)
+      let typ = map_poly(variant.typ)
       let fields =
         list.index_map(variant.fields, fn(field, i) {
           let name = case field.label {
             Some(label) -> label
             None -> gen_names.get_field_name("", i)
           }
-          Parameter(map_type(c, field.item.typ), name)
+          Parameter(map_type(field.item.typ), name)
         })
       let id = get_id(module, variant.name)
       Variant(typ, id, variant.name, fields)
@@ -198,14 +210,14 @@ fn lower_custom_type(c: t.Context, custom: t.CustomType) {
   CustomType(typ, id, name, variants)
 }
 
-fn lower_function(c: t.Context, def: t.Definition(t.FunctionDefinition)) {
-  let c = t.Context(..c, current_definition: def.definition.name)
+fn lower_function(c: Context, def: t.Definition(t.FunctionDefinition)) {
+  let c = Context(..c, definition: def.definition.name)
   let function = def.definition
-  let typ = map_poly(c, function.typ)
-  let module = c.current_module
+  let typ = map_poly(function.typ)
+  let module = c.module
   let name = function.name
   let id = get_id(module, name)
-  let parameters = list.map(function.parameters, lower_parameter(c, _))
+  let parameters = list.map(function.parameters, lower_parameter)
   let body = lower_body(c, function.body)
   let taken = list.map(parameters, fn(param) { param.name })
   let #(_, _, body) = unshadow(taken, 1, body)
@@ -213,8 +225,8 @@ fn lower_function(c: t.Context, def: t.Definition(t.FunctionDefinition)) {
   Function(typ:, id:, parameters:, body:)
 }
 
-fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
-  let typ = map_type(c, parameter.typ)
+fn lower_parameter(parameter: t.FunctionParameter) {
+  let typ = map_type(parameter.typ)
   let name = case parameter.name {
     t.Named(name) -> name
     t.Discarded(name) -> "_" <> name
@@ -223,7 +235,7 @@ fn lower_parameter(c: t.Context, parameter: t.FunctionParameter) {
 }
 
 pub fn register_variant_functions(
-  c: Context,
+  c: Module,
   module_name: String,
   variant: Variant,
 ) {
@@ -239,10 +251,10 @@ pub fn register_variant_functions(
       module: module_name,
       builtin: True,
     )
-  Context(..c, externals: [fun, ..c.externals])
+  Module(..c, externals: [fun, ..c.externals])
 }
 
-fn lower_body(c: t.Context, body: List(t.Statement)) {
+fn lower_body(c: Context, body: List(t.Statement)) {
   case body {
     [] -> lower_expression(c, t.Todo(t.nil_type, None))
     [statement] ->
@@ -287,7 +299,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
           let value = lower_expression(c, value)
           let body = lower_body(c, body)
 
-          let bindings = lower_pattern_bindings(c, pattern, subject)
+          let bindings = lower_pattern_bindings(pattern, subject)
           let body =
             list.fold(bindings, body, fn(body, binding) {
               let #(name, subject) = binding
@@ -315,7 +327,7 @@ fn lower_body(c: t.Context, body: List(t.Statement)) {
 }
 
 fn check_assertions(
-  c: t.Context,
+  c: Context,
   pattern: t.Pattern,
   subject: t.Expression,
   value: Exp,
@@ -384,9 +396,9 @@ fn parse_bitstring_segment_expression(
       }
     })
     |> result.unwrap(case value {
-      t.Int(typ, value) -> IntMode
-      t.Float(typ, value) -> FloatMode
-      t.String(typ, value) -> Utf8Mode
+      t.Int(..) -> IntMode
+      t.Float(..) -> FloatMode
+      t.String(..) -> Utf8Mode
       _ -> IntMode
     })
 
@@ -468,9 +480,9 @@ fn parse_bitstring_segment_pattern(
       }
     })
     |> result.unwrap(case value {
-      t.PatternInt(typ, value) -> IntMode
-      t.PatternFloat(typ, value) -> FloatMode
-      t.PatternString(typ, value) -> Utf8Mode
+      t.PatternInt(..) -> IntMode
+      t.PatternFloat(..) -> FloatMode
+      t.PatternString(..) -> Utf8Mode
       _ -> IntMode
     })
 
@@ -845,7 +857,6 @@ fn index_bit_array(
 }
 
 fn lower_pattern_bindings(
-  c: t.Context,
   pattern: t.Pattern,
   subject: t.Expression,
 ) -> List(#(String, t.Expression)) {
@@ -854,11 +865,11 @@ fn lower_pattern_bindings(
     t.PatternFloat(..) -> []
     t.PatternString(..) -> []
     t.PatternDiscard(..) -> []
-    t.PatternVariable(typ, name) -> [#(name, subject)]
-    t.PatternTuple(typ, elems) -> {
+    t.PatternVariable(name:, ..) -> [#(name, subject)]
+    t.PatternTuple(elems:, ..) -> {
       list.index_map(elems, fn(elem, i) {
         let subject = t.TupleIndex(elem.typ, subject, i)
-        lower_pattern_bindings(c, elem, subject)
+        lower_pattern_bindings(elem, subject)
       })
       |> list.flatten
     }
@@ -875,13 +886,13 @@ fn lower_pattern_bindings(
           let a = [t.Field(Some("item"), x), t.Field(Some("next"), rest)]
           t.PatternConstructor(typ, t.builtin, "Cons", a, a, True, False)
         })
-      lower_pattern_bindings(c, list, subject)
+      lower_pattern_bindings(list, subject)
     }
-    t.PatternAssignment(typ, pattern, name) -> {
-      let pattern = lower_pattern_bindings(c, pattern, subject)
+    t.PatternAssignment(pattern:, name:, ..) -> {
+      let pattern = lower_pattern_bindings(pattern, subject)
       [#(name, subject), ..pattern]
     }
-    t.PatternConcatenate(typ, prefix, prefix_name, suffix_name) -> {
+    t.PatternConcatenate(prefix:, prefix_name:, suffix_name:, ..) -> {
       let prefix_binding = case prefix_name {
         Some(t.Named(name)) -> [#(name, t.String(t.string_type, prefix))]
         _ -> []
@@ -910,10 +921,10 @@ fn lower_pattern_bindings(
 
       list.append(prefix_binding, suffix_binding)
     }
-    t.PatternBitString(typ, segs) -> {
+    t.PatternBitString(segments:, ..) -> {
       // TODO total size not used? can we remove the calculation?
       let #(total_size, segs) =
-        list.fold(segs, #(t.Int(t.int_type, "0"), []), fn(acc, seg) {
+        list.fold(segments, #(t.Int(t.int_type, "0"), []), fn(acc, seg) {
           let #(offset, bindings) = acc
           let #(pattern, options) = seg
 
@@ -921,21 +932,13 @@ fn lower_pattern_bindings(
             index_bit_array(options, subject, offset, pattern)
 
           let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
-          let new_binding = lower_pattern_bindings(c, pattern, inner_subject)
+          let new_binding = lower_pattern_bindings(pattern, inner_subject)
           #(offset, list.append(bindings, new_binding))
         })
       segs
       |> list.reverse()
     }
-    t.PatternConstructor(
-      typ,
-      module,
-      constructor,
-      arguments,
-      ordered_arguments,
-      _,
-      _,
-    ) -> {
+    t.PatternConstructor(module:, constructor:, ordered_arguments:, ..) -> {
       let elems = ordered_arguments
       list.index_map(elems, fn(elem, index) {
         let label = option.unwrap(elem.label, "")
@@ -948,7 +951,7 @@ fn lower_pattern_bindings(
             label,
             index,
           )
-        lower_pattern_bindings(c, elem.item, subject)
+        lower_pattern_bindings(elem.item, subject)
       })
       |> list.flatten
     }
@@ -1011,7 +1014,7 @@ fn add_exp(first: Exp, second: Exp) {
 }
 
 fn lower_pattern_match(
-  c: t.Context,
+  c: Context,
   pattern: t.Pattern,
   subject: t.Expression,
 ) -> Exp {
@@ -1165,8 +1168,8 @@ fn lower_pattern_match(
           let assert NamedType(custom, _) = subject.typ
           let assert Ok(mod) = dict.get(c.modules, module)
           let assert Ok(t.Definition(_, custom)) =
-            list.find(mod.custom_types, fn(c) {
-              get_id(module, c.definition.name) == custom
+            list.find(mod.custom_types, fn(custom_type) {
+              get_id(module, custom_type.definition.name) == custom
             })
           let variant = get_id(module, constructor)
 
@@ -1182,14 +1185,14 @@ fn lower_pattern_match(
   }
 }
 
-fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
+fn lower_expression(c: Context, exp: t.Expression) -> Exp {
   case exp {
-    t.Int(typ, value) -> Literal(map_type(c, typ), Int(value))
-    t.Float(typ, value) -> Literal(map_type(c, typ), Float(value))
-    t.String(typ, value) -> Literal(map_type(c, typ), String(value))
-    t.LocalVariable(typ, name) -> Local(map_type(c, typ), name)
+    t.Int(typ, value) -> Literal(map_type(typ), Int(value))
+    t.Float(typ, value) -> Literal(map_type(typ), Float(value))
+    t.String(typ, value) -> Literal(map_type(typ), String(value))
+    t.LocalVariable(typ, name) -> Local(map_type(typ), name)
     t.Function(typ, module, name, _labels) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
 
       case module, name {
         // convert these to literals
@@ -1201,47 +1204,54 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
         }
       }
     }
-    t.Constant(value:, ..) -> {
+    t.Constant(module:, name:, ..) -> {
+      // TODO: in order for lowering to not require implementation details of
+      // other modules, inlining must happen later
+      let assert Ok(mod) = dict.get(c.modules, module)
+      let assert Ok(constant) =
+        list.find(mod.constants, fn(constant) {
+          constant.definition.name == name
+        })
       // inline the constant
-      lower_expression(c, value)
+      lower_expression(c, constant.definition.value)
     }
     t.NegateInt(typ, value) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let value = lower_expression(c, value)
       let fun = Global(FunctionType([typ], typ), "negate_int")
       Call(typ, fun, [value])
     }
     t.NegateBool(typ, value) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let value = lower_expression(c, value)
       let fun = Global(FunctionType([typ], typ), "negate_bool")
       Call(typ, fun, [value])
     }
     t.Block(_typ, statements) -> lower_body(c, statements)
     t.Panic(typ, value) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let value = case value {
         Some(value) -> lower_expression(c, value)
         None -> {
           let message = "panic: " <> current_location(c)
-          Literal(map_type(c, t.string_type), String(message))
+          Literal(map_type(t.string_type), String(message))
         }
       }
       Panic(typ, value)
     }
     t.Todo(typ, value) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let value = case value {
         Some(value) -> lower_expression(c, value)
         None -> {
           let message = "todo: " <> current_location(c)
-          Literal(map_type(c, t.string_type), String(message))
+          Literal(map_type(t.string_type), String(message))
         }
       }
       Panic(typ, value)
     }
     t.Tuple(typ, elements) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let elements = list.map(elements, lower_expression(c, _))
       let element_types = list.map(elements, fn(e) { e.typ })
       let len = int.to_string(list.length(elements))
@@ -1249,7 +1259,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Call(typ, fun, elements)
     }
     t.List(typ, elements, rest) -> {
-      let list_typ = map_type(c, typ)
+      let list_typ = map_type(typ)
       let rest = case rest {
         Some(rest) -> lower_expression(c, rest)
         None -> Global(list_typ, "Empty")
@@ -1264,8 +1274,8 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       })
     }
     t.Fn(typ, parameters, _return, body) -> {
-      let typ = map_type(c, typ)
-      let parameters = list.map(parameters, lower_parameter(c, _))
+      let typ = map_type(typ)
+      let parameters = list.map(parameters, lower_parameter)
       let body = lower_body(c, body)
       Fn(typ, parameters, body)
     }
@@ -1289,7 +1299,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
             }
           }
         })
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let record = lower_expression(c, record)
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
@@ -1298,7 +1308,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Let(body.typ, subject_name, record, body)
     }
     t.FieldAccess(typ, container, module, variant, _label, index) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let container = lower_expression(c, container)
       let assert NamedType(custom, _) = container.typ
       let assert Ok(module) = dict.get(c.modules, module)
@@ -1314,19 +1324,19 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Op(typ, FieldAccess(variant.name, field), [container])
     }
     t.Call(typ, function, args) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let function = lower_expression(c, function)
       let arguments = list.map(args, lower_expression(c, _))
       Call(typ, function, arguments)
     }
     t.TupleIndex(typ, tuple, index) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let tuple = lower_expression(c, tuple)
       Op(typ, FieldAccess("#", gen_names.get_field_name("", index)), [tuple])
     }
     t.FnCapture(..) -> todo
     t.BitString(typ, segs) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
 
       let segs =
         list.map(segs, fn(seg) {
@@ -1440,9 +1450,9 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       Let(body.typ, "total_size", total_size, body)
     }
     t.Case(typ, subjects, clauses) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let message = String("No matching clause in " <> current_location(c))
-      let else_body = Panic(typ, Literal(map_type(c, t.string_type), message))
+      let else_body = Panic(typ, Literal(map_type(t.string_type), message))
 
       // Create bindings for each subject
       let subject_vars =
@@ -1465,7 +1475,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
               list.flat_map(sub_pats, fn(pair) {
                 let #(#(name, exp, _), pattern) = pair
                 let sub = t.LocalVariable(exp.typ, name)
-                lower_pattern_bindings(c, pattern, sub)
+                lower_pattern_bindings(pattern, sub)
               })
 
             // Create pattern matching conditions
@@ -1528,7 +1538,7 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
       lower_expression(c, not_eq)
     }
     t.BinaryOperator(typ, name, left, right) -> {
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
       let function_name = case name {
@@ -1563,15 +1573,15 @@ fn lower_expression(c: t.Context, exp: t.Expression) -> Exp {
     t.Echo(typ:, value:) -> {
       let assert Some(value) = value
       let value = lower_expression(c, value)
-      let typ = map_type(c, typ)
+      let typ = map_type(typ)
       let print_typ = FunctionType([value.typ], value.typ)
       Call(typ, Global(print_typ, "echo_"), [value])
     }
   }
 }
 
-fn current_location(c: t.Context) {
-  c.current_module <> "." <> c.current_definition
+fn current_location(c: Context) {
+  c.module <> "." <> c.definition
 }
 
 fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
@@ -1627,13 +1637,13 @@ fn replace_var(replace: String, with: Exp, in: Exp) -> Exp {
   }
 }
 
-fn map_poly(c: t.Context, typ: t.Poly) {
-  Poly(typ.vars, map_type(c, typ.typ))
+fn map_poly(typ: t.Poly) {
+  Poly(typ.vars, map_type(typ.typ))
 }
 
-fn register_tuple(c: Context, size: Int) {
+fn register_tuple(c: Module, size: Int) {
   let id = gen_names.get_tuple_id(size)
-  let vars = listx.sane_range(size)
+  let vars = list.map(listx.sane_range(size), t.TypeVarId)
   let element_types = list.map(vars, fn(i) { Unbound(i) })
   let custom_typ = Poly(vars, NamedType(id, element_types))
   let constructor_typ = Poly(vars, FunctionType(element_types, custom_typ.typ))
@@ -1646,31 +1656,27 @@ fn register_tuple(c: Context, size: Int) {
   let variant = Variant(constructor_typ, id, "#", element_fields)
   let custom = CustomType(custom_typ, id, "#", [variant])
 
-  let c = Context(..c, types: [custom, ..c.types])
+  let c = Module(..c, types: [custom, ..c.types])
   register_variant_functions(c, t.builtin, variant)
 }
 
-fn map_type(c: t.Context, typ: t.Type) {
+fn map_type(typ: t.Type) {
   case typ {
-    t.NamedType(name:, module:, parameters:) -> {
-      let parameters = list.map(parameters, map_type(c, _))
+    t.NamedType(module:, name:, parameters:) -> {
+      let parameters = list.map(parameters, map_type)
       NamedType(get_id(module, name), parameters)
     }
     t.FunctionType(parameters, return) -> {
-      let parameters = list.map(parameters, map_type(c, _))
-      let return = map_type(c, return)
+      let parameters = list.map(parameters, map_type)
+      let return = map_type(return)
       FunctionType(parameters, return)
     }
     t.TupleType(elements) -> {
-      let parameters = list.map(elements, map_type(c, _))
+      let parameters = list.map(elements, map_type)
       NamedType(gen_names.get_tuple_id(list.length(elements)), parameters)
     }
     t.VariableType(ref) -> {
-      let assert Ok(x) = dict.get(c.type_vars, ref)
-      case x {
-        t.Bound(x) -> map_type(c, x)
-        t.Unbound(x) -> Unbound(x)
-      }
+      Unbound(ref)
     }
   }
 }
