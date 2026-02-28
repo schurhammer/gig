@@ -13,19 +13,19 @@ import gleam/string
 
 pub const builtin = "gleam"
 
-pub const nil_type = NamedType("Nil", builtin, [])
+pub const nil_type = NamedType(builtin, "Nil", [])
 
-pub const bool_type = NamedType("Bool", builtin, [])
+pub const bool_type = NamedType(builtin, "Bool", [])
 
-pub const int_type = NamedType("Int", builtin, [])
+pub const int_type = NamedType(builtin, "Int", [])
 
-pub const codepoint_type = NamedType("UtfCodepoint", builtin, [])
+pub const codepoint_type = NamedType(builtin, "UtfCodepoint", [])
 
-pub const float_type = NamedType("Float", builtin, [])
+pub const float_type = NamedType(builtin, "Float", [])
 
-pub const string_type = NamedType("String", builtin, [])
+pub const string_type = NamedType(builtin, "String", [])
 
-pub const bit_array_type = NamedType("BitArray", builtin, [])
+pub const bit_array_type = NamedType(builtin, "BitArray", [])
 
 pub type TypeVarId {
   TypeVarId(id: Int)
@@ -324,8 +324,7 @@ pub type Field(t) {
 }
 
 pub type Type {
-  // TODO change to module, name
-  NamedType(name: String, module: String, parameters: List(Type))
+  NamedType(module: String, name: String, parameters: List(Type))
   TupleType(elements: List(Type))
   FunctionType(parameters: List(Type), return: Type)
   VariableType(ref: TypeVarId)
@@ -338,8 +337,8 @@ pub type Poly {
 pub type Annotation {
   NamedAnno(
     typ: Type,
-    name: String,
     module: Option(String),
+    name: String,
     parameters: List(Annotation),
   )
   TupleAnno(typ: Type, elements: List(Annotation))
@@ -469,7 +468,7 @@ pub fn infer_module(
         })
       let parameters = list.reverse(parameters)
       let param_types = list.map(parameters, fn(x) { x.1 })
-      let typ = NamedType(custom.name, c.module.name, param_types)
+      let typ = NamedType(c.module.name, custom.name, param_types)
       let typ = generalise(c, typ)
 
       register_type(c, def.definition.name, typ, [])
@@ -1186,9 +1185,7 @@ fn do_infer_annotation(
         |> result.map(dict.from_list),
       )
       let typ = do_instantiate(c, mapping, poly.typ)
-
-      // let typ = NamedType(name, module, list.map(params, fn(x) { x.typ }))
-      #(c, NamedAnno(typ, name, anno_module, params))
+      #(c, NamedAnno(typ, anno_module, name, params))
     }
     g.TupleType(_, elements) -> {
       use #(c, elements) <- result.map(
@@ -1465,7 +1462,7 @@ fn infer_pattern(
       )
 
       // Create the list type
-      let typ = NamedType("List", builtin, [elem_type])
+      let typ = NamedType(builtin, "List", [elem_type])
 
       // Handle the tail pattern if present
       use #(c, n, tail) <- result.map(case tail {
@@ -1978,7 +1975,7 @@ fn infer_expression(
 
       // Create a type variable for the element type
       let #(c, elem_type) = new_type_var_ref(c)
-      let typ = NamedType("List", builtin, [elem_type])
+      let typ = NamedType(builtin, "List", [elem_type])
 
       // Unify all element types
       use c <- result.try(
@@ -2084,7 +2081,7 @@ fn infer_expression(
 
         // field access must be on a named type
         let value_typ = case resolve_type(c, value.typ) {
-          NamedType(type_name, module, _) -> Ok(#(type_name, module))
+          NamedType(module, type_name, _) -> Ok(#(type_name, module))
           _ -> Error(InvalidFieldAccess(location(c)))
         }
         use #(type_name, module) <- result.try(value_typ)
@@ -2599,8 +2596,12 @@ fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
             Unbound -> typ
           }
       }
-    NamedType(name, module, args) ->
-      NamedType(name, module, list.map(args, do_instantiate(c, n, _)))
+    NamedType(module:, name:, parameters:) ->
+      NamedType(
+        module:,
+        name:,
+        parameters: list.map(parameters, do_instantiate(c, n, _)),
+      )
     FunctionType(args, ret) ->
       FunctionType(
         list.map(args, do_instantiate(c, n, _)),
@@ -2627,7 +2628,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
         }
       }
     a, VariableType(_) -> unify(c, b, a)
-    NamedType(aname, amodule, _), NamedType(bname, bmodule, _)
+    NamedType(amodule, aname, _), NamedType(bmodule, bname, _)
       if aname != bname || amodule != bmodule
     -> Error(IncompatibleTypes(location(c), a, b))
     NamedType(_, _, aargs), NamedType(_, _, bargs) ->
@@ -3015,9 +3016,9 @@ fn substitute_poly(c: Context, poly: Poly) {
 
 fn substitute_type(c: Context, typ: Type) {
   case typ {
-    NamedType(name:, module:, parameters:) -> {
+    NamedType(module:, name:, parameters:) -> {
       let parameters = list.map(parameters, substitute_type(c, _))
-      NamedType(name:, module:, parameters:)
+      NamedType(module:, name:, parameters:)
     }
     FunctionType(parameters, return) -> {
       let parameters = list.map(parameters, substitute_type(c, _))

@@ -1662,7 +1662,7 @@ fn register_tuple(c: Module, size: Int) {
 
 fn map_type(typ: t.Type) {
   case typ {
-    t.NamedType(name:, module:, parameters:) -> {
+    t.NamedType(module:, name:, parameters:) -> {
       let parameters = list.map(parameters, map_type)
       NamedType(get_id(module, name), parameters)
     }
