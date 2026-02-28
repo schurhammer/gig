@@ -146,7 +146,7 @@ fn lower_module(acc: Module, modules, module: t.Module) {
       let external =
         list.find(attrs, fn(x) {
           case x {
-            t.Attribute("external", [t.LocalVariable(_, "c"), ..]) -> True
+            t.Attribute("external", [t.NameAttributeArgument("c"), ..]) -> True
             _ -> False
           }
         })
@@ -156,9 +156,9 @@ fn lower_module(acc: Module, modules, module: t.Module) {
           let assert t.Attribute(
             _,
             [
-              t.LocalVariable(_, "c"),
-              t.String(_, _src),
-              t.String(_, external_name),
+              t.NameAttributeArgument("c"),
+              t.StringAttributeArgument(_src),
+              t.StringAttributeArgument(external_name),
             ],
           ) = external
           let fun = fun.definition

@@ -41,7 +41,12 @@ pub type Definition(definition) {
 }
 
 pub type Attribute {
-  Attribute(name: String, arguments: List(Expression))
+  Attribute(name: String, arguments: List(AttributeArgument))
+}
+
+pub type AttributeArgument {
+  NameAttributeArgument(name: String)
+  StringAttributeArgument(value: String)
 }
 
 // TODO it would probably be good to parameterise the Type
@@ -364,6 +369,7 @@ pub type Error {
   IncompatibleTypes(location: Location, type_a: Type, type_b: Type)
   RecursiveTypeError(location: Location)
   BitPatternSegmentTypeOverSpecified(location: Location)
+  InvalidAttributeArgument(location: Location)
 }
 
 pub type QName {
@@ -783,8 +789,10 @@ pub fn inspect_error(error: Error) {
       <> string.inspect(type_b)
     RecursiveTypeError(..) ->
       "Encountered a cyclical dependency between type variables"
-    BitPatternSegmentTypeOverSpecified(_) ->
+    BitPatternSegmentTypeOverSpecified(..) ->
       "Bit pattern segment type set multiple times"
+    InvalidAttributeArgument(..) ->
+      "Unexpected expression for attribute argument (only variable or string are allowed)"
   }
 }
 
@@ -840,28 +848,24 @@ fn register_type(
 }
 
 fn infer_attributes(c: Context, attrs: List(g.Attribute)) {
-  let attr_env =
-    dict.new()
-    |> dict.insert("c", nil_type)
-    |> dict.insert("erlang", nil_type)
-    |> dict.insert("javascript", nil_type)
+  list.try_map(attrs, fn(attr) {
+    use args <- result.map(
+      list.try_map(attr.arguments, map_attribute_argument(c, _)),
+    )
+    Attribute(attr.name, args)
+  })
+}
 
-  use #(_, attrs) <- result.map(
-    list.try_fold(attrs, #(c, []), fn(acc, attr) {
-      let #(c, attrs) = acc
-      use #(c, exprs) <- result.map(
-        list.try_fold(attr.arguments, #(c, []), fn(acc, attr) {
-          let #(c, exprs) = acc
-          use #(c, expr) <- result.map(infer_expression(c, attr_env, attr))
-          #(c, [expr, ..exprs])
-        }),
-      )
-      let exprs = list.reverse(exprs)
-      let attr = Attribute(attr.name, exprs)
-      #(c, [attr, ..attrs])
-    }),
-  )
-  list.reverse(attrs)
+fn map_attribute_argument(
+  c: Context,
+  expr: g.Expression,
+) -> Result(AttributeArgument, Error) {
+  let c = Context(..c, current_span: expr.location)
+  case expr {
+    g.String(value:, ..) -> Ok(StringAttributeArgument(value))
+    g.Variable(name:, ..) -> Ok(NameAttributeArgument(name))
+    _ -> Error(InvalidAttributeArgument(location(c)))
+  }
 }
 
 fn infer_constant(
