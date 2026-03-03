@@ -2710,18 +2710,23 @@ pub fn resolve_type(c: Context, typ: Type) -> Type {
 }
 
 fn substitute_custom_type(c: Context, custom_type: CustomType) {
-  // TODO: do we need to substitute type annotations?
   CustomType(
     ..custom_type,
     typ: substitute_poly(c, custom_type.typ),
     variants: list.map(custom_type.variants, fn(variant) {
-      Variant(..variant, typ: substitute_poly(c, variant.typ))
+      Variant(
+        ..variant,
+        typ: substitute_poly(c, variant.typ),
+        fields: list.map(
+          variant.fields,
+          map_field(_, substitute_annotation(c, _)),
+        ),
+      )
     }),
   )
 }
 
 fn substitute_function(c: Context, function: FunctionDefinition) {
-  // TODO: do we need to substitute type annotations?
   FunctionDefinition(
     ..function,
     typ: substitute_poly(c, function.typ),
@@ -2730,6 +2735,7 @@ fn substitute_function(c: Context, function: FunctionDefinition) {
       _,
     )),
     body: list.map(function.body, substitute_statement(c, _)),
+    return: option.map(function.return, substitute_annotation(c, _)),
   )
 }
 
@@ -2737,11 +2743,14 @@ fn substitute_function_parameter(
   c: Context,
   param: FunctionParameter,
 ) -> FunctionParameter {
-  FunctionParameter(..param, typ: substitute_type(c, param.typ))
+  FunctionParameter(
+    ..param,
+    typ: substitute_type(c, param.typ),
+    annotation: option.map(param.annotation, substitute_annotation(c, _)),
+  )
 }
 
 fn substitute_statement(c: Context, statement: Statement) -> Statement {
-  // TODO: do we need to substitute type annotations?
   case statement {
     Use(typ:, patterns:, function:) ->
       Use(
@@ -2754,7 +2763,7 @@ fn substitute_statement(c: Context, statement: Statement) -> Statement {
         typ: substitute_type(c, typ),
         kind:,
         pattern: substitute_pattern(c, pattern),
-        annotation:,
+        annotation: option.map(annotation, substitute_annotation(c, _)),
         value: substitute_expression(c, value),
       )
     Assert(typ:, expression:, message:) ->
@@ -2828,7 +2837,7 @@ fn substitute_expression(c: Context, expr: Expression) -> Expression {
       Fn(
         typ: substitute_type(c, typ),
         parameters: list.map(parameters, substitute_function_parameter(c, _)),
-        return:,
+        return: option.map(return, substitute_annotation(c, _)),
         body: list.map(body, substitute_statement(c, _)),
       )
     RecordUpdate(
@@ -3004,16 +3013,6 @@ fn substitute_pattern(c: Context, pattern: Pattern) -> Pattern {
   }
 }
 
-fn map_bit_string_segment_option(
-  option: BitStringSegmentOption(a),
-  func: fn(a) -> a,
-) -> BitStringSegmentOption(a) {
-  case option {
-    SizeValueOption(expr) -> SizeValueOption(func(expr))
-    _ -> option
-  }
-}
-
 fn substitute_poly(c: Context, poly: Poly) {
   Poly(poly.vars, substitute_type(c, poly.typ))
 }
@@ -3042,6 +3041,32 @@ fn substitute_type(c: Context, typ: Type) {
   }
 }
 
+fn substitute_annotation(c: Context, anno: Annotation) -> Annotation {
+  case anno {
+    NamedAnno(typ:, module:, name:, parameters:) ->
+      NamedAnno(
+        typ: substitute_type(c, typ),
+        module:,
+        name:,
+        parameters: list.map(parameters, substitute_annotation(c, _)),
+      )
+    TupleAnno(typ:, elements:) ->
+      TupleAnno(
+        typ: substitute_type(c, typ),
+        elements: list.map(elements, substitute_annotation(c, _)),
+      )
+    FunctionAnno(typ:, parameters:, return:) ->
+      FunctionAnno(
+        typ: substitute_type(c, typ),
+        parameters: list.map(parameters, substitute_annotation(c, _)),
+        return: substitute_annotation(c, return),
+      )
+    VariableAnno(typ:, name:) ->
+      VariableAnno(typ: substitute_type(c, typ), name:)
+    HoleAnno(typ:, name:) -> HoleAnno(substitute_type(c, typ), name:)
+  }
+}
+
 fn map_field(field: Field(a), func: fn(a) -> b) -> Field(b) {
   Field(..field, item: func(field.item))
 }
@@ -3052,4 +3077,14 @@ fn map_definition(def: Definition(a), func: fn(a) -> b) -> Definition(b) {
 
 fn location(c: Context) {
   Location(c.module.name, c.current_definition, c.current_span)
+}
+
+fn map_bit_string_segment_option(
+  option: BitStringSegmentOption(a),
+  func: fn(a) -> a,
+) -> BitStringSegmentOption(a) {
+  case option {
+    SizeValueOption(expr) -> SizeValueOption(func(expr))
+    _ -> option
+  }
 }
