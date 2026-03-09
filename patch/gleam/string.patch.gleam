@@ -74,7 +74,7 @@ fn append_pairs(strings: List(String)) {
 fn unsafe_int_to_utf_codepoint(a: Int) -> UtfCodepoint
 
 @external(c, "", "gleam_string_from_utf_codepoints")
-fn from_utf_codepoints(utf_codepoints: List(UtfCodepoint)) -> String
+pub fn from_utf_codepoints(utf_codepoints: List(UtfCodepoint)) -> String
 
 @external(c, "", "gleam_string_do_to_utf_codepoints")
 fn do_to_utf_codepoints(string: String) -> List(UtfCodepoint)

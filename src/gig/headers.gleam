@@ -6,7 +6,7 @@ import gleam/dict
 import gleam/list
 import gleam/string
 
-pub fn module_headers(c: core.Context) {
+pub fn module_headers(c: core.Module) {
   c.externals
   |> list.filter(fn(x) { !x.builtin })
   |> list.group(fn(x) { x.module })

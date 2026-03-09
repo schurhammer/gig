@@ -27,7 +27,7 @@ pub fn println(string: String) -> Nil {
     do_print("\n")
 }
 
-fn println_error(string: String) -> Nil {
+pub fn println_error(string: String) -> Nil {
   do_print_error(string)
   do_print_error("\n")
 }
