@@ -1,35 +1,37 @@
 import argv
 import gig/compiler
+import gig_check
 import gleam/list
 import gleam/result
 import gleam/string
 
 pub fn main() {
-  let args = argv.load().arguments
+  gig_check.main()
+  // let args = argv.load().arguments
 
-  let #(flags, files) =
-    list.partition(args, fn(a) { string.starts_with(a, "-") })
+  // let #(flags, files) =
+  //   list.partition(args, fn(a) { string.starts_with(a, "-") })
 
-  let compiler =
-    list.find_map(flags, fn(flag) {
-      case flag {
-        "--compiler=" <> compiler -> Ok(compiler)
-        _ -> Error(Nil)
-      }
-    })
-    |> result.unwrap("clang")
+  // let compiler =
+  //   list.find_map(flags, fn(flag) {
+  //     case flag {
+  //       "--compiler=" <> compiler -> Ok(compiler)
+  //       _ -> Error(Nil)
+  //     }
+  //   })
+  //   |> result.unwrap("clang")
 
-  let gc = list.contains(flags, "--gc")
-  let release = list.contains(flags, "--release")
-  let debug = list.contains(flags, "--debug")
-  let c_only = list.contains(flags, "-c")
-  let headers = list.contains(flags, "--headers")
+  // let gc = list.contains(flags, "--gc")
+  // let release = list.contains(flags, "--release")
+  // let debug = list.contains(flags, "--debug")
+  // let c_only = list.contains(flags, "-c")
+  // let headers = list.contains(flags, "--headers")
 
-  let options =
-    compiler.CompileOptions(compiler:, gc:, release:, debug:, c_only:, headers:)
+  // let options =
+  //   compiler.CompileOptions(compiler:, gc:, release:, debug:, c_only:, headers:)
 
-  case files {
-    [file, ..] -> compiler.compile(file, options)
-    _ -> panic as "no file provided"
-  }
+  // case files {
+  //   [file, ..] -> compiler.compile(file, options)
+  //   _ -> panic as "no file provided"
+  // }
 }

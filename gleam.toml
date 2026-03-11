@@ -19,6 +19,7 @@ argv = ">= 1.0.2 and < 2.0.0"
 simplifile = ">= 2.3.0 and < 3.0.0"
 glance = ">= 5.0.0 and < 6.0.0"
 glexer = ">= 2.2.1 and < 3.0.0"
+gig_check = { path = "gig_check" }
 
 [dev-dependencies]
 startest = ">= 0.7.0 and < 1.0.0"
