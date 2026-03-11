@@ -1,6 +1,5 @@
 import birdie
 import cymbal as y
-import gig/gen_names
 import gig/typed_ast as t
 import glance
 import gleam/dict
@@ -14,7 +13,6 @@ pub fn simple_test() {
     glance.module(
       "
       const five = 5
-
       pub fn add_five(a) {
         a + five
       }
@@ -26,6 +24,26 @@ pub fn simple_test() {
   module_to_yaml(checked)
   |> y.encode
   |> birdie.snap(title: "simple test")
+}
+
+pub fn recursion_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      pub fn fold(list, acc, fun) {
+        case list {
+          [] -> acc
+          [head, ..tail] -> fold(tail, fun(acc, head), fun)
+        }
+      }
+      ",
+    )
+
+  let assert Ok(checked) = t.infer_module(dict.new(), parsed, "fold")
+
+  module_to_yaml(checked)
+  |> y.encode
+  |> birdie.snap(title: "recursion test")
 }
 
 fn module_to_yaml(module: t.Module) -> y.Yaml {
@@ -88,11 +106,45 @@ fn make(kind, typ, props) {
 
 fn statement_to_yaml(statement: t.Statement) -> y.Yaml {
   case statement {
-    t.Use(typ:, patterns:, function:) -> todo
-    t.Assignment(typ:, kind:, pattern:, annotation:, value:) -> todo
-    t.Assert(typ:, expression:, message:) -> todo
-    t.Expression(typ:, expression:) ->
-      make("expression", typ, [#("expression", expr_to_yaml(expression))])
+    t.Use(typ:, patterns:, function:) ->
+      make("use", typ, [
+        #("patterns", ylist(patterns, pattern_to_yaml)),
+        #("function", expr_to_yaml(function)),
+      ])
+    t.Assignment(typ:, kind:, pattern:, annotation:, value:) ->
+      make(
+        "assignment",
+        typ,
+        [
+          Some(#(
+            "assignment_kind",
+            case kind {
+              t.Let -> "let"
+              t.LetAssert -> "let_assert"
+            }
+              |> y.string,
+          )),
+          Some(#("pattern", pattern_to_yaml(pattern))),
+          option.map(annotation, fn(annotation) {
+            #("annotation", annotation_to_yaml(annotation))
+          }),
+          Some(#("value", expr_to_yaml(value))),
+        ]
+          |> option.values,
+      )
+    t.Assert(typ:, expression:, message:) ->
+      make(
+        "assert",
+        typ,
+        [
+          Some(#("expression", expr_to_yaml(expression))),
+          option.map(message, fn(message) {
+            #("message", expr_to_yaml(message))
+          }),
+        ]
+          |> option.values,
+      )
+    t.Expression(typ: _, expression:) -> expr_to_yaml(expression)
   }
 }
 
@@ -106,19 +158,11 @@ fn expr_to_yaml(expr: t.Expression) -> y.Yaml {
       make("string_literal", typ, [#("value", y.string(value))])
     t.LocalVariable(typ:, name:) ->
       make("local_variable", typ, [#("name", y.string(name))])
-    t.Function(typ:, module:, name:, labels:) ->
+    t.Function(typ:, module:, name:, labels: _) ->
       make("function", typ, [
         #("module", y.string(module)),
         #("name", y.string(name)),
-        #(
-          "labels",
-          ylist(labels, fn(label) {
-            case label {
-              Some(label) -> y.string(label)
-              None -> y.string("")
-            }
-          }),
-        ),
+        // TODO: do we need labels?
       ])
     t.Constant(typ:, module:, name:) ->
       make("constant", typ, [
@@ -161,26 +205,44 @@ fn expr_to_yaml(expr: t.Expression) -> y.Yaml {
         }
       ])
     t.Fn(typ:, parameters:, return:, body:) ->
-      make("fn", typ, [
-        #("parameters", ylist(parameters, function_parameter_to_yaml)),
-      ])
+      make(
+        "fn",
+        typ,
+        [
+          Some(#("parameters", ylist(parameters, function_parameter_to_yaml))),
+          option.map(return, fn(return) {
+            #("return", annotation_to_yaml(return))
+          }),
+          Some(#("body", ylist(body, statement_to_yaml))),
+        ]
+          |> option.values,
+      )
     t.RecordUpdate(
       typ:,
       module: _,
       resolved_module:,
       constructor:,
       record:,
-      fields:,
+      fields: _,
       ordered_fields:,
     ) ->
       make("record_update", typ, [
         #("module", y.string(resolved_module)),
         #("constructor", y.string(constructor)),
         #("record", expr_to_yaml(record)),
-        #("fields", todo),
+        #(
+          "fields",
+          ylist(ordered_fields, fn(field) {
+            case field {
+              Ok(field) -> field_to_yaml(field)
+              Error(typ) -> y.block([#("type", type_to_yaml(typ))])
+            }
+          }),
+        ),
       ])
     t.FieldAccess(typ:, container:, module:, variant:, label:, index:) ->
       make("field_access", typ, [
+        #("container", expr_to_yaml(container)),
         #("module", y.string(module)),
         // TODO: why call it constructor above and variant here?
         #("variant", y.string(variant)),
@@ -216,36 +278,36 @@ fn expr_to_yaml(expr: t.Expression) -> y.Yaml {
 
 fn binop_to_string(op: glance.BinaryOperator) -> String {
   case op {
-    glance.And -> todo
-    glance.Or -> todo
-    glance.Eq -> todo
-    glance.NotEq -> todo
-    glance.LtInt -> todo
-    glance.LtEqInt -> todo
-    glance.LtFloat -> todo
-    glance.LtEqFloat -> todo
-    glance.GtEqInt -> todo
-    glance.GtInt -> todo
-    glance.GtEqFloat -> todo
-    glance.GtFloat -> todo
-    glance.Pipe -> todo
-    glance.AddInt -> "add_int"
-    glance.AddFloat -> todo
-    glance.SubInt -> todo
-    glance.SubFloat -> todo
-    glance.MultInt -> todo
-    glance.MultFloat -> todo
-    glance.DivInt -> todo
-    glance.DivFloat -> todo
-    glance.RemainderInt -> todo
-    glance.Concatenate -> todo
+    glance.And -> "&&"
+    glance.Or -> "||"
+    glance.Eq -> "=="
+    glance.NotEq -> "!="
+    glance.LtInt -> "<"
+    glance.LtEqInt -> "<="
+    glance.LtFloat -> "<."
+    glance.LtEqFloat -> "<=."
+    glance.GtEqInt -> ">="
+    glance.GtInt -> ">"
+    glance.GtEqFloat -> ">=."
+    glance.GtFloat -> ">"
+    glance.Pipe -> "|>"
+    glance.AddInt -> "+"
+    glance.AddFloat -> "+."
+    glance.SubInt -> "-"
+    glance.SubFloat -> "-."
+    glance.MultInt -> "*"
+    glance.MultFloat -> "*."
+    glance.DivInt -> "/"
+    glance.DivFloat -> "/."
+    glance.RemainderInt -> "%"
+    glance.Concatenate -> "<>"
   }
 }
 
 fn clause_to_yaml(clause: t.Clause) -> y.Yaml {
   y.block(
     [
-      Some(#("patterns", ylist(clause.patterns, pattern_to_yaml))),
+      Some(#("patterns", ylist(clause.patterns, ylist(_, pattern_to_yaml)))),
       option.map(clause.guard, fn(guard) { #("guard", expr_to_yaml(guard)) }),
       Some(#("body", expr_to_yaml(clause.body))),
     ]
@@ -253,8 +315,47 @@ fn clause_to_yaml(clause: t.Clause) -> y.Yaml {
   )
 }
 
-fn pattern_to_yaml(list: List(t.Pattern)) -> y.Yaml {
-  todo
+fn pattern_to_yaml(list: t.Pattern) -> y.Yaml {
+  case list {
+    t.PatternInt(typ:, value:) ->
+      make("int_pattern", typ, [#("value", y.string(value))])
+    t.PatternFloat(typ:, value:) ->
+      make("float_pattern", typ, [#("value", y.string(value))])
+    t.PatternString(typ:, value:) ->
+      make("string_pattern", typ, [#("value", y.string(value))])
+    t.PatternDiscard(typ:, name:) ->
+      make("discard_pattern", typ, [#("name", y.string(name))])
+    t.PatternVariable(typ:, name:) ->
+      make("variable_pattern", typ, [#("name", y.string(name))])
+    t.PatternTuple(typ:, elems:) ->
+      make("tuple_pattern", typ, [#("elements", ylist(elems, pattern_to_yaml))])
+    t.PatternList(typ:, elements:, tail:) ->
+      make(
+        "list_pattern",
+        typ,
+        [
+          Some(#("elements", ylist(elements, pattern_to_yaml))),
+          option.map(tail, fn(tail) { #("tail", pattern_to_yaml(tail)) }),
+        ]
+          |> option.values,
+      )
+    t.PatternAssignment(typ:, pattern:, name:) ->
+      make("assignment_pattern", typ, [
+        #("name", y.string(name)),
+        #("pattern", pattern_to_yaml(pattern)),
+      ])
+    t.PatternConcatenate(typ:, prefix:, prefix_name:, suffix_name:) -> todo
+    t.PatternBitString(typ:, segments:) -> todo
+    t.PatternConstructor(
+      typ:,
+      module:,
+      constructor:,
+      arguments:,
+      ordered_arguments:,
+      with_module:,
+      with_spread:,
+    ) -> todo
+  }
 }
 
 fn function_parameter_to_yaml(function_parameter: t.FunctionParameter) -> y.Yaml {
@@ -270,6 +371,17 @@ fn function_parameter_to_yaml(function_parameter: t.FunctionParameter) -> y.Yaml
   )
 }
 
+fn field_to_yaml(field: t.Field(t.Expression)) -> y.Yaml {
+  let t.Field(label:, item:) = field
+  y.block(
+    [
+      option.map(label, fn(label) { #("label", y.string(label)) }),
+      Some(#("item", expr_to_yaml(item))),
+    ]
+    |> option.values,
+  )
+}
+
 fn assignment_name_to_yaml(name: t.AssignmentName) -> y.Yaml {
   case name {
     t.Named(value:) -> value
@@ -280,7 +392,7 @@ fn assignment_name_to_yaml(name: t.AssignmentName) -> y.Yaml {
 
 fn poly_to_yaml(typ: t.Poly) -> y.Yaml {
   y.block([
-    #("type_variables", ylist(typ.vars, type_var_id_to_yaml)),
+    #("parameters", ylist(typ.vars, type_var_id_to_yaml)),
     #("definition", type_to_yaml(typ.typ)),
   ])
 }
@@ -323,7 +435,7 @@ fn publicity_to_yaml(publicity: t.Publicity) -> y.Yaml {
   |> y.string
 }
 
-fn annotation_to_yaml(annotation: option.Option(t.Annotation)) -> y.Yaml {
+fn annotation_to_yaml(annotation: t.Annotation) -> y.Yaml {
   todo
 }
 
