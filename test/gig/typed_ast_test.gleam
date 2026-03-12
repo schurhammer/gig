@@ -26,7 +26,7 @@ pub fn simple_test() {
   |> birdie.snap(title: "simple test")
 }
 
-pub fn recursion_test() {
+pub fn recursive_function_test() {
   let assert Ok(parsed) =
     glance.module(
       "
@@ -43,7 +43,26 @@ pub fn recursion_test() {
 
   module_to_yaml(checked)
   |> y.encode
-  |> birdie.snap(title: "recursion test")
+  |> birdie.snap(title: "recursive function test")
+}
+
+pub fn recursive_type_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      pub type Tree(e) {
+        Node(left: Tree(e), right: Tree(e))
+        Leaf(data: e)
+      }
+      ",
+    )
+
+  echo "HI!"
+  let assert Ok(checked) = t.infer_module(dict.new(), parsed, "tree") |> echo
+
+  module_to_yaml(checked)
+  |> y.encode
+  |> birdie.snap(title: "recursive type test")
 }
 
 fn module_to_yaml(module: t.Module) -> y.Yaml {
@@ -61,43 +80,98 @@ fn ylist(l: List(a), f: fn(a) -> y.Yaml) -> y.Yaml {
   y.array(list.map(l, f))
 }
 
-fn import_to_yaml(definition: t.Definition(t.Import)) -> y.Yaml {
-  todo
+fn import_to_yaml(def: t.Definition(t.Import)) -> y.Yaml {
+  let i = def.definition
+  y.block(
+    [
+      Some(#("module", y.string(i.module))),
+      option.map(i.alias, fn(alias) {
+        #("alias", assignment_name_to_yaml(alias))
+      }),
+      Some(#("attributes", ylist(def.attributes, attribute_to_yaml))),
+      Some(#(
+        "unqualified_types",
+        ylist(i.unqualified_types, unq_import_to_yaml),
+      )),
+      Some(#(
+        "unqualified_values",
+        ylist(i.unqualified_values, unq_import_to_yaml),
+      )),
+    ]
+    |> option.values,
+  )
 }
 
-fn type_alias_to_yaml(definition: t.Definition(t.TypeAlias)) -> y.Yaml {
-  todo
+fn type_alias_to_yaml(def: t.Definition(t.TypeAlias)) -> y.Yaml {
+  let a = def.definition
+  y.block([
+    #("name", y.string(a.name)),
+    #("type", poly_to_yaml(a.typ)),
+    #("publicity", publicity_to_yaml(a.publicity)),
+    #("attributes", ylist(def.attributes, attribute_to_yaml)),
+    #("parameters", ylist(a.parameters, y.string)),
+    #("aliased", annotation_to_yaml(a.aliased)),
+  ])
 }
 
-fn custom_type_to_yaml(definition: t.Definition(t.CustomType)) -> y.Yaml {
-  todo
+fn custom_type_to_yaml(def: t.Definition(t.CustomType)) -> y.Yaml {
+  let t = def.definition
+  y.block([
+    #("name", y.string(t.name)),
+    #("type", poly_to_yaml(t.typ)),
+    #("publicity", publicity_to_yaml(t.publicity)),
+    #("opaque", y.bool(t.opaque_)),
+    #("attributes", ylist(def.attributes, attribute_to_yaml)),
+    #("parameters", ylist(t.parameters, y.string)),
+    #("variants", ylist(t.variants, variant_to_yaml)),
+  ])
+}
+
+fn variant_to_yaml(variant: t.Variant) -> y.Yaml {
+  y.block([
+    #("name", y.string(variant.name)),
+    #("type", poly_to_yaml(variant.typ)),
+    #(
+      "fields",
+      ylist(variant.fields, field_to_yaml(_, "annotation", annotation_to_yaml)),
+    ),
+  ])
 }
 
 fn constant_to_yaml(def: t.Definition(t.ConstantDefinition)) -> y.Yaml {
-  y.block([
-    #("name", y.string(def.definition.name)),
-    #("type", poly_to_yaml(def.definition.typ)),
-    // TODO: annotation?
-    #("publicity", publicity_to_yaml(def.definition.publicity)),
-    #("attributes", ylist(def.attributes, attribute_to_yaml)),
-    #("value", expr_to_yaml(def.definition.value)),
-  ])
+  let c = def.definition
+  y.block(
+    [
+      Some(#("name", y.string(c.name))),
+      Some(#("type", poly_to_yaml(c.typ))),
+      option.map(c.annotation, fn(annotation) {
+        #("annotation", annotation_to_yaml(annotation))
+      }),
+      Some(#("publicity", publicity_to_yaml(c.publicity))),
+      Some(#("attributes", ylist(def.attributes, attribute_to_yaml))),
+      Some(#("value", expr_to_yaml(c.value))),
+    ]
+    |> option.values,
+  )
 }
 
 fn function_to_yaml(def: t.Definition(t.FunctionDefinition)) -> y.Yaml {
-  y.block([
-    #("name", y.string(def.definition.name)),
-    #("type", poly_to_yaml(def.definition.typ)),
-    #("publicity", publicity_to_yaml(def.definition.publicity)),
-    #("attributes", ylist(def.attributes, attribute_to_yaml)),
-    #(
-      "parameters",
-      ylist(def.definition.parameters, function_parameter_to_yaml),
-    ),
-    // TODO: return
-    #("body", ylist(def.definition.body, statement_to_yaml)),
-    // TODO: location?
-  ])
+  let f = def.definition
+  y.block(
+    [
+      Some(#("name", y.string(f.name))),
+      Some(#("type", poly_to_yaml(f.typ))),
+      Some(#("publicity", publicity_to_yaml(f.publicity))),
+      Some(#("attributes", ylist(def.attributes, attribute_to_yaml))),
+      Some(#("parameters", ylist(f.parameters, function_parameter_to_yaml))),
+      option.map(f.return, fn(return) {
+        #("return", annotation_to_yaml(return))
+      }),
+      Some(#("body", ylist(f.body, statement_to_yaml))),
+      // TODO: location?
+    ]
+    |> option.values,
+  )
 }
 
 fn make(kind, typ, props) {
@@ -234,7 +308,7 @@ fn expr_to_yaml(expr: t.Expression) -> y.Yaml {
           "fields",
           ylist(ordered_fields, fn(field) {
             case field {
-              Ok(field) -> field_to_yaml(field)
+              Ok(field) -> field_to_yaml(field, "value", expr_to_yaml)
               Error(typ) -> y.block([#("type", type_to_yaml(typ))])
             }
           }),
@@ -260,8 +334,35 @@ fn expr_to_yaml(expr: t.Expression) -> y.Yaml {
         #("index", y.int(index)),
       ])
     t.FnCapture(typ:, label:, function:, arguments_before:, arguments_after:) ->
-      todo
-    t.BitString(typ:, segments:) -> todo
+      make(
+        "fn_capture",
+        typ,
+        [
+          option.map(label, fn(label) { #("label", y.string(label)) }),
+          Some(#("function", expr_to_yaml(function))),
+          Some(#(
+            "arguments_before",
+            ylist(arguments_before, field_to_yaml(_, "value", expr_to_yaml)),
+          )),
+          Some(#(
+            "arguments_after",
+            ylist(arguments_after, field_to_yaml(_, "value", expr_to_yaml)),
+          )),
+        ]
+          |> option.values,
+      )
+    t.BitString(typ:, segments:) ->
+      make("bit_string", typ, [
+        #(
+          "segments",
+          ylist(segments, fn(segment) {
+            y.block([
+              #("expression", expr_to_yaml(segment.0)),
+              #("options", ylist(segment.1, bsso_to_yaml(_, expr_to_yaml))),
+            ])
+          }),
+        ),
+      ])
     t.Case(typ:, subjects:, clauses:) ->
       make("case", typ, [
         #("subjects", ylist(subjects, expr_to_yaml)),
@@ -274,6 +375,20 @@ fn expr_to_yaml(expr: t.Expression) -> y.Yaml {
         #("right", expr_to_yaml(right)),
       ])
   }
+}
+
+fn field_to_yaml(
+  field: t.Field(a),
+  item_name: String,
+  item_fun: fn(a) -> y.Yaml,
+) {
+  y.block(
+    [
+      option.map(field.label, fn(label) { #("label", y.string(label)) }),
+      Some(#(item_name, item_fun(field.item))),
+    ]
+    |> option.values,
+  )
 }
 
 fn binop_to_string(op: glance.BinaryOperator) -> String {
@@ -328,6 +443,7 @@ fn pattern_to_yaml(list: t.Pattern) -> y.Yaml {
     t.PatternVariable(typ:, name:) ->
       make("variable_pattern", typ, [#("name", y.string(name))])
     t.PatternTuple(typ:, elems:) ->
+      // TODO: why is it elems here and elements for list?
       make("tuple_pattern", typ, [#("elements", ylist(elems, pattern_to_yaml))])
     t.PatternList(typ:, elements:, tail:) ->
       make(
@@ -344,17 +460,50 @@ fn pattern_to_yaml(list: t.Pattern) -> y.Yaml {
         #("name", y.string(name)),
         #("pattern", pattern_to_yaml(pattern)),
       ])
-    t.PatternConcatenate(typ:, prefix:, prefix_name:, suffix_name:) -> todo
-    t.PatternBitString(typ:, segments:) -> todo
+    t.PatternConcatenate(typ:, prefix:, prefix_name:, suffix_name:) ->
+      make(
+        "concatenate_pattern",
+        typ,
+        [
+          Some(#("prefix", y.string(prefix))),
+          option.map(prefix_name, fn(name) {
+            #("prefix_name", assignment_name_to_yaml(name))
+          }),
+          Some(#("suffix_name", assignment_name_to_yaml(suffix_name))),
+        ]
+          |> option.values,
+      )
+    t.PatternBitString(typ:, segments:) ->
+      make("bit_string_pattern", typ, [
+        #(
+          "segments",
+          ylist(segments, fn(segment) {
+            y.block([
+              #("pattern", pattern_to_yaml(segment.0)),
+              #("options", ylist(segment.1, bsso_to_yaml(_, pattern_to_yaml))),
+            ])
+          }),
+        ),
+      ])
     t.PatternConstructor(
       typ:,
       module:,
       constructor:,
-      arguments:,
+      arguments: _,
       ordered_arguments:,
       with_module:,
       with_spread:,
-    ) -> todo
+    ) ->
+      make("constructor_pattern", typ, [
+        #("module", y.string(module)),
+        #("constructor", y.string(constructor)),
+        #(
+          "arguments",
+          ylist(ordered_arguments, field_to_yaml(_, "pattern", pattern_to_yaml)),
+        ),
+        #("with_module", y.bool(with_module)),
+        #("with_spread", y.bool(with_spread)),
+      ])
   }
 }
 
@@ -365,18 +514,9 @@ fn function_parameter_to_yaml(function_parameter: t.FunctionParameter) -> y.Yaml
       Some(#("type", type_to_yaml(typ))),
       option.map(label, fn(label) { #("label", y.string(label)) }),
       Some(#("name", assignment_name_to_yaml(name))),
-      // TODO: annotation
-    ]
-    |> option.values,
-  )
-}
-
-fn field_to_yaml(field: t.Field(t.Expression)) -> y.Yaml {
-  let t.Field(label:, item:) = field
-  y.block(
-    [
-      option.map(label, fn(label) { #("label", y.string(label)) }),
-      Some(#("item", expr_to_yaml(item))),
+      option.map(annotation, fn(annotation) {
+        #("annotation", annotation_to_yaml(annotation))
+      }),
     ]
     |> option.values,
   )
@@ -391,10 +531,12 @@ fn assignment_name_to_yaml(name: t.AssignmentName) -> y.Yaml {
 }
 
 fn poly_to_yaml(typ: t.Poly) -> y.Yaml {
-  y.block([
-    #("parameters", ylist(typ.vars, type_var_id_to_yaml)),
-    #("definition", type_to_yaml(typ.typ)),
-  ])
+  y.string(
+    "("
+    <> string.join(list.map(typ.vars, fn(id) { int.to_string(id.id) }), ", ")
+    <> ") "
+    <> type_to_string(typ.typ),
+  )
 }
 
 fn type_to_string(typ: t.Type) -> String {
@@ -436,9 +578,41 @@ fn publicity_to_yaml(publicity: t.Publicity) -> y.Yaml {
 }
 
 fn annotation_to_yaml(annotation: t.Annotation) -> y.Yaml {
-  todo
+  y.string(anno_to_string(annotation))
+}
+
+fn anno_to_string(annotation: t.Annotation) -> String {
+  let of_list = fn(l) { string.join(list.map(l, anno_to_string), ", ") }
+  case annotation {
+    t.NamedAnno(typ: _, module:, name:, parameters:) ->
+      case module {
+        Some(module) -> module <> "."
+        None -> ""
+      }
+      <> name
+      <> case parameters {
+        [] -> ""
+        _ -> "(" <> of_list(parameters) <> ")"
+      }
+    t.TupleAnno(typ: _, elements:) -> "#(" <> of_list(elements) <> ")"
+    t.FunctionAnno(typ: _, parameters:, return:) ->
+      "fn(" <> of_list(parameters) <> ") -> " <> anno_to_string(return)
+    t.VariableAnno(typ: _, name:) -> name
+    t.HoleAnno(typ: _, name:) -> "_" <> name
+  }
 }
 
 fn attribute_to_yaml(attribute: t.Attribute) -> y.Yaml {
+  todo
+}
+
+fn unq_import_to_yaml(unqualified_import: t.UnqualifiedImport) -> y.Yaml {
+  todo
+}
+
+fn bsso_to_yaml(
+  bit_string_segment_option: t.BitStringSegmentOption(a),
+  fun: fn(a) -> y.Yaml,
+) -> y.Yaml {
   todo
 }
