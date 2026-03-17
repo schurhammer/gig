@@ -6,6 +6,7 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 
 pub fn simple_test() {
@@ -57,12 +58,89 @@ pub fn recursive_type_test() {
       ",
     )
 
-  echo "HI!"
-  let assert Ok(checked) = t.infer_module(dict.new(), parsed, "tree") |> echo
+  let assert Ok(checked) = t.infer_module(dict.new(), parsed, "tree")
 
   module_to_yaml(checked)
   |> y.encode
   |> birdie.snap(title: "recursive type test")
+}
+
+pub fn type_alias_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      pub type Pair(a, b) = #(a, b)
+
+      pub fn pair_of_pairs(p: Pair(a, b), q: Pair(a, b)) {
+        #(p, q)
+      }
+      ",
+    )
+
+  let assert Ok(checked) = t.infer_module(dict.new(), parsed, "example")
+
+  module_to_yaml(checked)
+  |> y.encode
+  |> birdie.snap(title: "type alias test")
+}
+
+pub fn import_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      pub type Int
+      ",
+    )
+  let assert Ok(prelude) =
+    t.infer_module(dict.new(), parsed, "gleam")
+    |> result.map(t.interface)
+
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      pub type Option(e) {
+        Some(e)
+        None
+      }
+
+      @external(erlang, \"option\", \"map\")
+      pub fn map(option: Option(a), f: fn(a) -> b) -> Option(b)
+      ",
+    )
+  let assert Ok(option_interface) =
+    t.infer_module(dict.new(), parsed, "gleam/option")
+    |> result.map(t.interface)
+
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      import gleam/option.{type Option, Some, None}
+
+      pub type OptionalInt = Option(Int)
+
+      pub fn optional_square(maybe) {
+        option.map(maybe, fn(n) { n * n })
+      }
+
+      pub fn optional_double(maybe) {
+        case maybe {
+          Some(n) -> Some(2 * n)
+          None -> None
+        }
+      }
+      ",
+    )
+
+  let assert Ok(checked) =
+    t.infer_module(
+      dict.from_list([#("gleam", prelude), #("gleam/option", option_interface)]),
+      parsed,
+      "example",
+    )
+
+  module_to_yaml(checked)
+  |> y.encode
+  |> birdie.snap(title: "import test")
 }
 
 fn module_to_yaml(module: t.Module) -> y.Yaml {
