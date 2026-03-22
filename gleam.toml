@@ -17,7 +17,8 @@ gleam_stdlib = ">= 0.62.1 and < 1.0.0"
 shellout = ">= 1.7.0 and < 2.0.0"
 argv = ">= 1.0.2 and < 2.0.0"
 simplifile = ">= 2.3.0 and < 3.0.0"
-glance = ">= 5.0.0 and < 6.0.0"
+glance = ">= 6.0.0 and < 7.0.0"
+glance_typed = { git = "https://github.com/schurhammer/glance_typed.git", ref = "main" }
 glexer = ">= 2.2.1 and < 3.0.0"
 birdie = ">= 1.3.1 and < 2.0.0"
 

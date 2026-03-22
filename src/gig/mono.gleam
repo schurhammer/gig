@@ -271,7 +271,7 @@ fn instantiate_function(c: Context, name: String, mono: Type) {
 
       case fun.body {
         t.Panic(_, _) -> {
-          io.println_error("instantiating unimplemented function " <> fun.id)
+          io.println_error("missing function " <> fun.id <> " in " <> name)
         }
         _ -> Nil
       }

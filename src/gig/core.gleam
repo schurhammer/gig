@@ -1,5 +1,5 @@
 import gig/gen_names.{get_id}
-import gig/typed_ast as t
+import glance_typed as t
 import gleam/dict
 import gleam/result
 import gleam/string
@@ -12,7 +12,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 
-pub const builtin = t.builtin
+pub const prelude = t.prelude
 
 pub type TypeVarId =
   t.TypeVarId
@@ -198,9 +198,9 @@ fn lower_custom_type(c: Context, custom: t.CustomType) {
       let typ = map_poly(variant.typ)
       let fields =
         list.index_map(variant.fields, fn(field, i) {
-          let name = case field.label {
-            Some(label) -> label
-            None -> gen_names.get_field_name("", i)
+          let name = case field {
+            t.LabelledVariantField(label:, ..) -> gen_names.field_name(label, i)
+            t.UnlabelledVariantField(..) -> gen_names.field_name("", i)
           }
           Parameter(map_type(field.item.typ), name)
         })
@@ -234,6 +234,15 @@ fn lower_parameter(parameter: t.FunctionParameter) {
   Parameter(typ, name)
 }
 
+fn lower_fn_parameter(parameter: t.FnParameter) {
+  let typ = map_type(parameter.typ)
+  let name = case parameter.name {
+    t.Named(name) -> name
+    t.Discarded(name) -> "_" <> name
+  }
+  Parameter(typ, name)
+}
+
 pub fn register_variant_functions(
   c: Module,
   module_name: String,
@@ -256,17 +265,17 @@ pub fn register_variant_functions(
 
 fn lower_body(c: Context, body: List(t.Statement)) {
   case body {
-    [] -> lower_expression(c, t.Todo(t.nil_type, None))
+    [] -> lower_expression(c, t.Todo(t.nil_type, g.Span(0, 0), None))
     [statement] ->
       case statement {
-        t.Expression(_, exp) -> lower_expression(c, exp)
-        t.Assignment(_, kind, pattern, _, value) -> {
+        t.Expression(expression:, ..) -> lower_expression(c, expression)
+        t.Assignment(kind:, pattern:, value:, ..) -> {
           let body = lower_expression(c, value)
 
           // check assertions
           case kind {
-            t.LetAssert -> {
-              let subject = t.LocalVariable(value.typ, "S")
+            t.LetAssert(_) -> {
+              let subject = t.LocalVariable(value.typ, g.Span(0, 0), "S")
               let value = lower_expression(c, value)
               let body = check_assertions(c, pattern, subject, value, body)
               Let(body.typ, "S", value, body)
@@ -274,28 +283,28 @@ fn lower_body(c: Context, body: List(t.Statement)) {
             t.Let -> body
           }
         }
-        t.Assert(typ, expression, message) -> {
+        t.Assert(typ:, expression:, message:, ..) -> {
           let expression = lower_expression(c, expression)
           let body = lower_body(c, body)
-          let message = lower_expression(c, t.Panic(typ, message))
+          let message = lower_expression(c, t.Panic(typ, g.Span(0, 0), message))
           If(typ: body.typ, condition: expression, then: body, els: message)
         }
         t.Use(..) -> todo
       }
     [statement, ..body] ->
       case statement {
-        t.Expression(_, value) -> {
-          let value = lower_expression(c, value)
+        t.Expression(expression:, ..) -> {
+          let value = lower_expression(c, expression)
           let body = lower_body(c, body)
           Let(body.typ, "_", value, body)
         }
-        t.Assignment(_, _, t.PatternVariable(_, name), _, value) -> {
+        t.Assignment(pattern: t.PatternVariable(name:, ..), value:, ..) -> {
           let value = lower_expression(c, value)
           let body = lower_body(c, body)
           Let(body.typ, name, value, body)
         }
-        t.Assignment(_, kind, pattern, _, value) -> {
-          let subject = t.LocalVariable(value.typ, "S")
+        t.Assignment(kind:, pattern:, value:, ..) -> {
+          let subject = t.LocalVariable(value.typ, g.Span(0, 0), "S")
           let value = lower_expression(c, value)
           let body = lower_body(c, body)
 
@@ -309,16 +318,16 @@ fn lower_body(c: Context, body: List(t.Statement)) {
 
           // check assertions
           let body = case kind {
-            t.LetAssert -> check_assertions(c, pattern, subject, value, body)
+            t.LetAssert(_) -> check_assertions(c, pattern, subject, value, body)
             t.Let -> body
           }
 
           Let(body.typ, "S", value, body)
         }
-        t.Assert(typ, expression, message) -> {
+        t.Assert(typ:, expression:, message:, ..) -> {
           let expression = lower_expression(c, expression)
           let body = lower_body(c, body)
-          let message = lower_expression(c, t.Panic(typ, message))
+          let message = lower_expression(c, t.Panic(typ, g.Span(0, 0), message))
           If(typ: body.typ, condition: expression, then: body, els: message)
         }
         t.Use(..) -> todo
@@ -405,14 +414,15 @@ fn parse_bitstring_segment_expression(
   let size =
     list.find_map(options, fn(option) {
       case option {
-        t.SizeOption(size) -> Ok(Sized(t.Int(t.int_type, int.to_string(size))))
+        t.SizeOption(size) ->
+          Ok(Sized(t.Int(t.int_type, g.Span(0, 0), int.to_string(size))))
         t.SizeValueOption(size) -> Ok(Sized(size))
         _ -> Error(Nil)
       }
     })
     |> result.unwrap(case mode {
-      IntMode -> Sized(t.Int(t.int_type, "8"))
-      FloatMode -> Sized(t.Int(t.int_type, "64"))
+      IntMode -> Sized(t.Int(t.int_type, g.Span(0, 0), "8"))
+      FloatMode -> Sized(t.Int(t.int_type, g.Span(0, 0), "64"))
       Utf8CodepointMode -> Unsized
       Utf16CodepointMode -> Unsized
       Utf32CodepointMode -> Unsized
@@ -489,20 +499,22 @@ fn parse_bitstring_segment_pattern(
   let size =
     list.find_map(options, fn(option) {
       case option {
-        t.SizeOption(size) -> Ok(Sized(t.Int(t.int_type, int.to_string(size))))
+        t.SizeOption(size) ->
+          Ok(Sized(t.Int(t.int_type, g.Span(0, 0), int.to_string(size))))
         t.SizeValueOption(pattern) ->
           case pattern {
-            t.PatternInt(typ, value) -> Ok(Sized(t.Int(typ, value)))
-            t.PatternVariable(typ, value) ->
-              Ok(Sized(t.LocalVariable(typ, value)))
+            t.PatternInt(typ:, value:, ..) ->
+              Ok(Sized(t.Int(typ, g.Span(0, 0), value)))
+            t.PatternVariable(typ:, name:, ..) ->
+              Ok(Sized(t.LocalVariable(typ, g.Span(0, 0), name)))
             _ -> Error(Nil)
           }
         _ -> Error(Nil)
       }
     })
     |> result.unwrap(case mode {
-      IntMode -> Sized(t.Int(t.int_type, "8"))
-      FloatMode -> Sized(t.Int(t.int_type, "64"))
+      IntMode -> Sized(t.Int(t.int_type, g.Span(0, 0), "8"))
+      FloatMode -> Sized(t.Int(t.int_type, g.Span(0, 0), "64"))
       Utf8CodepointMode -> Unsized
       Utf16CodepointMode -> Unsized
       Utf32CodepointMode -> Unsized
@@ -551,9 +563,9 @@ fn parse_bitstring_segment_pattern(
 
 fn endian_expression(endian: Endianness) -> t.Expression {
   case endian {
-    NativeEndian -> t.Int(t.int_type, "0")
-    BigEndian -> t.Int(t.int_type, "1")
-    LittleEndian -> t.Int(t.int_type, "2")
+    NativeEndian -> t.Int(t.int_type, g.Span(0, 0), "0")
+    BigEndian -> t.Int(t.int_type, g.Span(0, 0), "1")
+    LittleEndian -> t.Int(t.int_type, g.Span(0, 0), "2")
   }
 }
 
@@ -575,28 +587,36 @@ fn index_bit_array(
             _ ->
               t.BinaryOperator(
                 t.int_type,
+                g.Span(0, 0),
                 g.MultInt,
                 size,
-                t.Int(t.int_type, int.to_string(unit)),
+                t.Int(t.int_type, g.Span(0, 0), int.to_string(unit)),
               )
           }
           #(size, False)
         }
-        Unsized -> #(t.Int(t.int_type, "-1"), True)
+        Unsized -> #(t.Int(t.int_type, g.Span(0, 0), "-1"), True)
       }
 
       let inner_subject =
         t.Call(
           t.bit_array_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type],
               t.bit_array_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "slice_bit_array",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(size),
+          ],
           [subject, offset, size],
         )
 
@@ -606,7 +626,7 @@ fn index_bit_array(
     IntMode -> {
       let size = case size_value {
         Sized(size) -> size
-        Unsized -> t.Int(t.int_type, "8")
+        Unsized -> t.Int(t.int_type, g.Span(0, 0), "8")
       }
 
       let size = case unit {
@@ -614,9 +634,10 @@ fn index_bit_array(
         _ ->
           t.BinaryOperator(
             t.int_type,
+            g.Span(0, 0),
             g.MultInt,
             size,
-            t.Int(t.int_type, int.to_string(unit)),
+            t.Int(t.int_type, g.Span(0, 0), int.to_string(unit)),
           )
       }
 
@@ -631,15 +652,23 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.int_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.int_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             function_name,
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(size),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, size, endian],
         )
 
@@ -649,7 +678,7 @@ fn index_bit_array(
     FloatMode -> {
       let size = case size_value {
         Sized(size) -> size
-        Unsized -> t.Int(t.int_type, "64")
+        Unsized -> t.Int(t.int_type, g.Span(0, 0), "64")
       }
 
       let size = case unit {
@@ -657,9 +686,10 @@ fn index_bit_array(
         _ ->
           t.BinaryOperator(
             t.int_type,
+            g.Span(0, 0),
             g.MultInt,
             size,
-            t.Int(t.int_type, int.to_string(unit)),
+            t.Int(t.int_type, g.Span(0, 0), int.to_string(unit)),
           )
       }
 
@@ -668,15 +698,23 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.float_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.float_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_float",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(size),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, size, endian],
         )
 
@@ -687,10 +725,10 @@ fn index_bit_array(
       let size = case size_value {
         Sized(_size) -> panic as "size not supported"
         Unsized -> {
-          let assert t.PatternString(_, value) = expr
+          let assert t.PatternString(value:, ..) = expr
           let assert Ok(unescaped) = glexer.unescape_string(value)
           let size = string.byte_size(unescaped)
-          t.Int(t.int_type, int.to_string(8 * size))
+          t.Int(t.int_type, g.Span(0, 0), int.to_string(8 * size))
         }
       }
 
@@ -699,15 +737,23 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.string_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.string_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_utf8_string",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(size),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, size, endian],
         )
 
@@ -718,10 +764,26 @@ fn index_bit_array(
       let size = case size_value {
         Sized(_size) -> panic as "size not supported for UTF-16"
         Unsized -> {
-          let assert t.PatternString(_, value) = expr
+          let assert t.PatternString(value:, ..) = expr
           let fun_type = t.FunctionType([t.string_type], t.int_type)
-          let fun = t.Function(fun_type, t.builtin, "utf16_string_bit_size", [])
-          t.Call(t.int_type, fun, [t.String(t.string_type, value)])
+          let fun =
+            t.Function(
+              fun_type,
+              g.Span(0, 0),
+              t.prelude,
+              "utf16_string_bit_size",
+              [],
+            )
+          let str_val = t.String(t.string_type, g.Span(0, 0), value)
+          t.Call(
+            t.int_type,
+            g.Span(0, 0),
+            fun,
+            [
+              t.UnlabelledField(str_val),
+            ],
+            [str_val],
+          )
         }
       }
 
@@ -730,15 +792,23 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.string_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.string_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_utf16_string",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(size),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, size, endian],
         )
 
@@ -749,10 +819,26 @@ fn index_bit_array(
       let size = case size_value {
         Sized(_size) -> panic as "size not supported for UTF-32"
         Unsized -> {
-          let assert t.PatternString(_, value) = expr
+          let assert t.PatternString(value:, ..) = expr
           let fun_type = t.FunctionType([t.string_type], t.int_type)
-          let fun = t.Function(fun_type, t.builtin, "utf32_string_bit_size", [])
-          t.Call(t.int_type, fun, [t.String(t.string_type, value)])
+          let fun =
+            t.Function(
+              fun_type,
+              g.Span(0, 0),
+              t.prelude,
+              "utf32_string_bit_size",
+              [],
+            )
+          let str_val = t.String(t.string_type, g.Span(0, 0), value)
+          t.Call(
+            t.int_type,
+            g.Span(0, 0),
+            fun,
+            [
+              t.UnlabelledField(str_val),
+            ],
+            [str_val],
+          )
         }
       }
 
@@ -761,15 +847,23 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.string_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type, t.int_type],
               t.string_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_utf32_string",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(size),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, size, endian],
         )
 
@@ -779,7 +873,7 @@ fn index_bit_array(
     Utf8CodepointMode -> {
       let size = case size_value {
         Sized(_size) -> panic as "size not supported for UTF-8 codepoint"
-        Unsized -> t.Int(t.int_type, "8")
+        Unsized -> t.Int(t.int_type, g.Span(0, 0), "8")
       }
 
       let endian = endian_expression(endian)
@@ -787,15 +881,22 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.codepoint_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type],
               t.codepoint_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_utf8",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, endian],
         )
 
@@ -805,7 +906,7 @@ fn index_bit_array(
     Utf16CodepointMode -> {
       let size = case size_value {
         Sized(_size) -> panic as "size not supported for UTF-16 codepoint"
-        Unsized -> t.Int(t.int_type, "16")
+        Unsized -> t.Int(t.int_type, g.Span(0, 0), "16")
       }
 
       let endian = endian_expression(endian)
@@ -813,15 +914,22 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.codepoint_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type],
               t.codepoint_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_utf16",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, endian],
         )
 
@@ -831,7 +939,7 @@ fn index_bit_array(
     Utf32CodepointMode -> {
       let size = case size_value {
         Sized(_size) -> panic as "size not supported for UTF-32 codepoint"
-        Unsized -> t.Int(t.int_type, "32")
+        Unsized -> t.Int(t.int_type, g.Span(0, 0), "32")
       }
 
       let endian = endian_expression(endian)
@@ -839,15 +947,22 @@ fn index_bit_array(
       let inner_subject =
         t.Call(
           t.codepoint_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType(
               [t.bit_array_type, t.int_type, t.int_type],
               t.codepoint_type,
             ),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "index_bit_array_utf32",
             [],
           ),
+          [
+            t.UnlabelledField(subject),
+            t.UnlabelledField(offset),
+            t.UnlabelledField(endian),
+          ],
           [subject, offset, endian],
         )
 
@@ -866,25 +981,45 @@ fn lower_pattern_bindings(
     t.PatternString(..) -> []
     t.PatternDiscard(..) -> []
     t.PatternVariable(name:, ..) -> [#(name, subject)]
-    t.PatternTuple(elems:, ..) -> {
-      list.index_map(elems, fn(elem, i) {
-        let subject = t.TupleIndex(elem.typ, subject, i)
+    t.PatternTuple(elements:, ..) -> {
+      list.index_map(elements, fn(elem, i) {
+        let subject = t.TupleIndex(elem.typ, g.Span(0, 0), subject, i)
         lower_pattern_bindings(elem, subject)
       })
       |> list.flatten
     }
-    t.PatternList(typ, elements, tail) -> {
+    t.PatternList(typ:, elements:, tail:, ..) -> {
       // rewrite to constructor pattern
       let tail = case tail {
         Some(tail) -> tail
         None ->
-          t.PatternConstructor(typ, t.builtin, "Empty", [], [], True, False)
+          t.PatternVariant(
+            typ: typ,
+            location: g.Span(0, 0),
+            module: Some(t.prelude),
+            constructor: "Empty",
+            arguments: [],
+            with_spread: True,
+            resolved_module: t.prelude,
+            positional_arguments: [],
+          )
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
-          let a = [t.Field(Some("item"), x), t.Field(Some("next"), rest)]
-          t.PatternConstructor(typ, t.builtin, "Cons", a, a, True, False)
+          t.PatternVariant(
+            typ: typ,
+            location: g.Span(0, 0),
+            module: Some(t.prelude),
+            constructor: "Cons",
+            arguments: [],
+            with_spread: True,
+            resolved_module: t.prelude,
+            positional_arguments: [
+              t.MatchedArgument(x),
+              t.MatchedArgument(rest),
+            ],
+          )
         })
       lower_pattern_bindings(list, subject)
     }
@@ -892,28 +1027,37 @@ fn lower_pattern_bindings(
       let pattern = lower_pattern_bindings(pattern, subject)
       [#(name, subject), ..pattern]
     }
-    t.PatternConcatenate(prefix:, prefix_name:, suffix_name:, ..) -> {
+    t.PatternConcatenate(prefix:, prefix_name:, rest_name:, ..) -> {
       let prefix_binding = case prefix_name {
-        Some(t.Named(name)) -> [#(name, t.String(t.string_type, prefix))]
+        Some(t.Named(name)) -> [
+          #(name, t.String(t.string_type, g.Span(0, 0), prefix)),
+        ]
         _ -> []
       }
 
-      let suffix_binding = case suffix_name {
+      let suffix_binding = case rest_name {
         t.Named(name) -> {
           // Create a call to drop the prefix from the subject string
           // We have to unescape the prefix to get the real size
           let assert Ok(unescaped_prefix) = glexer.unescape_string(prefix)
           let size = string.byte_size(unescaped_prefix)
-          let prefix_len = t.Int(t.int_type, int.to_string(size))
+          let prefix_len = t.Int(t.int_type, g.Span(0, 0), int.to_string(size))
           let drop_fun =
             t.Function(
               t.FunctionType([t.string_type, t.int_type], t.string_type),
-              t.builtin,
+              g.Span(0, 0),
+              t.prelude,
               "drop_start_string",
               [],
             )
           let suffix_value =
-            t.Call(t.string_type, drop_fun, [subject, prefix_len])
+            t.Call(
+              t.string_type,
+              g.Span(0, 0),
+              drop_fun,
+              [t.UnlabelledField(subject), t.UnlabelledField(prefix_len)],
+              [subject, prefix_len],
+            )
           [#(name, suffix_value)]
         }
         t.Discarded(_) -> []
@@ -924,34 +1068,50 @@ fn lower_pattern_bindings(
     t.PatternBitString(segments:, ..) -> {
       // TODO total size not used? can we remove the calculation?
       let #(total_size, segs) =
-        list.fold(segments, #(t.Int(t.int_type, "0"), []), fn(acc, seg) {
-          let #(offset, bindings) = acc
-          let #(pattern, options) = seg
+        list.fold(
+          segments,
+          #(t.Int(t.int_type, g.Span(0, 0), "0"), []),
+          fn(acc, seg) {
+            let #(offset, bindings) = acc
+            let #(pattern, options) = seg
 
-          let #(size, _match_to_end, inner_subject) =
-            index_bit_array(options, subject, offset, pattern)
+            let #(size, _match_to_end, inner_subject) =
+              index_bit_array(options, subject, offset, pattern)
 
-          let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
-          let new_binding = lower_pattern_bindings(pattern, inner_subject)
-          #(offset, list.append(bindings, new_binding))
-        })
+            let offset =
+              t.BinaryOperator(t.int_type, g.Span(0, 0), g.AddInt, offset, size)
+            let new_binding = lower_pattern_bindings(pattern, inner_subject)
+            #(offset, list.append(bindings, new_binding))
+          },
+        )
       segs
       |> list.reverse()
     }
-    t.PatternConstructor(module:, constructor:, ordered_arguments:, ..) -> {
-      let elems = ordered_arguments
+    t.PatternVariant(
+      typ:,
+      resolved_module:,
+      constructor:,
+      positional_arguments:,
+      ..,
+    ) -> {
+      let elems = positional_arguments
       list.index_map(elems, fn(elem, index) {
-        let label = option.unwrap(elem.label, "")
-        let subject =
-          t.FieldAccess(
-            elem.item.typ,
-            subject,
-            module,
-            constructor,
-            label,
-            index,
-          )
-        lower_pattern_bindings(elem.item, subject)
+        case elem {
+          t.MatchedArgument(pattern) -> {
+            let subject =
+              t.FieldAccess(
+                typ: pattern.typ,
+                location: g.Span(0, 0),
+                container: subject,
+                label: "",
+                module: resolved_module,
+                constructor:,
+                index:,
+              )
+            lower_pattern_bindings(pattern, subject)
+          }
+          t.UnmatchedArgument(_) -> []
+        }
       })
       |> list.flatten
     }
@@ -1019,67 +1179,98 @@ fn lower_pattern_match(
   subject: t.Expression,
 ) -> Exp {
   case pattern {
-    t.PatternInt(typ, value) -> {
-      let value = t.Int(typ, value)
-      let match = t.BinaryOperator(t.bool_type, g.Eq, subject, value)
+    t.PatternInt(typ, _, value) -> {
+      let value = t.Int(typ, g.Span(0, 0), value)
+      let match =
+        t.BinaryOperator(t.bool_type, g.Span(0, 0), g.Eq, subject, value)
       lower_expression(c, match)
     }
-    t.PatternFloat(typ, value) -> {
-      let value = t.Float(typ, value)
-      let match = t.BinaryOperator(t.bool_type, g.Eq, subject, value)
+    t.PatternFloat(typ, _, value) -> {
+      let value = t.Float(typ, g.Span(0, 0), value)
+      let match =
+        t.BinaryOperator(t.bool_type, g.Span(0, 0), g.Eq, subject, value)
       lower_expression(c, match)
     }
-    t.PatternString(typ, value) -> {
-      let value = t.String(typ, value)
-      let match = t.BinaryOperator(t.bool_type, g.Eq, subject, value)
+    t.PatternString(typ, _, value) -> {
+      let value = t.String(typ, g.Span(0, 0), value)
+      let match =
+        t.BinaryOperator(t.bool_type, g.Span(0, 0), g.Eq, subject, value)
       lower_expression(c, match)
     }
-    t.PatternDiscard(_typ, _name) -> true_value
-    t.PatternVariable(_typ, _name) -> true_value
-    t.PatternTuple(_typ, elems) -> {
+    t.PatternDiscard(..) -> true_value
+    t.PatternVariable(..) -> true_value
+    t.PatternTuple(_, _, elems) -> {
       // TODO check if the order of boolean expression is correct i.e. left to right
       // maybe we need to reverse, swap params, fold_right etc
       list.index_fold(elems, true_value, fn(match, elem, i) {
-        let subject = t.TupleIndex(elem.typ, subject, i)
+        let subject = t.TupleIndex(elem.typ, g.Span(0, 0), subject, i)
         let elem_match = lower_pattern_match(c, elem, subject)
         and_exp(elem_match, match)
       })
     }
-    t.PatternList(typ, elements, tail) -> {
+    t.PatternList(typ, _, elements, tail) -> {
       // rewrite to constructor pattern
       let tail = case tail {
         Some(tail) -> tail
         None ->
-          t.PatternConstructor(typ, t.builtin, "Empty", [], [], True, False)
+          t.PatternVariant(
+            typ: typ,
+            location: g.Span(0, 0),
+            module: Some(t.prelude),
+            constructor: "Empty",
+            arguments: [],
+            with_spread: True,
+            resolved_module: t.prelude,
+            positional_arguments: [],
+          )
       }
       let elements = list.reverse(elements)
       let list =
         list.fold(elements, tail, fn(rest, x) {
-          let a = [t.Field(Some("item"), x), t.Field(Some("next"), rest)]
-          t.PatternConstructor(typ, t.builtin, "Cons", a, a, True, False)
+          t.PatternVariant(
+            typ: typ,
+            location: g.Span(0, 0),
+            module: Some(t.prelude),
+            constructor: "Cons",
+            arguments: [],
+            with_spread: True,
+            resolved_module: t.prelude,
+            positional_arguments: [
+              t.MatchedArgument(x),
+              t.MatchedArgument(rest),
+            ],
+          )
         })
       lower_pattern_match(c, list, subject)
     }
-    t.PatternAssignment(_typ, pattern, _name) -> {
+    t.PatternAssignment(_, _, pattern, _) -> {
       lower_pattern_match(c, pattern, subject)
     }
-    t.PatternConcatenate(_typ, prefix, _prefix_name, _suffix_name) -> {
-      let prefix_str = t.String(t.string_type, prefix)
+    t.PatternConcatenate(_, _, prefix, _, _) -> {
+      let prefix_str = t.String(t.string_type, g.Span(0, 0), prefix)
       let match =
         t.Function(
           t.FunctionType([t.string_type, t.string_type], t.bool_type),
-          t.builtin,
+          g.Span(0, 0),
+          t.prelude,
           "starts_with_string",
           [],
         )
-      let starts_with_call = t.Call(t.bool_type, match, [subject, prefix_str])
+      let starts_with_call =
+        t.Call(
+          t.bool_type,
+          g.Span(0, 0),
+          match,
+          [t.UnlabelledField(subject), t.UnlabelledField(prefix_str)],
+          [subject, prefix_str],
+        )
       lower_expression(c, starts_with_call)
     }
-    t.PatternBitString(_typ, segs) -> {
+    t.PatternBitString(_, _, segs) -> {
       let #(total_size, match_to_end, data_match) =
         list.fold(
           segs,
-          #(t.Int(t.int_type, "0"), False, true_value),
+          #(t.Int(t.int_type, g.Span(0, 0), "0"), False, true_value),
           fn(acc, seg) {
             let #(offset, match_to_end, match) = acc
             let #(pattern, options) = seg
@@ -1092,7 +1283,8 @@ fn lower_pattern_match(
             let #(size, match_to_end, inner_subject) =
               index_bit_array(options, subject, offset, pattern)
 
-            let offset = t.BinaryOperator(t.int_type, g.AddInt, offset, size)
+            let offset =
+              t.BinaryOperator(t.int_type, g.Span(0, 0), g.AddInt, offset, size)
 
             let seg_match = lower_pattern_match(c, pattern, inner_subject)
             let match = and_exp(seg_match, match)
@@ -1104,12 +1296,15 @@ fn lower_pattern_match(
       let length_subject =
         t.Call(
           t.int_type,
+          g.Span(0, 0),
           t.Function(
             t.FunctionType([t.bit_array_type], t.int_type),
-            t.builtin,
+            g.Span(0, 0),
+            t.prelude,
             "length_bit_array",
             [],
           ),
+          [t.UnlabelledField(subject)],
           [subject],
         )
 
@@ -1121,6 +1316,7 @@ fn lower_pattern_match(
       let length_match =
         t.BinaryOperator(
           t.bool_type,
+          g.Span(0, 0),
           length_match_op,
           length_subject,
           total_size,
@@ -1129,49 +1325,52 @@ fn lower_pattern_match(
 
       and_exp(length_match, data_match)
     }
-    t.PatternConstructor(
-      _typ,
-      module,
-      constructor,
-      _arguments,
-      ordered_arguments,
-      _,
-      _,
+    t.PatternVariant(
+      typ:,
+      resolved_module:,
+      constructor:,
+      positional_arguments:,
+      ..,
     ) -> {
-      case module, constructor {
+      case resolved_module, constructor {
         // handle special cases
         "gleam", "Nil" -> true_value
         "gleam", "True" -> lower_expression(c, subject)
         "gleam", "False" -> {
-          let not_subject = t.NegateBool(t.bool_type, subject)
+          let not_subject = t.NegateBool(t.bool_type, g.Span(0, 0), subject)
           lower_expression(c, not_subject)
         }
         _, _ -> {
-          let elems = ordered_arguments
+          let elems = positional_arguments
           let match =
             list.index_fold(elems, true_value, fn(match, elem, index) {
-              let label = option.unwrap(elem.label, "")
-              let subject =
-                t.FieldAccess(
-                  elem.item.typ,
-                  subject,
-                  module,
-                  constructor,
-                  label,
-                  index,
-                )
-              let elem_match = lower_pattern_match(c, elem.item, subject)
-              and_exp(elem_match, match)
+              case elem {
+                t.MatchedArgument(pattern) -> {
+                  let subject =
+                    t.FieldAccess(
+                      typ: pattern.typ,
+                      location: g.Span(0, 0),
+                      container: subject,
+                      label: "",
+                      module: resolved_module,
+                      constructor:,
+                      index:,
+                    )
+                  let elem_match = lower_pattern_match(c, pattern, subject)
+                  and_exp(elem_match, match)
+                }
+                t.UnmatchedArgument(_) -> match
+              }
             })
 
           let subject = lower_expression(c, subject)
           let assert NamedType(custom, _) = subject.typ
-          let assert Ok(mod) = dict.get(c.modules, module)
+          let assert Ok(mod) = dict.get(c.modules, resolved_module)
           let assert Ok(t.Definition(_, custom)) =
             list.find(mod.custom_types, fn(custom_type) {
-              get_id(module, custom_type.definition.name) == custom
+              get_id(resolved_module, custom_type.definition.name) == custom
             })
-          let variant = get_id(module, constructor)
+          let variant = get_id(resolved_module, constructor)
 
           let variant_match = case custom.variants {
             [_] -> true_value
@@ -1187,11 +1386,11 @@ fn lower_pattern_match(
 
 fn lower_expression(c: Context, exp: t.Expression) -> Exp {
   case exp {
-    t.Int(typ, value) -> Literal(map_type(typ), Int(value))
-    t.Float(typ, value) -> Literal(map_type(typ), Float(value))
-    t.String(typ, value) -> Literal(map_type(typ), String(value))
-    t.LocalVariable(typ, name) -> Local(map_type(typ), name)
-    t.Function(typ, module, name, _labels) -> {
+    t.Int(typ:, value:, ..) -> Literal(map_type(typ), Int(value))
+    t.Float(typ:, value:, ..) -> Literal(map_type(typ), Float(value))
+    t.String(typ:, value:, ..) -> Literal(map_type(typ), String(value))
+    t.LocalVariable(typ:, name:, ..) -> Local(map_type(typ), name)
+    t.Function(typ:, module:, name:, ..) -> {
       let typ = map_type(typ)
 
       case module, name {
@@ -1215,42 +1414,42 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
       // inline the constant
       lower_expression(c, constant.definition.value)
     }
-    t.NegateInt(typ, value) -> {
+    t.NegateInt(typ:, value:, ..) -> {
       let typ = map_type(typ)
       let value = lower_expression(c, value)
       let fun = Global(FunctionType([typ], typ), "negate_int")
       Call(typ, fun, [value])
     }
-    t.NegateBool(typ, value) -> {
+    t.NegateBool(typ:, value:, ..) -> {
       let typ = map_type(typ)
       let value = lower_expression(c, value)
       let fun = Global(FunctionType([typ], typ), "negate_bool")
       Call(typ, fun, [value])
     }
-    t.Block(_typ, statements) -> lower_body(c, statements)
-    t.Panic(typ, value) -> {
+    t.Block(statements:, ..) -> lower_body(c, statements)
+    t.Panic(typ:, message:, ..) -> {
       let typ = map_type(typ)
-      let value = case value {
-        Some(value) -> lower_expression(c, value)
+      let value = case message {
+        Some(message) -> lower_expression(c, message)
         None -> {
-          let message = "panic: " <> current_location(c)
-          Literal(map_type(t.string_type), String(message))
+          let msg = "panic: " <> current_location(c)
+          Literal(map_type(t.string_type), String(msg))
         }
       }
       Panic(typ, value)
     }
-    t.Todo(typ, value) -> {
+    t.Todo(typ:, message:, ..) -> {
       let typ = map_type(typ)
-      let value = case value {
-        Some(value) -> lower_expression(c, value)
+      let value = case message {
+        Some(message) -> lower_expression(c, message)
         None -> {
-          let message = "todo: " <> current_location(c)
-          Literal(map_type(t.string_type), String(message))
+          let msg = "todo: " <> current_location(c)
+          Literal(map_type(t.string_type), String(msg))
         }
       }
       Panic(typ, value)
     }
-    t.Tuple(typ, elements) -> {
+    t.Tuple(typ:, elements:, ..) -> {
       let typ = map_type(typ)
       let elements = list.map(elements, lower_expression(c, _))
       let element_types = list.map(elements, fn(e) { e.typ })
@@ -1258,7 +1457,7 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
       let fun = Global(FunctionType(element_types, typ), "Tuple" <> len)
       Call(typ, fun, elements)
     }
-    t.List(typ, elements, rest) -> {
+    t.List(typ:, elements:, rest:, ..) -> {
       let list_typ = map_type(typ)
       let rest = case rest {
         Some(rest) -> lower_expression(c, rest)
@@ -1273,28 +1472,64 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
         Call(list_typ, cons, args)
       })
     }
-    t.Fn(typ, parameters, _return, body) -> {
+    t.Fn(typ:, parameters:, body:, ..) -> {
       let typ = map_type(typ)
-      let parameters = list.map(parameters, lower_parameter)
+      let parameters = list.map(parameters, lower_fn_parameter)
       let body = lower_body(c, body)
       Fn(typ, parameters, body)
     }
-    t.RecordUpdate(typ, _, module, constructor, record, _fields, ordered_fields) -> {
+    t.RecordUpdate(
+      typ:,
+      resolved_module:,
+      constructor:,
+      record:,
+      positional_fields:,
+      ..,
+    ) -> {
       // bind record to subject
       // for each field in variant either take the new field or default to field access on subject
       // and call the constructor with that
+
+      // create a temp variable if needed
       let subject_name = case record {
-        t.LocalVariable(_, name) -> name
+        t.LocalVariable(name:, ..) -> name
         _ -> "S"
       }
-      let subject = t.LocalVariable(typ, subject_name)
+      let subject = t.LocalVariable(typ, g.Span(0, 0), subject_name)
+
+      // let typ = map_type(typ)
+      // let container = lower_expression(c, container)
+      // let assert NamedType(custom, _) = container.typ
+      // let assert Ok(mod) = dict.get(c.modules, module)
+      // let assert Ok(t.Definition(_, custom)) =
+      //   list.find(mod.custom_types, fn(c) {
+      //     get_id(mod.name, c.definition.name) == custom
+      //   })
+      // let assert Ok(variant) =
+      //   list.find(custom.variants, fn(v) { v.name == constructor })
+      // let assert [field, ..] = list.drop(variant.fields, index)
+
+      // find the types
+      // let assert t.NamedType(parameters: field_types, ..) = record.typ
+      // let assert Ok(fields_types) =
+      //   list.strict_zip(positional_fields, field_types)
+
+      // index into original data for non updated fields
       let fields =
-        list.index_map(ordered_fields, fn(f, i) {
-          case f {
-            Ok(field) -> lower_expression(c, field.item)
-            Error(field_type) -> {
+        list.index_map(positional_fields, fn(field, index) {
+          case field {
+            t.UpdatedField(value) -> lower_expression(c, value)
+            t.UnchangedField(typ) -> {
               let access =
-                t.FieldAccess(field_type, subject, module, constructor, "", i)
+                t.FieldAccess(
+                  typ:,
+                  location: g.Span(0, 0),
+                  container: subject,
+                  label: "",
+                  module: resolved_module,
+                  constructor:,
+                  index:,
+                )
               lower_expression(c, access)
             }
           }
@@ -1303,43 +1538,46 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
       let record = lower_expression(c, record)
       let field_types = list.map(fields, fn(x) { x.typ })
       let constructor_typ = FunctionType(field_types, typ)
-      let constructor = gen_names.get_id(module, constructor)
+      let constructor = gen_names.get_id(resolved_module, constructor)
       let body = Call(typ, Global(constructor_typ, constructor), fields)
       Let(body.typ, subject_name, record, body)
     }
-    t.FieldAccess(typ, container, module, variant, _label, index) -> {
+    t.FieldAccess(typ:, container:, module:, constructor:, index:, ..) -> {
       let typ = map_type(typ)
       let container = lower_expression(c, container)
       let assert NamedType(custom, _) = container.typ
-      let assert Ok(module) = dict.get(c.modules, module)
+      let assert Ok(mod) = dict.get(c.modules, module)
       let assert Ok(t.Definition(_, custom)) =
-        list.find(module.custom_types, fn(c) {
-          get_id(module.name, c.definition.name) == custom
+        list.find(mod.custom_types, fn(c) {
+          get_id(mod.name, c.definition.name) == custom
         })
       let assert Ok(variant) =
-        list.find(custom.variants, fn(v) { v.name == variant })
+        list.find(custom.variants, fn(v) { v.name == constructor })
       let assert [field, ..] = list.drop(variant.fields, index)
-      let field = option.unwrap(field.label, "")
-      let field = gen_names.get_field_name(field, index)
+      let field = case field {
+        t.LabelledVariantField(label:, ..) -> label
+        t.UnlabelledVariantField(..) -> ""
+      }
+      let field = gen_names.field_name(field, index)
       Op(typ, FieldAccess(variant.name, field), [container])
     }
-    t.Call(typ, function, args) -> {
+    t.Call(typ:, function:, positional_arguments:, ..) -> {
       let typ = map_type(typ)
       let function = lower_expression(c, function)
-      let arguments = list.map(args, lower_expression(c, _))
+      let arguments = list.map(positional_arguments, lower_expression(c, _))
       Call(typ, function, arguments)
     }
-    t.TupleIndex(typ, tuple, index) -> {
+    t.TupleIndex(typ:, tuple:, index:, ..) -> {
       let typ = map_type(typ)
       let tuple = lower_expression(c, tuple)
-      Op(typ, FieldAccess("#", gen_names.get_field_name("", index)), [tuple])
+      Op(typ, FieldAccess("#", gen_names.field_name("", index)), [tuple])
     }
     t.FnCapture(..) -> todo
-    t.BitString(typ, segs) -> {
+    t.BitString(typ:, segments:, ..) -> {
       let typ = map_type(typ)
 
       let segs =
-        list.map(segs, fn(seg) {
+        list.map(segments, fn(seg) {
           let #(exp, options) = seg
 
           let #(mode, size_value, unit, signed, endian) =
@@ -1449,7 +1687,7 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
         Let(body.typ, "bit_array", Literal(typ, BitArray("total_size")), body)
       Let(body.typ, "total_size", total_size, body)
     }
-    t.Case(typ, subjects, clauses) -> {
+    t.Case(typ:, subjects:, clauses:, ..) -> {
       let typ = map_type(typ)
       let message = String("No matching clause in " <> current_location(c))
       let else_body = Panic(typ, Literal(map_type(t.string_type), message))
@@ -1474,7 +1712,7 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
             let bindings =
               list.flat_map(sub_pats, fn(pair) {
                 let #(#(name, exp, _), pattern) = pair
-                let sub = t.LocalVariable(exp.typ, name)
+                let sub = t.LocalVariable(exp.typ, g.Span(0, 0), name)
                 lower_pattern_bindings(pattern, sub)
               })
 
@@ -1482,7 +1720,7 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
             let conditions =
               list.map(sub_pats, fn(pair) {
                 let #(#(name, exp, _), pattern) = pair
-                let sub = t.LocalVariable(exp.typ, name)
+                let sub = t.LocalVariable(exp.typ, g.Span(0, 0), name)
                 lower_pattern_match(c, pattern, sub)
               })
 
@@ -1523,21 +1761,26 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
         Let(acc.typ, name, value, acc)
       })
     }
-    t.BinaryOperator(_typ, g.And, left, right) -> {
+    t.BinaryOperator(name: g.And, left:, right:, ..) -> {
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
       and_exp(left, right)
     }
-    t.BinaryOperator(_typ, g.Or, left, right) -> {
+    t.BinaryOperator(name: g.Or, left:, right:, ..) -> {
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
       or_exp(left, right)
     }
-    t.BinaryOperator(typ, g.NotEq, left, right) -> {
-      let not_eq = t.NegateBool(typ, t.BinaryOperator(typ, g.Eq, left, right))
+    t.BinaryOperator(typ:, name: g.NotEq, left:, right:, ..) -> {
+      let not_eq =
+        t.NegateBool(
+          typ,
+          g.Span(0, 0),
+          t.BinaryOperator(typ, g.Span(0, 0), g.Eq, left, right),
+        )
       lower_expression(c, not_eq)
     }
-    t.BinaryOperator(typ, name, left, right) -> {
+    t.BinaryOperator(typ:, name:, left:, right:, ..) -> {
       let typ = map_type(typ)
       let left = lower_expression(c, left)
       let right = lower_expression(c, right)
@@ -1570,9 +1813,9 @@ fn lower_expression(c: Context, exp: t.Expression) -> Exp {
       let function = Global(function_type, function_name)
       Call(typ, function, [left, right])
     }
-    t.Echo(typ:, value:) -> {
-      let assert Some(value) = value
-      let value = lower_expression(c, value)
+    t.Echo(typ:, expression:, ..) -> {
+      let assert Some(expression) = expression
+      let value = lower_expression(c, expression)
       let typ = map_type(typ)
       let print_typ = FunctionType([value.typ], value.typ)
       Call(typ, Global(print_typ, "echo_"), [value])
@@ -1650,14 +1893,14 @@ fn register_tuple(c: Module, size: Int) {
 
   let element_fields =
     list.index_map(element_types, fn(typ, i) {
-      Parameter(typ, gen_names.get_field_name("", i))
+      Parameter(typ, gen_names.field_name("", i))
     })
 
   let variant = Variant(constructor_typ, id, "#", element_fields)
   let custom = CustomType(custom_typ, id, "#", [variant])
 
   let c = Module(..c, types: [custom, ..c.types])
-  register_variant_functions(c, t.builtin, variant)
+  register_variant_functions(c, t.prelude, variant)
 }
 
 fn map_type(typ: t.Type) {

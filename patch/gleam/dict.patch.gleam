@@ -225,6 +225,139 @@ fn do_foldr(node: Node(k, v), acc: a, fun: fn(a, k, v) -> a) -> a {
   }
 }
 
+/// Determines the number of key-value pairs in the dict.
+/// Time complexity: O(n)
+pub fn size(dict: Dict(k, v)) -> Int {
+  fold(dict, 0, fn(acc, _, _) { acc + 1 })
+}
+
+/// Determines whether or not the dict is empty.
+pub fn is_empty(dict: Dict(k, v)) -> Bool {
+  dict.root == E || dict.root == EE
+}
+
+pub fn has_key(tree: Dict(k, v), key: k) -> Bool {
+  case do_find(tree.root, key) {
+    Ok(entry) -> True
+    _ -> False
+  }
+}
+
+/// Calls a function for each key and value in a dict, discarding the return value.
+pub fn each(dict: Dict(k, v), fun: fn(k, v) -> a) -> Nil {
+  fold(dict, Nil, fn(nil, k, v) {
+    fun(k, v)
+    nil
+  })
+}
+
+pub fn map_values(in dict: Dict(k, v), with fun: fn(k, v) -> a) -> Dict(k, a) {
+  fold(dict, new(), fn(acc, k, v) { insert(acc, k, fun(k, v)) })
+}
+
+/// Gets a list of all keys in a given dict.
+pub fn keys(dict: Dict(k, v)) -> List(k) {
+  fold(dict, [], fn(acc, key, _value) { [key, ..acc] })
+}
+
+/// Gets a list of all values in a given dict.
+pub fn values(dict: Dict(k, v)) -> List(v) {
+  fold(dict, [], fn(acc, _key, value) { [value, ..acc] })
+}
+
+pub fn from_list(list: List(#(k, v))) -> Dict(k, v) {
+  from_list_loop(new(), list)
+}
+
+fn from_list_loop(acc: Dict(k, v), list: List(#(k, v))) -> Dict(k, v) {
+  case list {
+    [] -> acc
+    [#(k, v), ..rest] -> from_list_loop(insert(acc, k, v), rest)
+  }
+}
+
+pub fn filter(
+  in dict: Dict(k, v),
+  keeping predicate: fn(k, v) -> Bool,
+) -> Dict(k, v) {
+  fold(dict, new(), fn(acc, k, v) {
+    case predicate(k, v) {
+      True -> insert(acc, k, v)
+      False -> acc
+    }
+  })
+}
+
+fn do_filter(f: fn(k, v) -> Bool, dict: Dict(k, v)) -> Dict(k, v) {
+  panic
+}
+
+pub fn take(from dict: Dict(k, v), keeping desired_keys: List(k)) -> Dict(k, v) {
+  take_loop(dict, desired_keys, new())
+}
+
+fn take_loop(dict: Dict(k, v), keys: List(k), acc: Dict(k, v)) -> Dict(k, v) {
+  case keys {
+    [] -> acc
+    [key, ..rest] ->
+      case get(dict, key) {
+        Ok(value) -> take_loop(dict, rest, insert(acc, key, value))
+        Error(_) -> take_loop(dict, rest, acc)
+      }
+  }
+}
+
+pub fn drop(from dict: Dict(k, v), drop disallowed_keys: List(k)) -> Dict(k, v) {
+  do_drop(dict, disallowed_keys)
+}
+
+fn do_drop(dict: Dict(k, v), keys: List(k)) -> Dict(k, v) {
+  case keys {
+    [] -> dict
+    [key, ..rest] -> do_drop(delete(dict, key), rest)
+  }
+}
+
+pub fn combine(
+  dict: Dict(k, v),
+  other: Dict(k, v),
+  with fun: fn(v, v) -> v,
+) -> Dict(k, v) {
+  fold(other, dict, fn(acc, k, v) {
+    case get(acc, k) {
+      Ok(existing) -> insert(acc, k, fun(existing, v))
+      Error(_) -> insert(acc, k, v)
+    }
+  })
+}
+
+pub fn merge(into dict: Dict(k, v), from new_entries: Dict(k, v)) -> Dict(k, v) {
+  combine(dict, new_entries, fn(_, new_entry) { new_entry })
+}
+
+@internal
+pub fn group(key: fn(v) -> k, list: List(v)) -> Dict(k, List(v)) {
+  group_loop(new(), key, list)
+}
+
+fn group_loop(
+  acc: Dict(k, List(v)),
+  to_key: fn(v) -> k,
+  list: List(v),
+) -> Dict(k, List(v)) {
+  case list {
+    [] -> acc
+    [value, ..rest] -> {
+      let k = to_key(value)
+      let updated = case get(acc, k) {
+        Ok(existing) -> insert(acc, k, [value, ..existing])
+        Error(_) -> insert(acc, k, [value])
+      }
+      group_loop(updated, to_key, rest)
+    }
+  }
+}
+
 fn compare(a: a, b: a) -> order.Order {
   case eq(a, b) {
     True -> order.Eq

@@ -4,7 +4,7 @@ import gig/core
 import gig/headers
 import gig/mono
 import gig/patch
-import gig/typed_ast
+import glance_typed
 import gleam/bit_array
 import gleam/dict
 import gleam/set
@@ -107,13 +107,13 @@ pub fn compile(gleam_file_name: String, options: CompileOptions) {
   // process the prelude
   let assert Ok(source_text) = read_source(sources, "gleam")
   let assert Ok(prelude) = glance.module(source_text)
-  let assert Ok(typed) = typed_ast.infer_module(dict.new(), prelude, "gleam")
+  let assert Ok(typed) = glance_typed.infer_module(dict.new(), prelude, "gleam")
 
   // parse and typecheck input (recursively)
   let typed =
     infer_file(
       sources,
-      dict.from_list([#("gleam", #(typed, typed_ast.interface(typed)))]),
+      dict.from_list([#("gleam", #(typed, glance_typed.interface(typed)))]),
       module_id,
     )
 
@@ -231,7 +231,7 @@ int main(int argc, char **argv) {
   }
 
   let args = case options.release {
-    True -> ["-O3", "-flto", ..args]
+    True -> ["-O2", "-flto", ..args]
     False -> args
   }
 
@@ -280,9 +280,12 @@ fn offset_to_line_col(text: String, offset: Int) {
 
 fn infer_file(
   sources: dict.Dict(String, String),
-  modules: dict.Dict(String, #(typed_ast.Module, typed_ast.ModuleInterface)),
+  modules: dict.Dict(
+    String,
+    #(glance_typed.Module, glance_typed.ModuleInterface),
+  ),
   module_id: String,
-) -> dict.Dict(String, #(typed_ast.Module, typed_ast.ModuleInterface)) {
+) -> dict.Dict(String, #(glance_typed.Module, glance_typed.ModuleInterface)) {
   let assert Ok(source) = dict.get(sources, module_id)
 
   io.println("Parse " <> source)
@@ -312,16 +315,16 @@ fn infer_file(
   // infer this file
   io.println("Check " <> source)
   case
-    typed_ast.infer_module(
+    glance_typed.infer_module(
       dict.map_values(modules, fn(_, p) { p.1 }),
       module,
       module_id,
     )
   {
     Ok(module) ->
-      dict.insert(modules, module_id, #(module, typed_ast.interface(module)))
+      dict.insert(modules, module_id, #(module, glance_typed.interface(module)))
     Error(err) ->
-      panic as error(source_text, err.location, typed_ast.inspect_error(err))
+      panic as error(source_text, err.location, glance_typed.inspect_error(err))
   }
 }
 
@@ -349,7 +352,7 @@ fn parse_module(file: String, input: String) {
 
 fn error(
   source: String,
-  location: typed_ast.Location,
+  location: glance_typed.Location,
   message: String,
 ) -> String {
   let start = location.span.start

@@ -1,5 +1,4 @@
 import gig/compiler
-import gleam/io
 import startest/assertion_error
 
 import gleam/list
@@ -19,15 +18,8 @@ const compile_options = compiler.CompileOptions(
 )
 
 pub fn main() {
-  // self-compile if binary doesn't exist
-  case simplifile.is_file("src/gig.exe") {
-    Ok(True) -> Nil
-    _ -> {
-      io.println_error("gig.exe does not exist, compiling now ..")
-      compiler.compile("src/gig", compile_options)
-      Nil
-    }
-  }
+  // self-compile
+  compiler.compile("src/gig", compile_options)
 
   // run the tests
   startest.run(startest.default_config())
